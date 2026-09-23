@@ -947,7 +947,7 @@ fn match_uploaded_creations(wanted: &[UploadReference], all: &[CopiedCreation]) 
         match matches.as_slice() {
             [] => {},
             [creation] => picked.push(CopiedCreation { media_type: Some(reference.media_type), ..(*creation).clone() }),
-            _ => return Err(format!("새로 올사용자 레퍼런스 이름이 여러 개와 일치합니다({name}). 보드의 중복 업로드를 확인한 뒤 다시 누르세요.")),
+            _ => return Err(format!("새로 업로드한 레퍼런스 이름이 여러 개와 일치합니다({name}). 보드의 중복 업로드를 확인한 뒤 다시 누르세요.")),
         }
     }
     Ok(picked)
