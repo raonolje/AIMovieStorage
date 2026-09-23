@@ -1,7 +1,9 @@
 import { z } from "zod";
 import type { CompositionState } from "@/lib/composition";
+import type { CompositionVideoOptions, CompositionVideoControls, SavedReferenceVideo } from "./referenceVideoExport";
 import { SHOT_PRESETS } from "@/lib/cameraMoves";
 import { EDITABLE_BONES } from "@/lib/rig";
+import { controlDetailSchema, projectControlValue, type ControlDetail } from "./controlProjection";
 import {
   CompositionControlError,
   compositionCommandsSchema,
@@ -38,6 +40,7 @@ export interface CompositionSessionPort {
   redo: () => void;
   settle?: () => Promise<void>;
   capture: () => Promise<CompositionCapture>;
+  exportVideo?: (options: CompositionVideoOptions, controls: CompositionVideoControls) => Promise<SavedReferenceVideo>;
   commit: (
     state: CompositionState,
     captures: CompositionCapture,
@@ -79,6 +82,7 @@ export const compositionSessionRequestSchema = z
   .object({
     sessionId: sessionIdSchema,
     expectedRevision: z.number().int().nonnegative(),
+    detail: controlDetailSchema,
   })
   .strict();
 export const compositionApplyRequestSchema =
@@ -89,12 +93,14 @@ export const compositionOpenRequestSchema = z
   .object({
     projectName: z.string().min(1).max(500),
     cutId: z.string().min(1).max(200),
+    detail: controlDetailSchema,
   })
   .strict();
 export const compositionChangesRequestSchema = z
   .object({
     sessionId: sessionIdSchema,
     sinceRevision: z.number().int().nonnegative(),
+    detail: controlDetailSchema,
   })
   .strict();
 export const compositionChangesJsonSchema = z.toJSONSchema(
@@ -193,8 +199,10 @@ function guard(session: Session, revision: number) {
       { expectedRevision: revision, actualRevision: session.revision },
     );
 }
-function snapshot(session: Session) {
+function snapshot(session: Session, detail: ControlDetail = "full") {
   const value = reconcile(session);
+  // 모캡 키 전체를 먼저 복제하면 요약 응답이어도 수십 MB를 왕복 준비하며 멈춥니다.
+  const projected = projectControlValue(value.state, detail);
   return {
     ...session.identity,
     sessionId: session.sessionId,
@@ -202,7 +210,8 @@ function snapshot(session: Session) {
     busy: session.busy,
     canUndo: value.canUndo,
     canRedo: value.canRedo,
-    state: clone(value.state),
+    state: projected.value,
+    projection: projected.projection,
     availableCharacterIds: [...value.context.characterIds],
     availableImageIds: [...(value.context.imageIds ?? [])],
   };
@@ -297,14 +306,14 @@ export function listCompositionTargets() {
 }
 export function listCompositionSessions() {
   return [...sessions.values()].map((session) => {
-    const { state: _state, ...info } = snapshot(session);
+    const { state: _state, ...info } = snapshot(session, "summary");
     return info;
   });
 }
-export function getCompositionSession(sessionId: string) {
+export function getCompositionSession(sessionId: string, detail: ControlDetail = "full") {
   const session = requireSession(parse(sessionIdSchema, sessionId));
   return {
-    ...snapshot(session),
+    ...snapshot(session, detail),
     cameraPresets: SHOT_PRESETS.map(({ id, label }) => ({ id, label })),
     bones: EDITABLE_BONES.map(({ id, label }) => ({ id, label })),
     units: {
@@ -319,7 +328,7 @@ export function getCompositionSession(sessionId: string) {
 export function getCompositionChanges(input: unknown) {
   const request = parse(compositionChangesRequestSchema, input);
   const session = requireSession(request.sessionId);
-  const latest = snapshot(session);
+  const latest = snapshot(session, request.detail);
   if (request.sinceRevision > session.revision)
     throw new CompositionControlError(
       "revision_conflict",
@@ -330,13 +339,23 @@ export function getCompositionChanges(input: unknown) {
     (item) => item.revision > request.sinceRevision,
   );
   const first = session.changes[0]?.revision ?? session.revision + 1;
+  const projected = projectControlValue(changes, request.detail);
+  // 본문 예산이 먼저 소진돼도 사람이 어느 판에서 무엇을 바꿨는지는 남겨야 합니다.
+  const entries = request.detail === "full" ? projected.value : changes.map((change, index) => ({
+    revision: change.revision,
+    source: change.source,
+    changedPaths: [...change.changedPaths],
+    changes: projected.value[index]?.changes ?? [],
+    truncated: change.truncated || projected.projection.truncated,
+  }));
   return {
     sessionId: session.sessionId,
     revision: session.revision,
-    changes: clone(changes),
+    changes: entries,
+    changesProjection: projected.projection,
     fullSnapshotRequired:
       request.sinceRevision < first - 1 ||
-      changes.some((item) => item.truncated),
+      changes.some((item) => item.truncated) || projected.projection.truncated,
     snapshot: latest,
   };
 }
@@ -345,7 +364,7 @@ export async function openComposition(input: unknown) {
   const existing = [...sessions.values()].find(
     (item) => keyOf(item.identity) === keyOf(target),
   );
-  if (existing) return snapshot(existing);
+  if (existing) return snapshot(existing, target.detail);
   let opened = false;
   let prepared = false;
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -372,7 +391,7 @@ export async function openComposition(input: unknown) {
     );
     if (found) {
       await found.port.settle?.();
-      return snapshot(found);
+      return snapshot(found, target.detail);
     }
   }
   if (!prepared && !opened)
@@ -436,8 +455,44 @@ export async function applyCompositionCommands(input: unknown) {
     await settleAfterEdit(session, {
       applied: planned.state !== read.state,
       created,
-    });
-    return { ...snapshot(session), created };
+    }, request.detail);
+    return { ...snapshot(session, request.detail), created };
+  });
+}
+
+/**
+ * 파일 읽기가 필요한 내부 도메인 동작도 화면과 같은 history에 한 번만 넣습니다.
+ * prepare는 앱 내부 함수입니다. 외부에서 함수·스크립트·저장 상태 전체를 받지 않습니다.
+ */
+export async function applyCompositionMutation<T>(
+  input: unknown,
+  prepare: (value: { state: CompositionState; identity: CompositionIdentity; context: CompositionCommandContext }) =>
+    Promise<{ state: CompositionState; result: T }> | { state: CompositionState; result: T },
+) {
+  const request = parse(compositionSessionRequestSchema, input);
+  const session = requireSession(request.sessionId);
+  return exclusive(session, async () => {
+    guard(session, request.expectedRevision);
+    const read = session.port.read();
+    const planned = await prepare({ state: read.state, identity: { ...session.identity }, context: read.context });
+    // 결과를 읽고 리타깃하는 사이 사람은 계속 편집할 수 있습니다. 늦게 온 계산으로 덮지 않습니다.
+    guard(session, request.expectedRevision);
+    const applied = planned.state !== read.state;
+    if (applied) {
+      session.source = "controller";
+      try {
+        session.port.apply(current => {
+          if (current !== read.state) throw new CompositionControlError("revision_conflict", "적용 직전에 구도가 바뀌었습니다.");
+          return planned.state;
+        });
+        reconcile(session);
+      } finally { session.source = undefined; }
+    }
+    await settleAfterEdit(session, { applied });
+    const latest = reconcile(session);
+    // 수천 개 관절 키를 다시 응답에 싣지 않습니다. 상세 상태는 composition_get으로 읽을 수 있습니다.
+    return { ...session.identity, sessionId: session.sessionId, revision: session.revision,
+      canUndo: latest.canUndo, canRedo: latest.canRedo, applied, result: planned.result };
   });
 }
 
@@ -459,8 +514,8 @@ async function historyCommand(input: unknown, direction: "undo" | "redo") {
     } finally {
       session.source = undefined;
     }
-    await settleAfterEdit(session, { applied: true, operation: direction });
-    return snapshot(session);
+    await settleAfterEdit(session, { applied: true, operation: direction }, request.detail);
+    return snapshot(session, request.detail);
   });
 }
 export const undoComposition = (input: unknown) =>
@@ -475,6 +530,7 @@ async function settleAfterEdit(
     created?: { index: number; id: string }[];
     operation?: string;
   },
+  detail: ControlDetail = "summary",
 ) {
   try {
     await session.port.settle?.();
@@ -486,7 +542,7 @@ async function settleAfterEdit(
       "편집 처리 뒤 화면 확인을 끝내지 못했습니다. 적용 여부와 최신 판을 확인한 뒤 계속해 주세요.",
       {
         ...result,
-        snapshot: snapshot(session),
+        snapshot: snapshot(session, detail),
         sessionClosed: !sessions.has(session.sessionId),
         cause: error instanceof Error ? error.message : String(error),
       },
@@ -522,12 +578,46 @@ export async function commitComposition(input: unknown) {
     const state = clone(session.port.read().state);
     const result = await session.port.commit(state, captures);
     // 저장 도중 사람이 더 편집할 수 있습니다. 저장한 판과 현재 판을 구분해 성공을 과장하지 않습니다.
-    const after = snapshot(session);
+    const after = snapshot(session, request.detail);
     return {
       ...after,
       persistedRevision: request.expectedRevision,
       persistedLatest: after.revision === request.expectedRevision,
       result,
     };
+  });
+}
+
+/** 내보내기 동안 같은 세션의 명령을 직렬화하고 수동 편집은 판 충돌로 알립니다. */
+export async function exportCompositionVideo(
+  input: unknown,
+  options: CompositionVideoOptions,
+  controls: CompositionVideoControls,
+  persist: (video: SavedReferenceVideo, identity: CompositionIdentity) => Promise<void>,
+) {
+  const request = parse(compositionSessionRequestSchema, input);
+  const session = requireSession(request.sessionId);
+  return exclusive(session, async () => {
+    guard(session, request.expectedRevision);
+    if (!session.port.exportVideo) throw new CompositionControlError("export_unavailable", "이 구도 창은 영상 내보내기가 준비되지 않았습니다.");
+    await session.port.settle?.();
+    guard(session, request.expectedRevision);
+    const sourceState = session.port.read().state;
+    const assertCurrent = () => {
+      if (controls.signal?.aborted) throw new DOMException("영상 만들기를 취소했습니다.", "AbortError");
+      // 관절 키 수만 개를 프레임마다 직렬화하지 않습니다. 함수형 편집으로 참조가 바뀐 때 판을 다시 셉니다.
+      if (sessions.get(session.sessionId) !== session || session.port.read().state !== sourceState)
+        guard(session, request.expectedRevision);
+      controls.assertCurrent?.();
+    };
+    const video = await session.port.exportVideo(options, { ...controls, assertCurrent });
+    assertCurrent();
+    guard(session, request.expectedRevision);
+    // 파일 쓰기만 성공한 상태를 완료로 보고하지 않습니다. 프로젝트 저장 관문의 ack가 필요합니다.
+    await persist(video, { ...session.identity });
+    reconcile(session);
+    return { ...video, sessionId: session.sessionId, sourceRevision: request.expectedRevision,
+      revision: session.revision, persistedLatest: session.revision === request.expectedRevision,
+      persisted: true, compositionSaved: false };
   });
 }

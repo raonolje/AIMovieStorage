@@ -1,3 +1,4 @@
+import { useT } from "@/lib/i18n";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Check, Plus, Save, X } from "lucide-react";
@@ -40,6 +41,7 @@ export function PlannerShotBar({
   setState: UpdateComposition;
   onGoToShot?: () => void;
 }) {
+  const t = useT();
   const shots = cameraShotsOf(state);
   const activeId = state.activeShotId ?? null;
   /** 이름을 고치는 중인 구도. null 이면 아무것도 안 고치는 중. */
@@ -70,7 +72,7 @@ export function PlannerShotBar({
           className="text-[9px] font-semibold"
           style={{ color: "oklch(0.52 0.01 265)" }}
         >
-          저장한 카메라 {shots.length > 0 && `(${shots.length})`}
+          {t("저장한 카메라")} {shots.length > 0 && `(${shots.length})`}
         </span>
         <button
           type="button"
@@ -85,17 +87,17 @@ export function PlannerShotBar({
           /*
             저장한 구도가 하나도 없으면 무빙 아이콘을 눌러도 «카메라를 먼저 세우세요» 로 막힙니다 —
             그래서 클립이 안 생기고, 클립이 없으면 «이동량»·«길이»·«속도 그래프» 칸도 안 그려집니다.
-            이 단추가 그 줄의 **첫 문**입니다(). 안내 창이 여기부터 눌러 나갑니다.
+            이 단추가 그 줄의 **첫 문**입니다(). 안내 창은 여기를 가리키고, 저장은 직접 눌렀을 때만 합니다.
           */
           data-tour-open="bottom-clip-amount bottom-clip-length bottom-easing bottom-free-key"
-          title="지금 카메라를 새 구도로 저장합니다"
+          title={t("지금 카메라를 새 구도로 저장합니다")}
           className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold"
           style={{
             background: "oklch(0.55 0.15 200 / 26%)",
             color: "oklch(0.80 0.13 200)",
           }}
         >
-          <Plus className="h-3 w-3" /> 지금 구도 저장
+          <Plus className="h-3 w-3" /> {t("지금 구도 저장")}
         </button>
       </div>
 
@@ -110,8 +112,7 @@ export function PlannerShotBar({
           className="mt-1.5 text-[9px] leading-relaxed"
           style={{ color: "oklch(0.45 0.01 265)" }}
         >
-          아직 없습니다. 구도를 잡고 «지금 구도 저장» 을 누르면 여기 쌓입니다 —
-          눌러서 그 구도로 바로 돌아올 수 있고, <b>G</b> 는 활성 구도로 갑니다.
+          {t("아직 없습니다. «지금 구도 저장»으로 저장하고 목록을 누르면 그 구도로 돌아옵니다. G는 활성 구도로 갑니다.")}
         </p>
       ) : (
         <div
@@ -187,7 +188,7 @@ export function PlannerShotBar({
                       },
                     );
                   }}
-                  title="이 구도를 지금 카메라로 덮어씁니다(재저장)"
+                  title={t("이 구도를 지금 카메라로 덮어씁니다(재저장)")}
                   className="shrink-0 rounded p-1"
                   style={{ color: "oklch(0.66 0.13 200)" }}
                 >
@@ -208,7 +209,7 @@ export function PlannerShotBar({
                         removeCameraShotIn(current, shot.id),
                       );
                   }}
-                  title="이 구도를 지웁니다"
+                  title={t("이 구도를 지웁니다")}
                   className="shrink-0 rounded p-1"
                   style={{ color: "oklch(0.62 0.16 25)" }}
                 >

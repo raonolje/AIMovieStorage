@@ -1,7 +1,7 @@
 /**
  * 어느 창에서든 Tauri 를 띄웁니다.
  *
- * node scripts/tauri.mjs dev|build [--edition private|public] [--dry-run]
+ * node scripts/tauri.mjs dev|build [--edition private|public] [--dry-run] [--portable-only]
  *
  * # 왜 이 파일이 있는가
  *
@@ -26,6 +26,8 @@
  * 어떤 창에서 시작했든 결과가 같습니다.
  *
  * # 판(edition) — 비공개 / 공개
+ *
+ *
  *
  * - `private`(기본) — 전체 엔진을 유지하고 `target/private` 에 빌드합니다.
  * - `public` — 저장소 뿌리 `edition.json` 의 제외 엔진을 번들에서 뺍니다. 세 군데가 같이 움직입니다.
@@ -57,6 +59,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -86,10 +89,12 @@ const action = argv[0] === "build" ? "build" : "dev";
 /** 환경 변수로도 받습니다 — CI 가 스크립트 인자를 못 고칠 때를 위해. 인자가 있으면 인자가 이깁니다. */
 let edition = process.env.FRAMEFORGE_EDITION || "private";
 let dryRun = false;
+let portableOnly = false;
 
 for (let i = 1; i < argv.length; i += 1) {
   const arg = argv[i];
   if (arg === "--dry-run") dryRun = true;
+  else if (arg === "--portable-only") portableOnly = true;
   else if (arg === "--edition") edition = argv[(i += 1)] ?? "";
   else if (arg.startsWith("--edition="))
     edition = arg.slice("--edition=".length);
@@ -99,7 +104,7 @@ for (let i = 1; i < argv.length; i += 1) {
     fail([
       `모르는 인자입니다: ${arg}`,
       "",
-      "  쓰는 법: node scripts/tauri.mjs dev|build [--edition private|public] [--dry-run]",
+      "  쓰는 법: node scripts/tauri.mjs dev|build [--edition private|public] [--dry-run] [--portable-only]",
     ]);
   }
 }
@@ -107,6 +112,7 @@ for (let i = 1; i < argv.length; i += 1) {
 if (edition !== "private" && edition !== "public") {
   fail([`판은 private 또는 public 입니다: ${edition}`]);
 }
+if (portableOnly && action !== "build") fail(["--portable-only는 build에서만 사용할 수 있습니다."]);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 판 — 제외 엔진과 번들 덧씌움
@@ -204,8 +210,11 @@ console.log(
 
 if (dryRun) {
   console.log("");
+  if (portableOnly) console.log("  [dry-run] 기존 빌드의 무설치본만 포장합니다. 컴파일·설치본·서명은 만들지 않습니다.");
   console.log(
-    `  [dry-run] 실행할 명령: pnpm exec tauri ${[action, ...extra.args].join(" ")}`,
+    portableOnly
+      ? "  [dry-run] 실행할 작업: 기존 실행 파일·리소스로 무설치본 및 빌드 명세 생성"
+      : `  [dry-run] 실행할 명령: pnpm exec tauri ${[action, ...extra.args].join(" ")}`,
   );
   // 실제 실행과 같은 순서 — 물려받은 판 변수를 지운 뒤 결정한 판을 심습니다. 셸에 남은 값이 보이게.
   const inherited = stripEditionKeys({ ...process.env });
@@ -225,6 +234,17 @@ if (dryRun) {
   } else {
     console.log("  [dry-run] 덧씌움 없음 — tauri.conf.json 그대로");
   }
+  process.exit(0);
+}
+
+// 설치본이 끝난 뒤 압축만 실패했다면 같은 바이너리·리소스로 복구합니다.
+if (portableOnly) {
+  if (process.platform !== "win32") fail(["기존 Windows 무설치본 포장은 Windows에서 실행해 주세요."]);
+  if (!existsSync(path.join(layout.releaseDir, layout.executable))
+    || !existsSync(path.join(layout.releaseDir, "bundle", "nsis", layout.installer))) {
+    fail(["현재 판·버전의 실행 파일과 설치 파일을 먼저 빌드해 주세요."]);
+  }
+  try { packPortable(); } catch (error) { fail([String(error)]); }
   process.exit(0);
 }
 
@@ -431,18 +451,29 @@ function packPortable() {
   */
     const zipName = layout.portable;
     const zipPath = path.join(outDir, zipName);
-    rmSync(zipPath, { force: true });
-    // 윈도에 기본으로 있는 것만 씁니다 — 빌드 기계에 압축 도구를 더 깔게 하지 않으려고요.
-    const zipped = spawnSync(
-      "powershell",
-      [
-        "-NoProfile",
-        "-Command",
-        `Compress-Archive -Path '${stage.replaceAll("'", "''")}\\*' -DestinationPath '${zipPath.replaceAll("'", "''")}' -Force`,
-      ],
-      { stdio: "inherit", shell: false },
-    );
-    if (zipped.status !== 0) throw new Error("무설치본 압축에 실패했습니다.");
+    const zipStage = mkdtempSync(path.join(outDir, "portable-zip-"));
+    try {
+      const temporaryZip = path.join(zipStage, zipName);
+      // PS7의 PSModulePath가 PS5에 전달돼도 Archive 모듈을 불러오지 않습니다.
+      // 경로는 코드에 끼우지 않아 한글·공백·작은따옴표·대괄호를 그대로 보존합니다.
+      const command = [
+        "$ErrorActionPreference = 'Stop'",
+        "$null = [System.Reflection.Assembly]::LoadWithPartialName('System.IO.Compression.FileSystem')",
+        "[System.IO.Compression.ZipFile]::CreateFromDirectory($env:AIMOVIE_ZIP_SOURCE, $env:AIMOVIE_ZIP_TARGET, [System.IO.Compression.CompressionLevel]::Optimal, $false, [System.Text.Encoding]::UTF8)",
+      ].join("; ");
+      const powershell = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+      const zipped = spawnSync(powershell, ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(command, "utf16le").toString("base64")], {
+        stdio: "inherit", shell: false, windowsHide: true,
+        env: { ...process.env, AIMOVIE_ZIP_SOURCE: stage, AIMOVIE_ZIP_TARGET: temporaryZip },
+      });
+      if (zipped.status !== 0) throw new Error("무설치본 압축에 실패했습니다.");
+      // 새 ZIP 완성 전에는 이전 정상 산출물을 지우지 않습니다. 잠겼으면 교체를 실패시킵니다.
+      renameSync(temporaryZip, zipPath);
+    } finally {
+      const checkedZipStage = inside(outDir, path.relative(outDir, zipStage));
+      if (!path.basename(checkedZipStage).startsWith("portable-zip-")) throw new Error("압축 작업 폴더 이름이 다릅니다.");
+      rmSync(checkedZipStage, { recursive: true, force: true });
+    }
     writeBuildManifest(layout, resources.kept);
     console.log(`  무설치본: ${zipPath}`);
     console.log(`  빌드 명세: ${layout.manifestPath}`);

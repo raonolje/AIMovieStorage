@@ -248,6 +248,8 @@ export default function MagnificInboxPanel({
           onClick={() => setOpen((value) => !value)}
           /* 접혀 있으면 후보 타일도 «크게 보기» 도 없습니다 — 안내 창이 먼저 여기를 펴 줍니다. */
           data-tour-switch="shelf-inbox-zoom"
+          data-tour-switch-kind="expand"
+          aria-expanded={open}
           className="flex items-center gap-1.5 text-xs font-semibold text-white"
         >
           {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}

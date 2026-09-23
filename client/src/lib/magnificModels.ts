@@ -16,108 +16,11 @@ import { invoke } from "@tauri-apps/api/core";
  * 이유가 없습니다.
  */
 
-export interface MagnificModel {
-  /** 생성할 때 그대로 넘기는 값. 마그니픽이 `slug` 라 부릅니다. */
-  slug: string;
-  name: string;
-  /** 고를 수 있는 해상도들. 비어 있으면 그 모델은 해상도를 안 받습니다. */
-  resolutions: string[];
-  /** 이미지 전용 — 「고급·표준」 같은 등급. */
-  qualities: string[];
-  /** 영상 전용 — 이 모델이 받아 주는 길이(초). 비어 있으면 아무 길이나 받습니다. */
-  durations: number[];
-  /** 이 모델이 받아 주는 화면 비율. 비어 있으면 아무거나 받습니다. */
-  aspectRatios: string[];
-}
+export type { MagnificModel } from "./magnificCatalog";
+import { parseMagnificCatalog, type MagnificModel } from "./magnificCatalog";
 
 const cache: Partial<Record<"image" | "video", MagnificModel[]>> = {};
-
-/*
-  ── 카탈로그는 **JSON 이 아닙니다** ──────────────────────────────────────
-
-   오류도 안 뜨고 목록만 비어 있었는데, 까닭은
-  마그니픽이 모델 목록을 **TOON 텍스트**로 주기 때문입니다(도구 설명에 「lean TOON text」
-  라고 적혀 있습니다). JSON 으로 풀려다 실패하면 글자 한 덩어리가 되고, 거기서 배열을
-  찾으니 아무것도 없었습니다 — 실패가 아니라 **빈 목록**이라 오류도 안 났습니다.
-
-  생김새는 YAML 을 닮았습니다. 우리가 볼 것은 넷뿐입니다.
-
-      models[4]:
-        - slug: kling-25
-          name: Kling 2.5
-          durations[2]: 5,10
-          resolutions[2]: 1080p,720p
-          agentRecommendation:        ← 더 깊은 칸은 안 봅니다
-            tier: recommended
-
-  그래서 **깊이로 가릅니다** — 모델은 「2칸 + `- `」 에서 시작하고, 그 모델의 칸은 정확히
-  4칸입니다. 더 깊은 것(레퍼런스 규칙·제약)은 지나칩니다. 전부 읽어 들이면 `references`
-  안의 `type:` 같은 것이 모델 칸으로 새어 듭니다.
-*/
-
-/** `"1:1","16:9"` · `5,10` 처럼 쉼표로 이어진 값. 따옴표는 벗깁니다. */
-function commaList(raw: string): string[] {
-  return raw
-    .split(",")
-    .map((item) => item.trim().replace(/^"|"$/g, ""))
-    .filter(Boolean);
-}
-
-function parseToon(text: string): MagnificModel[] {
-  const made: MagnificModel[] = [];
-  let current: MagnificModel | null = null;
-
-  const take = (key: string, value: string) => {
-    if (!current) return;
-    if (key === "slug") current.slug = value.replace(/^"|"$/g, "");
-    else if (key === "name") current.name = value.replace(/^"|"$/g, "");
-    else if (key === "resolutions") current.resolutions = commaList(value);
-    else if (key === "aspectRatios") current.aspectRatios = commaList(value);
-    else if (key === "qualities") current.qualities = commaList(value);
-    else if (key === "durations")
-      current.durations = commaList(value)
-        .map(Number)
-        .filter((item) => Number.isFinite(item) && item > 0);
-  };
-
-  for (const line of text.split(/\r?\n/)) {
-    // 새 모델 — 「 - slug: kling-25」
-    const head = /^ {2}- (\w+)(?:\[\d+\])?:\s*(.*)$/.exec(line);
-    if (head) {
-      current = { slug: "", name: "", resolutions: [], qualities: [], durations: [], aspectRatios: [] };
-      made.push(current);
-      take(head[1], head[2]);
-      continue;
-    }
-    // 그 모델의 칸 — 정확히 네 칸. 더 깊으면 다른 것의 속입니다.
-    const field = /^ {4}(\w+)(?:\[\d+\])?:\s*(.*)$/.exec(line);
-    if (field) take(field[1], field[2]);
-  }
-  return made.filter((item) => item.slug);
-}
-
-const strings = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-
-/** 숫자 목록. 「5」 처럼 글자로 오는 서버도 있어 함께 받습니다. */
-const numbers = (value: unknown): number[] =>
-  Array.isArray(value)
-    ? value
-        .map((item) => (typeof item === "number" ? item : Number(item)))
-        .filter((item) => Number.isFinite(item) && item > 0)
-    : [];
-
-/** JSON 으로 주는 서버도 있을 수 있어 그 길도 남깁니다. */
-function listOf(value: unknown): Record<string, unknown>[] {
-  if (Array.isArray(value)) return value as Record<string, unknown>[];
-  if (value && typeof value === "object") {
-    for (const key of ["models", "data", "items", "results"]) {
-      const found = (value as Record<string, unknown>)[key];
-      if (Array.isArray(found)) return found as Record<string, unknown>[];
-    }
-  }
-  return [];
-}
+const pending: Partial<Record<"image" | "video", Promise<MagnificModel[]>>> = {};
 
 export async function loadMagnificModels(
   kind: "image" | "video",
@@ -125,22 +28,20 @@ export async function loadMagnificModels(
   fresh = false,
 ): Promise<MagnificModel[]> {
   if (!fresh && cache[kind]) return cache[kind]!;
+  // 컷마다 안내를 띄워도 같은 카탈로그 요청을 동시에 여러 번 보내지 않습니다.
+  if (pending[kind]) return pending[kind]!;
+  const request = readMagnificModels(kind);
+  pending[kind] = request;
+  try { return await request; }
+  finally { delete pending[kind]; }
+}
+
+async function readMagnificModels(kind: "image" | "video"): Promise<MagnificModel[]> {
   const reply = await invoke<unknown>("magnific_call", {
     tool: kind === "image" ? "images_models_list" : "video_models_list",
     args: {},
   });
-  const made = typeof reply === "string"
-    ? parseToon(reply)
-    : listOf(reply)
-        .map((item) => ({
-          slug: String(item.slug ?? item.id ?? item.model ?? ""),
-          name: String(item.name ?? item.label ?? item.slug ?? ""),
-          resolutions: strings(item.resolutions),
-          qualities: strings(item.qualities),
-          durations: numbers(item.durations ?? item.durationOptions),
-          aspectRatios: strings(item.aspectRatios),
-        }))
-        .filter((item) => item.slug);
+  const made = parseMagnificCatalog(reply);
   /*
     빈 목록은 **성공이 아닙니다.** 오류도 없이 비어 있으면 「연결했는데 왜 안 뜨지」 를
     알 길이 없습니다. 받아 온 것을 그대로 붙여 까닭을 보여 줍니다.

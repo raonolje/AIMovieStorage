@@ -17,12 +17,13 @@ import {
   uninstallLocalEngine,
   useLocalEngines,
   engineFit,
-  loadPrecision,
   PRECISION_LABEL,
   precisionFor,
   savePrecision,
   saveLocalMemoryPolicy,
   useLocalMemoryPolicy,
+  usePrecisionSetting,
+  PRECISION_LADDER,
   type EngineFit,
   type HardwareProbe,
   type LocalPrecision,
@@ -65,7 +66,7 @@ export default function LocalEnginesPanel({
   */
   const [probe, setProbe] = useState<HardwareProbe | null>(null);
   /** 사람이 못 박은 정밀도. «자동» 이면 워커가 GPU 를 보고 정합니다. */
-  const [precision, setPrecision] = useState<LocalPrecision>(() => loadPrecision());
+  const precision = usePrecisionSetting() as LocalPrecision;
   useEffect(() => {
     let alive = true;
     void invoke<HardwareProbe>("probe_hardware")
@@ -113,8 +114,7 @@ export default function LocalEnginesPanel({
           probe={probe}
           precision={precision}
           onPrecision={(value) => {
-            setPrecision(value);
-            savePrecision(value);
+            void savePrecision(value).catch(error => toast.error(String(error)));
           }}
         />
       )}
@@ -167,12 +167,12 @@ export default function LocalEnginesPanel({
       )}
 
       {shown.map((engine) => (
-        <LocalEngineCard
+        <EngineSettingsCard
           key={engine.id}
           engine={engine}
           progress={installs[engine.id]}
           fit={engineFit(engine, probe)}
-          precision={precisionFor(LOCAL_ENGINE_CATALOG[engine.id], probe, precision)}
+          probe={probe}
         />
       ))}
 
@@ -255,6 +255,7 @@ function HardwareRow({
   precision: LocalPrecision;
   onPrecision: (value: LocalPrecision) => void;
 }) {
+  const t = useT();
   if (!probe) {
     return (
       <p className="text-[10px]" style={{ color: "oklch(0.48 0.01 265)" }}>
@@ -307,8 +308,8 @@ function HardwareRow({
                   : value === "bf16"
                     ? "원본 그대로. 안 들어가면 느려지거나 죽습니다"
                     : value === "int8"
-                      ? "절반 크기. 품질 손실이 거의 없습니다"
-                      : "4분의 1 크기(nf4). 눈에 띄지만 도는 것이 안 도는 것보다 낫습니다"
+                      ? t("메모리를 줄입니다. 속도와 품질은 모델과 GPU에 따라 다릅니다.")
+                      : t("메모리를 더 줄입니다. 속도와 품질은 원본과 비교해 선택하세요.")
               }
               className="rounded px-1.5 py-0.5 text-[9px]"
               style={{
@@ -323,6 +324,40 @@ function HardwareRow({
       </div>
     </div>
   );
+}
+
+function EngineSettingsCard({ engine, progress, fit, probe }: {
+  engine: LocalEngineStatus;
+  progress?: { stage: string; percent: number | null; message: string };
+  fit: EngineFit;
+  probe: HardwareProbe | null;
+}) {
+  const t = useT();
+  const setting = usePrecisionSetting(engine.id);
+  const common = usePrecisionSetting() as LocalPrecision;
+  const info = LOCAL_ENGINE_CATALOG[engine.id];
+  const modes = info.precisionModes ?? PRECISION_LADDER;
+  const precision = precisionFor(info, probe, setting === "inherit" ? common : setting);
+  return <div className="space-y-1">
+    <LocalEngineCard engine={engine} progress={progress} fit={fit} precision={precision} />
+    {engine.kind !== "mocap" && <div className="mb-3 flex flex-wrap items-center gap-2 px-3 text-[11px]">
+      <label className="flex items-center gap-2">
+        {t("모델별 정밀도")}
+        <select aria-label={t("{model} 정밀도", { model: engine.name })} value={setting}
+          className="rounded border border-white/10 bg-background px-2 py-1"
+          onChange={event => {
+            try { void savePrecision(event.target.value as LocalPrecision | "inherit", engine.id).catch(error => toast.error(String(error))); }
+            catch (error) { toast.error(String(error)); }
+          }}>
+          <option value="inherit">{t("공통 설정 따르기")}</option>
+          <option value="auto">{t("자동 — 이 GPU 에 맞춰")}</option>
+          {modes.map(mode => <option key={mode} value={mode}>{t(PRECISION_LABEL[mode])}</option>)}
+        </select>
+      </label>
+      <span className="text-muted-foreground">{t("다음 생성 예상: {precision}", { precision })}</span>
+      <span className="w-full text-muted-foreground">{t("메모리를 줄여도 더 빨라진다고 보장하지 않습니다. 같은 입력으로 품질과 시간을 비교하세요.")}</span>
+    </div>}
+  </div>;
 }
 
 function LocalEngineCard({

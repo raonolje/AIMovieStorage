@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CaptureResult } from "./motionCapture";
 import type { MocapSource } from "./mocapStore";
 
-const port = vi.hoisted(() => ({ capture: vi.fn(), save: vi.fn(), run: vi.fn(), invoke: vi.fn(), mirror: vi.fn(), register: vi.fn(), queue: vi.fn() }));
+const port = vi.hoisted(() => ({ capture: vi.fn(), save: vi.fn(), import: vi.fn(), run: vi.fn(), invoke: vi.fn(), mirror: vi.fn(), register: vi.fn(), queue: vi.fn() }));
 vi.mock("./handCapture", () => ({ captureVideoHands: port.capture }));
-vi.mock("./mediaLibrary", () => ({ assetSrc: (path: string) => path, safeFileName: (name: string) => name, saveProjectMediaAsset: port.save, importProjectMediaAsset: vi.fn(), queueMirrorWriteAndConfirm: port.mirror, registerMirrorSection: port.register, queueMirrorWrite: port.queue }));
+vi.mock("./mediaLibrary", () => ({ assetSrc: (path: string) => path, safeFileName: (name: string) => name, saveProjectMediaAsset: port.save, importProjectMediaAsset: port.import, queueMirrorWriteAndConfirm: port.mirror, registerMirrorSection: port.register, queueMirrorWrite: port.queue }));
 vi.mock("./llm", () => ({ isDesktopApp: () => true }));
 vi.mock("./motionRepair", () => ({ repairPerson: (person: unknown) => person }));
 vi.mock("./localEngines", () => ({ runLocal: port.run, stopLocalWorkers: vi.fn() }));
@@ -23,6 +23,7 @@ beforeEach(() => {
   vi.resetModules();
   port.capture.mockReset().mockResolvedValue(updated);
   port.save.mockReset().mockResolvedValue({ path: "/fixtures/new.json" });
+  port.import.mockReset().mockResolvedValue({ path: "/fixtures/imported.mp4" });
   port.run.mockReset(); port.invoke.mockReset().mockResolvedValue("/fixtures/output.json");
   port.mirror.mockReset().mockResolvedValue(undefined); port.register.mockReset(); port.queue.mockReset();
   const values = new Map<string, string>();
@@ -31,6 +32,29 @@ beforeEach(() => {
 });
 
 describe("손 추가 추적의 작업 줄과 결과 저장", () => {
+  it("영상 저장 실패나 미설정은 경로 없는 성공으로 삼키지 않는다", async () => {
+    const store = await import("./mocapStore");
+    const file = new File(["video"], "sample.mp4");
+    port.save.mockRejectedValueOnce(new Error("저장 실패"));
+    await expect(store.saveMocapVideo("작품", file)).rejects.toThrow("저장 실패");
+    port.save.mockResolvedValueOnce(null);
+    await expect(store.saveMocapVideo("작품", file)).rejects.toThrow("저장 폴더");
+    port.import.mockRejectedValueOnce(new Error("복사 실패"));
+    await expect(store.importMocapVideo("작품", "/original/video.mp4")).rejects.toThrow("복사 실패");
+    port.import.mockResolvedValueOnce(null);
+    await expect(store.importMocapVideo("작품", "/original/video.mp4")).rejects.toThrow("저장 폴더");
+    expect(store.mocapSourcesOf("작품")).toEqual([]);
+  });
+
+  it("영상 가져오기는 저장 완료를 기다리고 복사된 경로를 반환한다", async () => {
+    const store = await import("./mocapStore");
+    const wait = gate<{ path: string }>(); port.save.mockReturnValue(wait.promise);
+    let completed = false;
+    const saving = store.saveMocapVideo("작품", new File(["v"], "sample.mp4")).then(path => { completed = true; return path; });
+    await tick(); expect(completed).toBe(false);
+    wait.resolve({ path: "/project/copied.mp4" });
+    await expect(saving).resolves.toBe("/project/copied.mp4");
+  });
   it("실제 결과 파일 완료를 기다린 뒤 기존 몸 분석과 함께 반영한다", async () => {
     const save = gate<{ path: string }>(); port.save.mockReturnValue(save.promise);
     const store = await import("./mocapStore"); store.addMocapSource("작품", source());
@@ -128,6 +152,30 @@ describe("손 추가 추적의 작업 줄과 결과 저장", () => {
     expect(store.mocapSourcesOf("작품")[0]).toMatchObject({ status: "idle", raw: original, resultPath: "/fixtures/old.json" });
   });
 
+  it("외부 완료 대기는 UI 큐를 함께 쓰며 차례가 오기 전 취소도 즉시 거절됩니다", async () => {
+    const capture = gate<CaptureResult>(); port.capture.mockReturnValueOnce(capture.promise);
+    const store = await import("./mocapStore");
+    store.addMocapSource("작품", source()); store.addMocapSource("작품", source("waiting"));
+    store.enqueueMocap("작품", "s", "hands");
+    const abort = new AbortController();
+    const waiting = store.enqueueMocapAndWait("작품", "waiting", "hands", { operationId: "queued-hand", signal: abort.signal });
+    const rejected = expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+    abort.abort(); await rejected;
+    expect(store.mocapSourcesOf("작품")[1].status).toBe("idle");
+    capture.resolve(updated);
+    await vi.waitFor(() => expect(store.mocapSourcesOf("작품")[0].status).toBe("done"));
+    expect(port.capture).toHaveBeenCalledTimes(1);
+  });
+
+  it("나중에 UI에서 재분석하면 앞선 외부 요청의 완료 표를 새 결과에 잘못 붙이지 않습니다", async () => {
+    const store = await import("./mocapStore"); store.addMocapSource("작품", source());
+    await store.enqueueMocapAndWait("작품", "s", "hands", { operationId: "external" });
+    expect(store.mocapSourcesOf("작품")[0].completedOperation).toEqual({ id: "external", kind: "hands" });
+    store.enqueueMocap("작품", "s", "hands");
+    await vi.waitFor(() => expect(store.mocapSourcesOf("작품")[0].status).toBe("done"));
+    expect(store.mocapSourcesOf("작품")[0].completedOperation).toBeUndefined();
+  });
+
   it("설치본에서 원본이 임시 blob뿐이면 복원 가능한 저장인 척하지 않는다", async () => {
     const store = await import("./mocapStore");
     store.addMocapSource("작품", { ...source(), path: null, blobUrl: "blob:temporary" });
@@ -135,6 +183,21 @@ describe("손 추가 추적의 작업 줄과 결과 저장", () => {
     await vi.waitFor(() => expect(store.mocapSourcesOf("작품")[0].status).toBe("error"));
     expect(port.capture).not.toHaveBeenCalled();
     expect(store.mocapSourcesOf("작품")[0].message).toContain("원본 영상을 먼저 파일로 저장");
+  });
+
+  it("내장 몸 분석의 영상 열기 중 취소도 작업 대기를 끝내고 영상 자원을 정리합니다", async () => {
+    const abort = new AbortController();
+    const video = new EventTarget();
+    const load = vi.fn(), remove = vi.fn();
+    Object.assign(video, { load, removeAttribute: remove });
+    Object.defineProperty(video, "src", { set: () => abort.abort() });
+    vi.stubGlobal("document", { querySelector: () => ({}), createElement: () => video });
+    const store = await import("./mocapStore");
+    store.addMocapSource("작품", { ...source(), engine: "mediapipe", blobUrl: "blob:existing" });
+    await expect(store.enqueueMocapAndWait("작품", "s", "body", { operationId: "body-cancel", signal: abort.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(store.mocapSourcesOf("작품")[0].status).toBe("idle");
+    expect(remove).toHaveBeenCalledWith("src"); expect(load).toHaveBeenCalledTimes(1);
+    expect(port.save).not.toHaveBeenCalled(); expect(port.run).not.toHaveBeenCalled();
   });
 
   it.each([undefined, false])("SAM 손 옵션 %s를 실제 워커 요청에 전달한다", async hands => {

@@ -165,7 +165,6 @@ export interface PromptWorkflowState<TReference = unknown, TImage = unknown> {
   /**
    * **다른 작품에서 끌어온 카드**라면 어디서 왔는지 한 줄.
    *
-   *
    * 가져온 뒤에는 저쪽과 아무 관계가 없지만(복사입니다), 「이 인물은 1편 것」 을
    * 나중에 알 수 있어야 합니다.
    */
@@ -204,7 +203,6 @@ export interface PromptWorkflowState<TReference = unknown, TImage = unknown> {
    */
   /**
    * 첫 레퍼런스 프롬프트 — **한글·영문 두 칸**.
-   *
    *
    * 모델마다 잘 듣는 말이 달라서(나노 바나나·GPT 는 한국어도 읽고, 미드저니는 영어라야
    * 합니다) 쓰는 사람이 그 자리에서 골라야 합니다.

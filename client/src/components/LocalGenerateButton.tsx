@@ -17,11 +17,12 @@ import { lorasToRun, useLoraFiles, withLoraTriggers } from "@/lib/localLoras";
 import LoraPicker from "@/components/LoraPicker";
 import PoseControlPicker from "@/components/PoseControlPicker";
 import type { PoseFrameSet } from "@/lib/poseFrames";
+import { validateLocalControlOptions } from "@/lib/localControlCapabilities";
+import H3ReferenceRangePicker, { type H3ReferenceRange } from "@/components/H3ReferenceRangePicker";
+import { useT } from "@/lib/i18n";
 
 /**
  * «로컬로 뽑기» — 이 컴퓨터의 모델로 그림·영상을 바로 만듭니다.
- *
- *
  *
  * 카드마다 프롬프트를 따로 쓰지 않습니다. **적어 둔 프롬프트를 그대로** 가져가되,
  * 보내는 순간에 마그니픽 전제(@칩·미드저니 매개변수)를 걷어냅니다(`tuneForLocal`).
@@ -76,6 +77,7 @@ export default function LocalGenerateButton({
   /** 만든 파일을 카드에 붙일 자리. 경로와 보일 이름을 줍니다. */
   onDone: (filePath: string, name: string) => void;
 }) {
+  const t = useT();
   useLocalEngines(); // 설치 상태를 구독해야 단추가 제때 살아납니다.
   const engines = availableLocalEngines(kind);
   const [engineId, setEngineId] = useState<LocalEngineId | "">("");
@@ -93,10 +95,13 @@ export default function LocalGenerateButton({
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   /**
    * 모캡에서 구운 **동작 기준**. 영상에서만 씁니다.
-   *
-   *
    */
   const [pose, setPose] = useState<PoseFrameSet | null>(null);
+  const videoReferences = (references ?? []).filter(item => item.kind === "video").map(item => item.path);
+  const referenceKey = JSON.stringify(videoReferences);
+  const [referenceSelection, setReferenceSelection] = useState<{ key: string; range: H3ReferenceRange } | null>(null);
+  const referenceRange = referenceSelection?.key === referenceKey ? referenceSelection.range : "";
+  const needsReferenceRange = kind === "video" && engine?.id === "minimaxh3" && videoReferences.length > 0;
 
   // 쓸 수 있는 엔진이 없으면 **아무것도 안 그립니다.** 설치는 설정에서 합니다 —
   // 카드마다 「설치하세요」 를 띄우면 화면이 안내문으로 뒤덮입니다.
@@ -115,6 +120,12 @@ export default function LocalGenerateButton({
       setStatus(event.message || "");
     }, engine.id);
     try {
+      const checked = validateLocalControlOptions(engine.id, {
+        control: kind === "video" && pose ? { kind: "pose", frames: pose.frames, fps: pose.fps } : undefined,
+        references: engine.id === "minimaxh3" ? references : undefined,
+        reference_video_range: needsReferenceRange ? referenceRange : undefined,
+      });
+      if (!checked.ok) throw new Error(checked.message);
       /*
         결과를 프로젝트 폴더에 놓으려면 «그 폴더 안의 경로» 가 필요합니다. 빈 파일로
         자리를 한 번 잡고 그 경로에 엔진이 씁니다 — 폴더·이름·번호 규칙을 저장 쪽
@@ -205,15 +216,16 @@ export default function LocalGenerateButton({
                 fps: 16,
                 image: firstFrame,
                 references: engine.id === "minimaxh3" ? references : undefined,
+                reference_video_range: needsReferenceRange && referenceRange ? referenceRange : undefined,
                 // 그림 한 장에는 얼릴 구역이 없습니다 — 마스크는 영상에만 실립니다.
                 motion_mask: motionMask,
               }
             : {}),
           loras: chosenLoras,
           // 뼈 그림은 **영상에만**. 그림 한 장에는 이을 동작이 없습니다.
-          ...(kind === "video" && pose ? { control: { kind: "pose" as const, frames: pose.frames } } : {}),
+          ...(kind === "video" && pose ? { control: { kind: "pose" as const, frames: pose.frames, fps: pose.fps } } : {}),
           // «자동» 이면 워커가 이 GPU 를 보고 정합니다. 설정에서 못 박아 두면 그것을 따릅니다.
-          precision: loadPrecision(),
+          precision: loadPrecision(engine.id),
         },
         timeoutSecs: kind === "video" ? 7200 : 1800,
       });
@@ -233,9 +245,15 @@ export default function LocalGenerateButton({
           : engine.id === "minimaxh3"
             ? 0
             : (references?.length ?? 0);
+      const referenceMeta = Array.isArray(result.meta?.reference_videos) ? result.meta.reference_videos : [];
+      const referenceSummary = referenceMeta.filter((item): item is { conditioning_seconds: number } =>
+        !!item && typeof item === "object" && typeof (item as { conditioning_seconds?: unknown }).conditioning_seconds === "number",
+      ).map(item => t("H3 참조 입력 {seconds}초", { seconds: item.conditioning_seconds.toFixed(2) })).join(" · ");
       toast.success(`${engine.name} 으로 만들었습니다.`, {
         description:
           `${Math.round(result.seconds)}초 걸렸습니다` +
+          (referenceSummary ? ` · ${referenceSummary}` : "") +
+          (result.meta?.precision ? ` · ${result.meta.precision} 적용` : "") +
           (tuned.usedKorean
             ? " · 영문 칸이 비어 한글로 보냈습니다(오픈 모델은 영어를 훨씬 잘 알아듣습니다)"
             : "") +
@@ -289,7 +307,7 @@ export default function LocalGenerateButton({
       <button
         type="button"
         onClick={() => void run()}
-        disabled={busy}
+        disabled={busy || (needsReferenceRange && !referenceRange)}
         title={
           busy
             ? status || "만드는 중…"
@@ -309,6 +327,9 @@ export default function LocalGenerateButton({
         {busy ? status || "만드는 중…" : label || "로컬로 뽑기"}
       </button>
       </div>
+
+      {needsReferenceRange && <H3ReferenceRangePicker paths={videoReferences} value={referenceRange}
+        onChange={range => setReferenceSelection({ key: referenceKey, range })} disabled={busy} />}
 
       {/* 받아 둔 로라가 있을 때만 뜹니다. 없으면 이 줄 자체가 없습니다. */}
       <LoraPicker

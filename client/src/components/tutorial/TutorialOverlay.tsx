@@ -7,6 +7,7 @@ import { isTypingTarget } from "@/lib/isTypingTarget";
 import { confirmDialog } from "@/components/ConfirmDialog";
 import { listLocalProjects } from "@/lib/localProjectStore";
 import { ensureTutorialSample } from "@/lib/tutorialSample";
+import { revealTutorialView, tutorialDoors } from "@/lib/tutorialReveal";
 import {
   PROJECT_STEP_PAGES,
   autoStartTutorial,
@@ -122,7 +123,6 @@ function labelOf(element: HTMLElement): string {
  *
  * `/project/:id` 는 «어느 작품인지» 가 없습니다. 프로젝트 화면 밖에서 그 걸음에 이르면
  * **연습용 예시 작품**을 엽니다 — 없으면 그 자리에서 만듭니다.
- *
  *
  * 「이미지가 등록된게 없으니까...시트에서 칸 잘라내기 같은 경우 볼 수가 없잖아」.
  * 예전에는 «가장 최근에 고친 작품» 을 열었는데, 그것이 갓 만든 빈 작품이면 가위도 시트도 뽑은
@@ -378,7 +378,8 @@ function ActiveStep({ tutorial, step, index }: { tutorial: Tutorial; step: Tutor
       setRect(null);
       return;
     }
-    const selector = `[data-tour="${step.anchor}"]`;
+    const anchor = step.anchor;
+    const selector = `[data-tour="${anchor}"]`;
     let frame = 0;
     const measure = () => {
       frame = 0;
@@ -395,11 +396,6 @@ function ActiveStep({ tutorial, step, index }: { tutorial: Tutorial; step: Tutor
       */
       const tabDialogs = document.querySelectorAll('[role="dialog"][data-state="open"]');
       const tabScope: ParentNode = tabDialogs.length ? tabDialogs[tabDialogs.length - 1] : document;
-      const tab = tabScope.querySelector<HTMLElement>(`[data-tour-switch~="${step.anchor}"]`);
-      if (tab && !clicked.current.has(tab)) {
-        clicked.current.add(tab);
-        tab.click();
-      }
 
       /*
         **보이는 것 중 첫 번째**를 잡습니다.
@@ -412,13 +408,15 @@ function ActiveStep({ tutorial, step, index }: { tutorial: Tutorial; step: Tutor
       */
       let element: Element | null = null;
       let box: DOMRect | undefined;
-      for (const candidate of document.querySelectorAll(selector)) {
+      for (const candidate of tabScope.querySelectorAll(selector)) {
         const rect = candidate.getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) continue;
         element = candidate;
         box = rect;
         break;
       }
+      // 생성·저장·선택 버튼은 자동 실행하지 않습니다. 탭·접기만 공통 경계에서 엽니다.
+      if (revealTutorialView(tabScope, anchor, clicked.current, Boolean(element))) return;
       if (!element || !box) {
         /*
           ── 자리가 없으면 **문을 가리킵니다** ─────────────────────────────────
@@ -457,40 +455,11 @@ function ActiveStep({ tutorial, step, index }: { tutorial: Tutorial; step: Tutor
         // 창이 겹쳐 떠 있으면 **맨 위의 것**만 손이 닿습니다 — 문서에서 첫 번째가 아니라 마지막입니다.
         const scope: ParentNode = dialogs.length ? dialogs[dialogs.length - 1] : document;
 
-        /*
-          **한 걸음에 여러 번 눌러 줍니다.** 「왜 자꾸 같은 수정을 계속 하게 만드는거야?」.
-
-          예전에는 걸음마다 딱 한 번만 눌렀습니다. 그런데 자리에 닿는 데 두 번이 필요한 경우가
-          흔합니다 — 구도잡기를 열고 «환경» 탭으로, 가위 창을 열고 «자르기» 탭으로. 한 번에서
-          멈추니 나머지 절반은 늘 «자리가 없습니다» 였습니다.
-
-          그래서 이미 누른 것을 기억해 두고, 다음 차례를 한 번씩 눌러 나갑니다. 같은 것을 두 번
-          누르지 않으므로 탭이 폈다 접혔다 하지 않고, 네 번에서 멈춰 무한히 누르지도 않습니다.
-        */
-        const candidates = [
-          ...scope.querySelectorAll<HTMLElement>(`[data-tour-switch~="${step.anchor}"]`),
-          ...scope.querySelectorAll<HTMLElement>(`[data-tour-open~="${step.anchor}"]`),
-        ];
-        const next = candidates.find((item) => !clicked.current.has(item));
-        if (next && clicked.current.size < 4) {
-          clicked.current.add(next);
-          setDoorLabel(labelOf(next));
-          window.setTimeout(() => next.click(), 200);
-          return;
-        }
-        // 더 누를 것이 없으면 마지막 문을 밝혀 «먼저 이것을 누르세요» 라고 적습니다.
+        const candidates = tutorialDoors(scope, anchor);
+        // 방·곡·구도 등이 없으면 만드는 단추를 안내합니다. 읽기만 해도 작품이 바뀌면 안 됩니다.
         const opener = candidates[candidates.length - 1];
         const openerBox = opener?.getBoundingClientRect();
         if (opener && openerBox && (openerBox.width > 0 || openerBox.height > 0)) {
-          /*
-            **창도 저절로 엽니다.**
-
-            여는 것 자체는 공짜입니다 — 돈이 드는 것은 창 안에서 «만들기» 를 누를 때이고, 그 자리는
-            따로 «설명만» 으로 묶어 두었습니다(`COSTLY_ANCHORS`). 그래서 한 번 눌러 열어 주고,
-            열리는 동안 무엇을 눌렀는지 보이게 문 이름은 그대로 적어 둡니다.
-
-            한 번만 누릅니다 — 못 찾을 때마다 누르면 0.4초마다 열었다 닫았다 합니다.
-          */
           if (lit.current !== opener) {
             lit.current?.removeAttribute("data-tutorial-lit");
             opener.setAttribute("data-tutorial-lit", "");

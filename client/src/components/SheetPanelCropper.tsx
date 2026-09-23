@@ -109,6 +109,7 @@ export default function SheetPanelCropper({
   markAssetType,
   initialMarks,
   spaceKind,
+  faceSetSize,
   onSaved,
 }: {
   open: boolean;
@@ -147,6 +148,7 @@ export default function SheetPanelCropper({
    * 파일 이름 토큰(`faceFileToken`)이 갈립니다. 캐릭터·에셋은 안 줘도 됩니다(파노라마 탭이 없음).
    */
   spaceKind?: SpaceKind | null;
+  faceSetSize?: import("@/lib/projectTypes").FaceSetSize | null;
   /** 저장한 파일을 화면 목록에도 넣습니다. */
   onSaved?: (files: CropperSavedFile[]) => void;
 }) {
@@ -678,6 +680,7 @@ export default function SheetPanelCropper({
                   걸음마다 제 탭으로 저절로 가야 자리를 안 잃습니다.
                 */
                 data-tour-switch={item.opens}
+                data-tour-switch-kind="tab"
                 className="flex items-center gap-1.5 rounded-t-md px-3 py-2 text-[11px] font-semibold"
                 style={{
                   background: on ? "oklch(1 0 0 / 8%)" : "transparent",
@@ -695,6 +698,7 @@ export default function SheetPanelCropper({
             <CrossUnfoldWorkbench
               imageSrc={imageSrc}
               spaceKind={spaceKind}
+              targetSize={faceSetSize}
               progress={faceProgress}
               onSaveFaces={saveFaces}
             />

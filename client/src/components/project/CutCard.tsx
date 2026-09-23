@@ -1104,6 +1104,7 @@ export default function CutCard({
         kind: "video",
         // 앞에서 고른 영상 모델. 슬러그를 아는 것만 넘어갑니다(까닭은 그림 «구성» 주석).
         model: targetModelOf(videoModel)?.magnific,
+        requestedVideoModel: videoModel,
         seconds: videoSeconds,
         prompt: [lines.join("\n"), body].filter(Boolean).join("\n\n"),
         referencePaths: paths,
@@ -1248,6 +1249,8 @@ export default function CutCard({
           aria-label="펼치기"
           // 접힌 컷은 머리줄만 보입니다 — 펴야 아래 자리들이 생깁니다.
           data-tour-switch="cut-frame cut-switches cut-summary cut-refs cut-style-toggles cut-dialogue cut-background-motion cut-prompt-section cut-prompt-write cut-video-section cut-video-prompt cut-ref-video-list"
+          data-tour-switch-kind="expand"
+          aria-expanded={open}
         >
           {open ? (
             <ChevronDown
@@ -2014,6 +2017,7 @@ export default function CutCard({
           */}
           <CutVideoSection
             cut={cut}
+            videoModel={videoModel}
             patchCut={patchCut}
             applyVideoPrompt={applyVideoPrompt}
             runVideoPrompt={runVideoPrompt}
@@ -2233,11 +2237,20 @@ export default function CutCard({
           레퍼런스 영상이 저장되면 컷이 그 경로와 길이를 들고 있습니다.
           
         */
-        onVideoSaved={(refVideoPath, refVideoSeconds) =>
-          // 영상 렌더가 끝난 한참 뒤에 옵니다. 그 사이 만진 다른 칸은 `patchCut` 이 얕게 합쳐
-          // 남으니 값꼴이어도 안전합니다 — 함수꼴은 저장소 약속(patch 는 늘 함수)일 뿐입니다.
-          patchCut(() => ({ refVideoPath, refVideoSeconds }))
-        }
+        onVideoSaved={async (refVideoPath, refVideoSeconds) => {
+          if (!commitProjectChange) throw new CompositionControlError("project_not_saved", "프로젝트 저장이 준비되지 않았습니다.");
+          // 몇 분 동안 바뀐 프롬프트·대사·다른 컷을 보존하고, 파일 저장 확인 뒤에만 완료를 알립니다.
+          await commitProjectChange(current => {
+            let found = false;
+            const scenes = current.scenes.map(scene => ({ ...scene, cuts: scene.cuts.map(item => {
+              if (item.id !== cut.id) return item;
+              found = true;
+              return { ...item, refVideoPath, refVideoSeconds };
+            }) }));
+            if (!found) throw new CompositionControlError("cut_not_found", "영상을 붙일 컷이 삭제되었습니다.");
+            return { ...current, scenes };
+          });
+        }}
       />
     </div>
   );

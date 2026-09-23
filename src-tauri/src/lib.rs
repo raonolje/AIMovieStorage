@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 /// 로컬 업스케일 엔진(설치·상주 워커·실행). ComfyUI 다리와는 별개입니다 —
 /// 이 파일 아래쪽의 `comfy_*` 는 «외부 엔진» 으로 그대로 남습니다.
 mod comfy;
+mod asset_upload;
 mod control;
 pub use control::run_mcp;
 mod datafiles;
@@ -203,6 +204,7 @@ struct SaveAssetRequest {
     /// 프런트가 세트 단위로 번호 하나를 정해 여섯 번 같은 값을 줍니다. 이미 있으면 덮어쓰지
     /// 않고 오류입니다.
     number: Option<u32>,
+    #[serde(default)]
     bytes: Vec<u8>,
 }
 
@@ -341,8 +343,7 @@ pub(crate) fn next_numbered_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
     dir.join(format!("{stem}_{}.{ext}", std::process::id()))
 }
 
-#[tauri::command]
-fn save_project_asset(request: SaveAssetRequest) -> Res<String> {
+fn asset_destination(request: &SaveAssetRequest) -> Res<(PathBuf, String, String)> {
     let dir = owner_dir(
         &request.base_directory,
         &request.project_name,
@@ -368,6 +369,12 @@ fn save_project_asset(request: SaveAssetRequest) -> Res<String> {
         .unwrap_or(&request.owner_name);
 
     let full_stem = asset_stem(&request.asset_type, stem);
+    Ok((dir, full_stem, ext))
+}
+
+#[tauri::command]
+fn save_project_asset(request: SaveAssetRequest) -> Res<String> {
+    let (dir, full_stem, ext) = asset_destination(&request)?;
     let path = match request.number {
         Some(n) => {
             let fixed = dir.join(format!("{full_stem}_{n:03}.{ext}"));
@@ -534,6 +541,36 @@ fn delete_project_media_file(
     }
     trash::move_to_trash(&root, &target)?;
     Ok(())
+}
+
+/// 생성 실패·취소의 빈 자리만 해제합니다. 일반 삭제는 결과까지 휴지통으로 옮기므로
+/// 재사용하지 않습니다. 경계·종류·크기를 모두 확인한 파일 하나만 직접 치웁니다.
+#[tauri::command]
+fn release_empty_project_asset(
+    base_directory: String,
+    project_name: String,
+    path: String,
+) -> Res<bool> {
+    let requested = Path::new(&path);
+    let metadata = match fs::symlink_metadata(requested) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(err("예약 파일을 확인하지 못했습니다", error)),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err("링크는 생성 예약 파일로 정리하지 않습니다.".into());
+    }
+    let root = project_root(&base_directory, &project_name);
+    let target = ensure_inside(&root, requested)?;
+    if !extension_allowed(&target) {
+        return Err("정리할 수 있는 종류의 예약 파일이 아닙니다.".into());
+    }
+    let metadata = fs::metadata(&target).map_err(|error| err("예약 파일을 확인하지 못했습니다", error))?;
+    if !metadata.is_file() || metadata.len() != 0 {
+        return Ok(false);
+    }
+    fs::remove_file(&target).map_err(|error| err("빈 예약 파일을 정리하지 못했습니다", error))?;
+    Ok(true)
 }
 
 /// 캐릭터·배경 이름이 바뀌면 폴더 이름도 따라갑니다.
@@ -1339,6 +1376,7 @@ fn open_project_inbox(base_directory: String, project_name: String) -> Res<Strin
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(asset_upload::AssetUploads::default())
         .plugin(tauri_plugin_log::Builder::new().build())
         // 업스케일 워커·설치 상태를 앱이 사는 동안 들고 있습니다.
         .manage(upscale::UpscaleState::default())
@@ -1351,9 +1389,14 @@ pub fn run() {
             control::control_write_journal,
             choose_storage_directory,
             save_project_asset,
+            asset_upload::begin_project_asset_upload,
+            asset_upload::append_project_asset_upload,
+            asset_upload::finish_project_asset_upload,
+            asset_upload::abort_project_asset_upload,
             import_project_asset,
             list_reference_files,
             delete_project_media_file,
+            release_empty_project_asset,
             rename_owner_tree,
             migrate_project_layout,
             delete_asset_owner,
@@ -1419,6 +1462,7 @@ pub fn run() {
             magnific_mcp::magnific_call,
             magnific_mcp::magnific_upload,
             magnific_mcp::magnific_generate,
+            magnific_mcp::magnific_generate_details,
             magnific_mcp::magnific_wait,
             magnific_mcp::magnific_download,
             magnific_mcp::magnific_recent,
@@ -1479,6 +1523,72 @@ pub fn run() {
                 upscale::stop_all_workers(app);
             }
         });
+}
+
+#[cfg(test)]
+mod empty_reservation_tests {
+    use super::*;
+
+    fn fixture() -> (tempfile::TempDir, PathBuf) {
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("시험 작품");
+        fs::create_dir(&project).unwrap();
+        (directory, project)
+    }
+
+    fn release(base: &Path, file: &Path) -> Res<bool> {
+        release_empty_project_asset(base.to_string_lossy().into_owned(), "시험 작품".into(), file.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn removes_only_empty_file_and_repeated_release_is_safe() {
+        let (base, project) = fixture();
+        let file = project.join("서아_로컬_001.png");
+        fs::write(&file, b"").unwrap();
+        assert!(release(base.path(), &file).unwrap());
+        assert!(!file.exists());
+        assert!(!release(base.path(), &file).unwrap());
+    }
+
+    #[test]
+    fn preserves_a_result_written_to_the_reservation() {
+        let (base, project) = fixture();
+        let file = project.join("서아_로컬_001.png");
+        fs::write(&file, "완성 결과".as_bytes()).unwrap();
+        assert!(!release(base.path(), &file).unwrap());
+        assert_eq!(fs::read(&file).unwrap(), "완성 결과".as_bytes());
+    }
+
+    #[test]
+    fn rejects_outside_file_even_when_empty() {
+        let (base, _) = fixture();
+        let file = base.path().join("다른 작품.png");
+        fs::write(&file, b"").unwrap();
+        assert!(release(base.path(), &file).is_err());
+        assert!(file.exists());
+    }
+
+    #[test]
+    fn rejects_parent_traversal_after_resolving_the_path() {
+        let (base, project) = fixture();
+        let file = base.path().join("다른 작품.png");
+        fs::write(&file, b"").unwrap();
+        assert!(release(base.path(), &project.join("..").join("다른 작품.png")).is_err());
+        assert!(file.exists());
+    }
+
+    #[test]
+    fn preserves_directories_and_unsupported_extensions() {
+        let (base, project) = fixture();
+        let directory = project.join("폴더.png");
+        fs::create_dir(&directory).unwrap();
+        assert!(!release(base.path(), &directory).unwrap());
+        assert!(directory.is_dir());
+        let file = project.join("설치.exe");
+        fs::write(&file, b"").unwrap();
+        assert!(release(base.path(), &file).is_err());
+        assert!(file.exists());
+    }
 }
 
 #[cfg(test)]

@@ -900,6 +900,8 @@ export interface LocalRunOptions {
    * 그림 9·영상 3·소리 3, 모두 합쳐 12개까지. 소리만 줄 수는 없습니다.
    */
   references?: { kind: "image" | "video" | "audio"; path: string }[];
+  /** H3 영상 레퍼런스가 있을 때 명시적으로 선택합니다. 원본 파일은 바꾸지 않습니다. */
+  reference_video_range?: "first5s" | "full";
   /** 음악 가사. 비우면 연주곡(`[inst]`). */
   lyrics?: string;
   /** 여러 개를 겹쳐 먹입니다. */
@@ -912,7 +914,7 @@ export interface LocalRunOptions {
    *
    * `weight` 는 얼마나 꽉 따를까(0~1.5). 1 이면 그대로, 낮추면 모델이 숨 쉴 틈이 생깁니다.
    */
-  control?: { kind: "pose"; frames: string[]; weight?: number };
+  control?: { kind: "pose"; frames: string[]; fps?: number; weight?: number };
   /**
    * **«여기는 움직인다» 마스크** — 흰 구역만 움직이고 검은 구역은 첫 프레임 그대로 붙박입니다
    * (`lib/motionMask.ts` 가 굽고, 파일 이름은 «원본_움직임_NNN»).
@@ -952,7 +954,7 @@ export interface LocalRunOptions {
   precision?: LocalPrecision;
 }
 
-/** bf16 원본 · int8(품질 손실 거의 없음) · int4 nf4(눈에 띄지만 도는 것이 낫다). */
+/** 정밀도는 메모리·속도·품질을 함께 비교해 고릅니다. 낮출수록 빠르다고 보장하지 않습니다. */
 export type LocalPrecision = "auto" | "bf16" | "int8" | "int4";
 
 export const PRECISION_LABEL: Record<LocalPrecision, string> = {
@@ -963,20 +965,62 @@ export const PRECISION_LABEL: Record<LocalPrecision, string> = {
 };
 
 const PRECISION_KEY = "frameforge.localPrecision.v1";
+const ENGINE_PRECISION_KEY = "frameforge.enginePrecision.v1";
+const PRECISION_SECTION = "localPrecision";
+interface PrecisionPreferences { default: LocalPrecision; engines: Partial<Record<LocalEngineId, LocalPrecision>> }
+const precisionListeners = new Set<() => void>();
+const validPrecision = (value: unknown): value is LocalPrecision => value === "auto" || value === "bf16" || value === "int8" || value === "int4";
+function readPrecisionPreferences(): PrecisionPreferences | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const saved = window.localStorage.getItem(PRECISION_KEY);
+    const raw = window.localStorage.getItem(ENGINE_PRECISION_KEY);
+    if (!saved && !raw) return null;
+    const engines: PrecisionPreferences["engines"] = {};
+    const parsed = raw ? JSON.parse(raw) : {};
+    for (const id of LOCAL_ENGINE_IDS) if (validPrecision(parsed?.[id])) engines[id] = parsed[id];
+    return { default: validPrecision(saved) ? saved : "auto", engines };
+  } catch { return null; }
+}
+function writePrecisionPreferences(value: PrecisionPreferences): void {
+  if (!value || !validPrecision(value.default)) throw new Error("정밀도 설정을 읽지 못했습니다.");
+  const engines: PrecisionPreferences["engines"] = {};
+  for (const id of LOCAL_ENGINE_IDS) if (validPrecision(value.engines?.[id])) engines[id] = value.engines[id];
+  window.localStorage.setItem(PRECISION_KEY, value.default);
+  window.localStorage.setItem(ENGINE_PRECISION_KEY, JSON.stringify(engines));
+  precisionListeners.forEach(listener => listener());
+}
+registerMirrorSection<PrecisionPreferences>(PRECISION_SECTION, { read: readPrecisionPreferences, write: writePrecisionPreferences });
 
 /** 사람이 못 박아 둔 정밀도. 설정에 붙고, 없으면 «자동» 입니다. */
-export function loadPrecision(): LocalPrecision {
-  if (typeof window === "undefined") return "auto";
-  const saved = window.localStorage.getItem(PRECISION_KEY);
-  return saved === "bf16" || saved === "int8" || saved === "int4" ? saved : "auto";
+export function loadPrecision(engine?: LocalEngineId): LocalPrecision {
+  const saved = readPrecisionPreferences();
+  return (engine && saved?.engines[engine]) || saved?.default || "auto";
 }
 
-export function savePrecision(value: LocalPrecision): void {
-  try {
-    window.localStorage.setItem(PRECISION_KEY, value);
-  } catch {
-    /* 저장 공간이 없으면 이번 판만 못 기억합니다. */
+export function savePrecision(value: LocalPrecision | "inherit", engine?: LocalEngineId): Promise<void> {
+  if (value !== "inherit" && !validPrecision(value)) throw new Error("지원하지 않는 정밀도입니다.");
+  const saved = readPrecisionPreferences() ?? { default: "auto", engines: {} };
+  const next = { ...saved, engines: { ...saved.engines } };
+  if (engine) {
+    if (!LOCAL_ENGINE_IDS.includes(engine)) throw new Error("엔진을 찾지 못했습니다.");
+    if (value !== "auto" && value !== "inherit" && !(LOCAL_ENGINE_CATALOG[engine].precisionModes ?? PRECISION_LADDER).includes(value))
+      throw new Error("이 엔진이 지원하지 않는 정밀도입니다.");
+    if (value === "inherit") delete next.engines[engine];
+    else next.engines[engine] = value;
+  } else {
+    if (value === "inherit") throw new Error("공통 설정에는 상속을 지정할 수 없습니다.");
+    next.default = value;
   }
+  writePrecisionPreferences(next);
+  return queueMirrorWriteAndConfirm(PRECISION_SECTION, next);
+}
+export function usePrecisionSetting(engine?: LocalEngineId): LocalPrecision | "inherit" {
+  return useSyncExternalStore(
+    listener => { precisionListeners.add(listener); return () => { precisionListeners.delete(listener); }; },
+    () => engine ? readPrecisionPreferences()?.engines[engine] ?? "inherit" : loadPrecision(),
+    () => engine ? "inherit" : "auto",
+  );
 }
 
 /** 기본은 생성마다 워커를 내려 RAM·VRAM이 다음 작업까지 남지 않게 합니다. */
@@ -1153,6 +1197,8 @@ export async function runLocal(
       // 화면·MCP·BGM 모두 이 설정 한 곳을 따릅니다. 호출자가 별도 값으로 우회하지 않습니다.
       opts: {
         ...options,
+        // 개별 생성이 명시한 값은 유지하고, 생략한 화면·조종기 호출은 모델별 설정을 읽습니다.
+        precision: options.precision ?? loadPrecision(engine),
         memory_policy: memoryPolicy.mode,
         memory_ram_percent: memoryPolicy.ramPercent,
         memory_vram_percent: memoryPolicy.vramPercent,

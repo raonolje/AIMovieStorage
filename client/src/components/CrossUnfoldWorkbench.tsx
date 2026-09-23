@@ -2,15 +2,23 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Grid2x2, Minus, Plus, RefreshCcw, Save } from "lucide-react";
 import { toast } from "sonner";
 import type { SpaceKind } from "@/lib/blueprint";
-import type { CompositionCubeFace } from "@/lib/composition";
 import {
   DEFAULT_CROSS_LINES,
   backgroundColorOf,
+  analyzeCrossFaces,
+  assessCrossFaces,
   crossCells,
-  cutCrossCell,
+  cutCrossFaces,
+  measureCrossFaces,
   detectCrossLines,
   type CrossLines,
 } from "@/lib/crossUnfold";
+import { crossUnfoldWarning } from "@/lib/crossUnfoldWarnings";
+import type { FaceSetSize } from "@/lib/projectTypes";
+import { useT } from "@/lib/i18n";
+import { useUndoStack } from "@/lib/useUndoStack";
+import { isTypingTarget } from "@/lib/isTypingTarget";
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { FACE_KEYS, faceLabel } from "@/lib/faceSets";
 import { loadImageForCanvas } from "@/lib/mediaLibrary";
 import type {
@@ -35,11 +43,14 @@ const LOUPE_SPAN = 48;
 export default function CrossUnfoldWorkbench({
   imageSrc,
   spaceKind,
+  targetSize,
   progress,
   onSaveFaces,
 }: {
   imageSrc: string;
   spaceKind?: SpaceKind | null;
+  /** 생성할 때 사용한 방 크기. 현재 방이 바뀌었더라도 원본의 치수로 검증합니다. */
+  targetSize?: FaceSetSize | null;
   /** 저장 진행 문구. 받는 쪽(`SheetPanelCropper`)이 채웁니다. */
   progress?: string | null;
   onSaveFaces?: (
@@ -47,8 +58,11 @@ export default function CrossUnfoldWorkbench({
     plan: PanoramaFacePlan,
   ) => Promise<void> | void;
 }) {
+  const t = useT();
   const [source, setSource] = useState<HTMLImageElement | null>(null);
-  const [lines, setLines] = useState<CrossLines>(DEFAULT_CROSS_LINES);
+  const history = useUndoStack<CrossLines>(DEFAULT_CROSS_LINES);
+  const lines = history.value;
+  const setLines = history.set;
   const [detected, setDetected] = useState<boolean | null>(null);
   const [flip, setFlip] = useState(true);
   /** 전개도의 빈칸 색. 잘라낸 칸에서 회색 테두리를 벗길 때 견줍니다. */
@@ -81,7 +95,7 @@ export default function CrossUnfoldWorkbench({
         setSource(image);
         setBackground(backgroundColorOf(image));
         const found = detectCrossLines(image);
-        setLines(found ?? DEFAULT_CROSS_LINES);
+        history.reset(found ?? DEFAULT_CROSS_LINES);
         setDetected(Boolean(found));
       })
       .catch(() => {
@@ -93,6 +107,27 @@ export default function CrossUnfoldWorkbench({
   }, [imageSrc]);
 
   const cells = useMemo(() => crossCells(lines), [lines]);
+  const [inspection, setInspection] = useState<ReturnType<typeof analyzeCrossFaces> | null>(null);
+  useEffect(() => {
+    setInspection(null);
+    if (!source) return;
+    // 큰 전개도에서 선을 끌 때마다 여섯 캔버스를 만들지 않고 손이 잠시 멎었을 때 잽니다.
+    const timer = window.setTimeout(() => setInspection(analyzeCrossFaces(source, lines, { flip, background, targetSize })), 180);
+    return () => window.clearTimeout(timer);
+  }, [source, lines, flip, background, targetSize]);
+  useEffect(() => {
+    const onUndo = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || isTypingTarget(event.target)) return;
+      if (event.key.toLowerCase() !== "z" && event.key.toLowerCase() !== "y") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key.toLowerCase() === "y" || event.shiftKey) history.redo();
+      else history.undo();
+    };
+    // 바깥 자르기 창도 Ctrl+Z를 쓰므로 전개도 탭에서 먼저 받습니다.
+    window.addEventListener("keydown", onUndo, true);
+    return () => window.removeEventListener("keydown", onUndo, true);
+  }, [history.undo, history.redo]);
 
   /*
     선 하나를 끕니다. 이웃 선을 넘지 못하게 막습니다 — 뒤집힌 칸은 너비가 음수라
@@ -104,6 +139,7 @@ export default function CrossUnfoldWorkbench({
       const frame = frameRef.current;
       if (!frame) return;
       event.preventDefault();
+      history.mark();
       setActiveLine({ axis, index });
       const move = (pointer: PointerEvent) => {
         const rect = frame.getBoundingClientRect();
@@ -115,7 +151,7 @@ export default function CrossUnfoldWorkbench({
           x: Math.min(1, Math.max(0, (pointer.clientX - rect.left) / rect.width)),
           y: Math.min(1, Math.max(0, (pointer.clientY - rect.top) / rect.height)),
         });
-        setLines((current) => {
+        history.replace((current) => {
           const list = [...current[axis]] as number[];
           const gap = 0.01;
           const low = index > 0 ? list[index - 1] + gap : 0;
@@ -225,21 +261,23 @@ export default function CrossUnfoldWorkbench({
    * 커팅(`useAutoUnfold`)도 같은 함수를 써야 «테두리 없어야 해» 같은 규칙이 한 벌로
    * 남습니다(공통 규칙 1).
    */
-  const cutCell = (face: CompositionCubeFace) => {
-    if (!source) return null;
-    const cell = cells.find((item) => item.face === face);
-    if (!cell) return null;
-    return cutCrossCell(source, cell, { flip, background });
-  };
-
   const save = async () => {
     if (!source || !onSaveFaces) return;
     setSaving(true);
     try {
+      const cut = cutCrossFaces(source, lines, { flip, background, targetSize });
+      const checked = assessCrossFaces(measureCrossFaces(cut, background), targetSize);
+      setInspection(checked);
+      if (!checked.safe && !(await confirmDialog({
+        title: t("면 비율과 경계를 확인한 뒤 저장해 주세요"),
+        description: `${checked.issues.map((issue) => crossUnfoldWarning(issue, spaceKind)).join("\n")}\n${t("원본은 그대로 있습니다. 가위 → 전개도에서 선을 맞추거나, 빠진 면을 포함해 다시 생성하세요.")}`,
+        confirmLabel: t("확인하고 저장"),
+        cancelLabel: t("선 다시 맞추기"),
+      }))) return;
       const files: PanoramaFaceFile[] = [];
       let biggest = 0;
       for (const face of FACE_KEYS) {
-        const canvas = cutCell(face);
+        const canvas = cut.find((item) => item.face === face)?.canvas;
         if (!canvas) continue;
         biggest = Math.max(biggest, canvas.width, canvas.height);
         const stem = faceLabel(face, spaceKind);
@@ -272,6 +310,8 @@ export default function CrossUnfoldWorkbench({
         enlarged: false,
         capped: false,
       });
+    } catch (error) {
+      toast.error(t("여섯 면을 저장하지 못했습니다"), { description: String(error) });
     } finally {
       setSaving(false);
     }
@@ -510,6 +550,14 @@ export default function CrossUnfoldWorkbench({
           </span>
         </label>
 
+        {inspection && inspection.issues.length > 0 && (
+          <div role="status" className="space-y-1.5 rounded-md border border-amber-400/30 bg-amber-400/10 p-2 text-[11px] leading-relaxed text-amber-200">
+            <b>{t("면 비율과 경계를 확인한 뒤 저장해 주세요")}</b>
+            {inspection.issues.map((issue, index) => <p key={`${issue.face}-${issue.kind}-${index}`}>{crossUnfoldWarning(issue, spaceKind)}</p>)}
+            <p>{t("회색 벽도 바탕으로 감지될 수 있습니다. 추정 수치를 보고 선과 원본을 함께 확인하세요.")}</p>
+          </div>
+        )}
+        {targetSize && <p className="text-[11px] text-muted-foreground">{t("생성 기준 방: {width} × {depth} × {height} m", { width: targetSize.width, depth: targetSize.depth, height: targetSize.height })}</p>}
         {ratio && (
           <div
             className="rounded-md p-2 text-[11px] leading-relaxed"

@@ -8,8 +8,6 @@ import type { ProjectContextSummary } from "@/lib/projectContext";
 /**
  * **프롬프트 말로 바꾸기** — 평소 말투로 적은 글을 생성기가 알아듣는 말로.
  *
- *
- *
  * # 왜 «안내문» 이 아니라 단추인가
  *
  * 「감정 이름만 적지 마세요」·「명령형을 쓰지 마세요」 를 문서에 적어 두는 것은 규칙을

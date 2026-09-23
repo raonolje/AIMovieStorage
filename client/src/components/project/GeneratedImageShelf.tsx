@@ -53,6 +53,7 @@ export default function GeneratedImageShelf({
   assetType,
   cropKind = "character",
   spaceKind,
+  faceSetSize,
 }: {
   images: GeneratedImageAsset[];
   /**
@@ -79,6 +80,7 @@ export default function GeneratedImageShelf({
   cropKind?: BlueprintKind;
   /** 배경의 실내·실외 — 파노라마 여섯 면의 위 면 이름(천장/하늘)이 갈립니다. 배경만 줍니다. */
   spaceKind?: SpaceKind | null;
+  faceSetSize?: import("@/lib/projectTypes").FaceSetSize | null;
 }) {
   const { projectName, imageMarks, setImageMarks } = useProjectMedia();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -569,6 +571,7 @@ export default function GeneratedImageShelf({
             cropTarget.filePath ? imageMarks[cropTarget.filePath] : undefined
           }
           spaceKind={spaceKind}
+          faceSetSize={cropTarget.faceSetSize ?? faceSetSize}
           onSaved={(files) => {
             files.forEach((file) => {
               if (file.marks) setImageMarks(file.path, file.marks);

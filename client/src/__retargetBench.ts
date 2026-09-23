@@ -1,8 +1,6 @@
 /**
  * **분석 결과를 구도잡기에 실제로 먹여 보는** 시험대(브라우저에서 돕니다).
  *
- *
- *
  * 앱이 «모션 넣기» 를 누를 때 지나는 길을 그대로 지납니다 —
  * 결과 JSON → `assembleCapture` → `repairPerson` → `createRetargetRig`(인형 GLB) → `retargetPerson`
  * → `placeCapturedMotion` → `applyCapturedMotionIn`.

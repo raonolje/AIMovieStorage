@@ -17,13 +17,16 @@ vi.mock("@/lib/localOutput", () => ({ runLocalToProject: state.run }));
 vi.mock("@/lib/mediaLibrary", () => ({
   assetSrc: (path: string) => `asset:${path}`,
   loadImageForCanvas: vi.fn(), safeFileName: (value: string) => value,
+  isVideoFile: (path?: string | null) => /\.(mp4|webm|mov|mkv|avi|m4v)(?:[?#].*)?$/i.test(path ?? ""),
   registerMirrorSection: vi.fn(), queueMirrorWriteAndConfirm: async () => {}, whenAppSettingsReady: async () => {},
 }));
 vi.mock("@/lib/taskQueue", () => ({
   registerTaskRunner: vi.fn(), enqueueTaskOperation: state.enqueue,
   isStopping: () => false, setTaskResult: vi.fn(),
   listTasks: () => state.tasks, getTask: (id: string) => state.tasks.find(task => task.id === id),
+  listPersistedTasks: async () => state.tasks, getPersistedTask: async (id: string) => state.tasks.find(task => task.id === id),
   stopTask: vi.fn(), flushTaskJournal: async () => {},
+  whenTaskJournalReady: async () => {}, getTaskByOperationId: () => null,
 }));
 vi.mock("@/lib/localProjectStore", () => ({
   loadProjects: async () => [...state.projects.values()],
@@ -104,15 +107,37 @@ async function compositionFixture() {
 }
 
 describe("MCP 도구 등록부와 실제 호출의 계약", () => {
+  it("큰 전체 응답은 명시적으로 거절하고 기본 요약·수정 결과는 같은 ID와 리비전을 돌려준다", async () => {
+    current().scenes[0].cuts[0].guideImage = `data:image/png;base64,${"A".repeat(5 * 1024 * 1024)}`;
+    const summary = await call("project_get", { projectId: "p" });
+    expect(summary.isError).not.toBe(true);
+    expect(summary.structuredContent).toMatchObject({ projectId: "p", projection: { detail: "summary", truncated: true }, draft: { scenes: [{ id: "s", cuts: [{ id: "c", guideImage: "" }] }] } });
+    expect(JSON.stringify(summary).length).toBeLessThan(50_000);
+    const full = await call("project_get", { projectId: "p", detail: "full" });
+    expectFailure(full, "response_too_large");
+    expect(full.structuredContent?.details).toMatchObject({ projectId: "p", revision: summary.structuredContent!.revision, retryDetail: "summary" });
+    const update = await call("project_update", { projectId: "p", expectedRevision: summary.structuredContent!.revision, commands: [{ type: "project.update", fields: { title: "새 제목" } }] });
+    expect(update.isError).not.toBe(true);
+    expect(update.structuredContent).toMatchObject({ persisted: true, projection: { detail: "summary" }, draft: { title: "새 제목" } });
+    expect(current().scenes[0].cuts[0].guideImage.length).toBeGreaterThan(5 * 1024 * 1024);
+  });
+
   it("공개한 JSON 규격은 실제 프로젝트·구도·생성 검증 규격이며 함수는 전송하지 않는다", async () => {
     const { tools } = await listedTools();
     const project = await import("./projectControl");
     const composition = await import("./compositionControl");
     const media = await import("./controlMedia");
+    const mocap = await import("./controlMocap");
+    const applyMocap = await import("./compositionMocapControl");
+    const exportVideo = await import("./compositionVideoExport");
     for (const [name, schema] of [
       ["project_create", project.projectCreateSchema], ["project_update", project.projectUpdateSchema],
       ["composition_apply", composition.compositionApplyRequestSchema], ["composition_commit", composition.compositionSessionRequestSchema],
       ["media_generate", media.generateMediaSchema], ["media_upscale", media.upscaleMediaSchema],
+      ["mocap_analyze", mocap.mocapAnalyzeSchema], ["mocap_track_hands", mocap.mocapHandsSchema],
+      ["mocap_result", mocap.mocapResultSchema],
+      ["composition_apply_mocap", applyMocap.compositionApplyMocapSchema],
+      ["composition_export_video", exportVideo.compositionExportVideoSchema],
     ] as const) {
       expect(tools.find(tool => tool.name === name)?.inputSchema).toEqual(z.toJSONSchema(schema));
     }
@@ -132,6 +157,7 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
       ["composition_undo", { sessionId: f.sessionId }],
       ["composition_redo", { sessionId: f.sessionId }],
       ["composition_commit", { sessionId: f.sessionId }],
+      ["composition_export_video", { projectId: "p", sessionId: f.sessionId, operationId: "op" }],
       ["composition_apply", { sessionId: f.sessionId, expectedRevision: 0, commands: [{ op: "camera.set", fovDegrees: 900 }] }],
     ] as const) expectFailure(await call(name, args), "invalid_request");
     expect(current().title).toBe("시험 작품");
@@ -190,6 +216,9 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
     expectFailure(await call("media_generate", { ...generate, options: { ...generate.options, image: "C:/outside.png" } }), "invalid_request");
     expectFailure(await call("media_upscale", { projectId: "p", assetId: "image", engine: "seedvr2", operationId: "up", targetSize: 2048, path: "C:/outside.png" }), "invalid_request");
     expectFailure(await call("asset_preview", { projectId: "p", assetId: "image", path: "C:/outside.png" }), "invalid_request");
+    expectFailure(await call("mocap_analyze", { projectId: "p", assetId: "video", operationId: "body", options: { engine: "mediapipe" }, path: "C:/outside.mp4" }), "invalid_request");
+    expectFailure(await call("mocap_track_hands", { projectId: "p", sourceId: "body", operationId: "hand", path: "C:/outside.mp4" }), "invalid_request");
+    expectFailure(await call("mocap_result", { projectId: "p", sourceId: "body", limit: 31 }), "invalid_request");
     expect(state.enqueue).not.toHaveBeenCalled();
     expect(f.apply).not.toHaveBeenCalled();
   });

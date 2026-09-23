@@ -1,5 +1,8 @@
 import { rememberMagnificSend, type MagnificOwnerHint } from "@/lib/magnificBridge";
 import { composeMagnificAuto } from "@/lib/mediaLibrary";
+import { loadMagnificModels } from "@/lib/magnificModels";
+import { assertMagnificVideoInputs, findMagnificVideoModel, mediaTypeOfPath } from "@/lib/magnificVideoInputs";
+import { t } from "@/lib/i18n";
 
 /**
  * 마그니픽 캔버스에 «레퍼런스 그림 → 이미지 생성기(프롬프트 + @칩)» 를 «구성» 한 번으로 만듭니다.
@@ -20,8 +23,6 @@ export const MAGNIFIC_IMAGE_MODEL = "imagen-nano-banana-2";
 /**
  * 영상 생성기의 기본 모델.
  *
- *
- *
  * 레퍼런스 영상을 받아 그 움직임을 따르는 일이라 «영상→영상» 을 잘하는 쪽이 필요합니다.
  * 마그니픽에서 바꿔도 됩니다 — 여기 값은 노드를 놓을 때의 첫 자리일 뿐입니다.
  */
@@ -35,6 +36,8 @@ export async function composeInMagnific(input: {
   aspectRatio?: string;
   count?: number;
   model?: string;
+  /** 프롬프트에서 고른 모델. 데스크톱 mode 대응이 없으면 다른 기본 모델로 바꾸지 않습니다. */
+  requestedVideoModel?: string;
   /** 그림이 아니라 **영상** 생성기를 놓습니다. */
   kind?: "image" | "video";
   /** 영상일 때 러닝타임(초). 구도잡기 타임라인이 정한 값을 그대로 넘깁니다. */
@@ -44,8 +47,20 @@ export async function composeInMagnific(input: {
   const say = input.onStatus ?? (() => undefined);
   const prompt = input.prompt.trim();
   if (!prompt) throw new Error("보낼 프롬프트가 없습니다.");
-  if (input.owner) rememberMagnificSend(input.owner, prompt);
   const paths = [...new Set(input.referencePaths.filter((path) => path && path.trim()))];
+  if (input.kind === "video" && input.requestedVideoModel && !input.model) {
+    throw new Error(t("선택한 영상 모델의 Magnific 데스크톱 연결값을 확인하지 못했습니다. 기본 모델로 바꾸지 않았습니다. Magnific에서 모델을 직접 고르거나 MCP 생성 목록을 사용하세요."));
+  }
+  if (input.kind === "video" && paths.some(path => mediaTypeOfPath(path) === "video")) {
+    const model = findMagnificVideoModel(await loadMagnificModels("video"), input.model ?? MAGNIFIC_VIDEO_MODEL);
+    assertMagnificVideoInputs(model, {
+      references: paths.map(path => ({ type: mediaTypeOfPath(path), url: path })),
+      // 데스크톱 구성 경로가 쓰는 고정값도 같은 제약으로 확인합니다.
+      resolution: "1080p",
+    });
+    say(t("영상 입력 지원을 확인했습니다. Magnific에서 영상 노드가 레퍼런스로 연결됐는지 확인한 뒤 생성하세요."));
+  }
+  if (input.owner) rememberMagnificSend(input.owner, prompt);
   // 그림이 없어도 됩니다 — 프롬프트만 든 생성기를 놓습니다(에셋·아직 그림 없는 인물).
   const what = input.kind === "video" ? "영상" : "이미지";
   say(

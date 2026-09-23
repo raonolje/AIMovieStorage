@@ -60,6 +60,7 @@ import type { RequestTemplateId } from "@/components/LlmRequestButton";
 import type { usePromptCard } from "@/components/project/usePromptCard";
 import { fieldStyle } from "@/components/project/fieldStyle";
 import NaturalPromptButton from "@/components/NaturalPromptButton";
+import { autoEquirectOf } from "@/components/project/useAutoUnfold";
 
 /**
  * 프롬프트 카드의 공통 몸통.
@@ -889,6 +890,7 @@ export default function PromptCardBody<
           }
           // 파노라마 여섯 면의 위 면 이름 — 실내 «천장», 아니면 «하늘».
           spaceKind={spaceKind}
+          faceSetSize={kind === "background" ? autoEquirectOf(entity.blueprint, spaceKind, entity.panoramaSpace, entity.exteriorSpace, null, `${entity.promptEn ?? ""}\n${entity.promptKo ?? ""}`)?.stamp : undefined}
           onSaved={(files) => {
             files.forEach((file) => {
               if (file.marks) setImageMarks(file.path, file.marks);
@@ -1130,7 +1132,6 @@ const FIRST_REFERENCE_RATIO: Record<BlueprintKind, string> = {
  *
  * 미드저니·스테이블 디퓨전을 골라 쓴 글을 그 칸에 넣으면 `--ar 2:3 --no …` 나
  * 「Negative prompt:」 줄이 프롬프트 본문에 글자 그대로 박힙니다.
- *
  *
  * 그래서 «구성» 은 **고른 모델을 그대로** 마그니픽 생성기에 얹습니다(`magnificModelOf`).
  * 미드저니만 디스코드로 돌아 우리가 놓을 수가 없어, 그때만 단추 대신 안내가 섭니다.

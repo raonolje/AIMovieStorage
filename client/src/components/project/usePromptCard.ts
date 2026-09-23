@@ -190,8 +190,7 @@ export function usePromptCard<
     고 느꼈습니다 — 실은 폴더에 멀쩡히 있는데 화면이 못 본 것이었습니다.
 
     카드를 열 때 한 번만 읽습니다. 계속 읽으면 방금 지운 것이 되살아납니다.
-    이미 목록에 있는 자리는 건드리지 않고, **없는 것만 뒤에 붙입니다.**
-  */
+    이미 목록에 있는 자리는 건드리지 않고, **없는 것만 뒤에 붙입니다.*  */
   const scanned = useRef(false);
   useEffect(() => {
     if (scanned.current || !options.projectName.trim()) return;
@@ -218,8 +217,7 @@ export function usePromptCard<
           저장이 끝나기 전에 창을 닫으면 filePath 를 채우는 두 번째 patch 가
           버려집니다. 그 상태로 다시 열면 폴더 파일이 «목록에 없는 것» 으로
           보여 새로 붙었습니다. 이름이 같고 아직 filePath 가 없는 것이 있으면
-          새로 붙이지 않고 **그 자리에 경로를 채웁니다.**
-        */
+          새로 붙이지 않고 **그 자리에 경로를 채웁니다.*        */
         const orphans = new Map(
           (current.references || [])
             .filter((image) => !image.filePath && image.name)

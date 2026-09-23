@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { attachHandsAtTime, captureHandFrames, captureVideoHands, type HandDetection } from "./handCapture";
+import { attachHandsAtTime, captureHandFrames, captureVideoHands, detectHandsWithBodyRegions, handRegionsAtTime, mapHandRegionDetection, type HandDetection } from "./handCapture";
 import { LM, type CapturePoint, type CaptureResult, type CaptureSample } from "./motionCapture";
 
 const p = (x: number, y = 0.5): CapturePoint => ({ x, y, z: 0, v: 0.9 });
@@ -24,6 +24,92 @@ function hands(...xs: number[]): HandDetection {
 }
 
 describe("몸 분석에 손 21점을 붙이기", () => {
+  it("원본과 거울 좌표에서 같은 손 구역을 자르며 화면 경계와 낮은 신뢰도를 지킨다", () => {
+    const raw = body(sample(0.01, 0.99)); raw.width = 3840; raw.height = 2160;
+    const normal = handRegionsAtTime(raw, 0, false), mirrored = handRegionsAtTime(raw, 0, true);
+    expect(normal).toHaveLength(2);
+    normal.forEach((region, index) => {
+      expect(region.x).toBeGreaterThanOrEqual(0); expect(region.x + region.size).toBeLessThanOrEqual(raw.width);
+      expect(region.y).toBeGreaterThanOrEqual(0); expect(region.y + region.size).toBeLessThanOrEqual(raw.height);
+      expect(region.x + mirrored[index].x + region.size).toBeCloseTo(raw.width);
+      expect(region.size).toBe(mirrored[index].size);
+    });
+    raw.persons[0].samples[0].image[LM.leftElbow].v = 0.3;
+    raw.persons[0].samples[0].image[LM.rightWrist].x = NaN;
+    expect(handRegionsAtTime(raw, 0, false)).toEqual([]);
+  });
+
+  it("손 ROI의 image x/y/z만 원본 비율로 돌리고 world 미터 단위는 보존한다", () => {
+    const detection = hands(0.25);
+    const region = { target: "0:0:left", x: 100, y: 200, size: 400, width: 2000, height: 1000 };
+    const mapped = mapHandRegionDetection(detection, region);
+    expect(mapped.landmarks[0][0]).toMatchObject({ x: 0.1, y: 0.4 });
+    expect(mapped.landmarks[0][0].z).toBeCloseTo(0);
+    expect(mapped.landmarks[0][20].z).toBeCloseTo(-0.004);
+    expect(mapped.worldLandmarks).toBe(detection.worldLandmarks);
+    detection.landmarks[0][0].x = -0.1;
+    const outside = mapHandRegionDetection(detection, region);
+    const raw = body(sample(outside.landmarks[0][0].x, 0.8));
+    raw.persons[0].samples[0].image[LM.leftWrist].y = outside.landmarks[0][0].y;
+    expect(attachHandsAtTime(raw, 0, outside, false)).toBe(raw);
+  });
+
+  it.each([false, true])("전체 화면에서 놓친 작은 손은 몸 ROI로 보완한다 (반전=%s)", async mirrored => {
+    const raw = body(sample(0.2, 0.8)); raw.width = 3840; raw.height = 2160; raw.mirrored = mirrored;
+    const frame = { width: 3840, height: 2160 } as HTMLCanvasElement;
+    const regions = handRegionsAtTime(raw, 0, mirrored);
+    let rect: number[] = [], cropIndex = 0;
+    const drawImage = vi.fn((_frame, ...args: number[]) => { rect = args; });
+    const crop = { width: 384, height: 384, getContext: () => ({ drawImage }) } as unknown as HTMLCanvasElement;
+    const detector = { close: vi.fn(), detect: vi.fn((canvas: HTMLCanvasElement) => {
+      if (canvas === frame) return hands();
+      const sourceX = mirrored ? 1 - [0.2, 0.8][cropIndex] : [0.2, 0.8][cropIndex];
+      const detection = hands((sourceX * frame.width - rect[0]) / rect[2]);
+      for (const point of detection.landmarks[0]) point.y = (0.5 * frame.height - rect[1]) / rect[3];
+      expect(rect.slice(0, 4)).toEqual([regions[cropIndex].x, regions[cropIndex].y, regions[cropIndex].size, regions[cropIndex].size]);
+      cropIndex++; return detection;
+    }) };
+    const result = await captureHandFrames(raw, async (time, bodyFrame) => detectHandsWithBodyRegions(detector, frame, crop, bodyFrame, time, mirrored));
+    expect(detector.detect).toHaveBeenCalledTimes(3);
+    expect(result.persons[0].samples[0].hands?.left?.image[0].x).toBeCloseTo(0.2);
+    expect(result.persons[0].samples[0].hands?.right?.image[0].x).toBeCloseTo(0.8);
+    expect(result.handTracking).toMatchObject({ frames: 1, roiCount: 2, detectorCalls: 3, detectedHands: 2, validHands: 2, appliedHands: 2, roiAppliedHands: 2, unchangedFrames: 0 });
+    expect(raw.persons[0].samples[0].hands).toBeUndefined();
+  });
+
+  it("ROI가 옆 사람의 손이나 같은 손을 다시 검출해도 임자를 바꾸거나 중복 적용하지 않는다", async () => {
+    const raw = body(sample(0.2, 0.8), sample(0.45, 0.95));
+    const detection = hands(0.2, 0.2, 0.2, 0.5);
+    detection.roiTargets = ["0:0:left", "0:0:right", "1:0:left", "1:0:right"];
+    const result = await captureHandFrames(raw, async () => detection);
+    expect(result.handTracking?.appliedHands).toBe(1);
+    expect(result.persons[0].samples[0].hands?.right).toBeUndefined();
+    expect(result.persons[1].samples[0].hands).toBeUndefined();
+  });
+
+  it("전체 화면에서 이미 배정한 손에는 ROI 검출을 중복 실행하지 않는다", () => {
+    const raw = body(sample(0.2, 0.8)); raw.width = 1920; raw.height = 1080;
+    const frame = { width: 1920, height: 1080 } as HTMLCanvasElement;
+    const drawImage = vi.fn();
+    const crop = { width: 384, height: 384, getContext: () => ({ drawImage }) } as unknown as HTMLCanvasElement;
+    const detector = { close: vi.fn(), detect: vi.fn(canvas => canvas === frame ? hands(0.2) : hands()) };
+    const result = detectHandsWithBodyRegions(detector, frame, crop, raw, 0, false);
+    expect(result.roiCount).toBe(1); expect(detector.detect).toHaveBeenCalledTimes(2);
+    const region = handRegionsAtTime(raw, 0, false).find(region => region.target.endsWith(":right"))!;
+    expect(drawImage.mock.calls[0].slice(1, 5)).toEqual([region.x, region.y, region.size, region.size]);
+  });
+
+  it("추가 검출이 0이면 기존 손을 보존하고 적용 0·변화 없는 장수를 기록한다", async () => {
+    const raw = body(sample(0.2, 0.8));
+    const existing = { image: Array.from({ length: 21 }, () => p(0.2)), world: Array.from({ length: 21 }, () => p(0.01)) };
+    raw.persons[0].samples[0].hands = { left: existing };
+    const result = await captureHandFrames(raw, async () => hands());
+    expect(result.persons).toBe(raw.persons);
+    expect(result.persons[0].samples[0].hands?.left).toBe(existing);
+    expect(result.handTracking).toMatchObject({ detectedHands: 0, validHands: 0, appliedHands: 0, unchangedFrames: 1 });
+    expect(raw.handTracking).toBeUndefined();
+  });
+
   it("좌우 라벨이 뒤집혀도 여러 사람의 손목으로 정확히 나눈다", () => {
     const raw = body(sample(0.1, 0.3), sample(0.65, 0.85));
     const saved = JSON.stringify(raw);

@@ -104,6 +104,13 @@ def _pick_workflow(opts):
     return "t2va"
 
 
+def _place_resident_rotary_buffer(transformer, device):
+    # device_map은 체크포인트에 없는 RoPE inv_freq(persistent=False)를
+    # CPU에 남길 수 있습니다. 상주 transformer와 같은 장치로 옮기되
+    # float32 주파수의 정밀도와 양자화한 가중치는 바꾸지 않습니다.
+    transformer.rope.to(device=device)
+
+
 def load(root, opts):
     workflow = _pick_workflow(opts)
     # 정밀도를 **먼저** 셈합니다 — 이미 올라가 있어도 사람이 정밀도를 바꿨으면 다시 올려야
@@ -219,6 +226,7 @@ def load(root, opts):
         """
         if big:
             # 트랜스포머는 `device_map` 으로 이미 GPU 에 있습니다. 조건화기만 흘려 보냅니다.
+            _place_resident_rotary_buffer(pipe.transformer, torch.device("cuda"))
             apply_group_offloading(
                 pipe.text_encoder.model,
                 offload_type="leaf_level",
@@ -315,7 +323,7 @@ def _apply_loras(opts):
     _state["loras"] = signature
 
 
-def _references(opts):
+def _references(opts, generated_frames):
     """`opts.references = [{"kind": "image"|"video"|"audio", "path": …}, …]` → 레퍼런스 객체.
 
     **순서가 뜻입니다.** 모델이 프롬프트에 「<Picture 1>」 처럼 이름을 붙이고 공유 시계에
@@ -334,7 +342,9 @@ def _references(opts):
         "video": MiniMaxH3VideoReference,
         "audio": MiniMaxH3AudioReference,
     }
-    out = []
+    from engines._h3_reference import load_video_reference
+
+    out, video_metadata = [], []
     for item in opts.get("references") or []:
         path = (item.get("path") or "").strip()
         kind = item.get("kind") or "image"
@@ -342,8 +352,16 @@ def _references(opts):
             continue
         if not os.path.isfile(path):
             raise IOError("레퍼런스를 찾지 못했습니다: {}".format(path))
-        out.append(table[kind].from_file(path))
-    return out
+        if kind == "video":
+            reference, metadata = load_video_reference(
+                path, opts.get("reference_video_range"), table[kind], generated_frames, FPS
+            )
+            metadata["reference_index"] = len(out)
+            video_metadata.append(metadata)
+            out.append(reference)
+        else:
+            out.append(table[kind].from_file(path))
+    return out, video_metadata
 
 
 def generate(output, opts, report):
@@ -373,8 +391,14 @@ def generate(output, opts, report):
         kwargs["width"] = int(width) // 32 * 32
         kwargs["height"] = int(height) // 32 * 32
 
+    video_metadata = []
     if workflow == "ref2va":
-        kwargs["references"] = _references(opts)
+        kwargs["references"], video_metadata = _references(opts, frames)
+        for reference in video_metadata:
+            report(9, "영상 레퍼런스 {} · 입력 {:.2f}초 · H3 조건 {:.2f}초".format(
+                "앞 5초" if reference["range"] == "first5s" else "전체",
+                reference["decoded_seconds"], reference["conditioning_seconds"],
+            ))
     elif workflow == "fl2va":
         from diffusers.utils import load_image
 
@@ -407,6 +431,7 @@ def generate(output, opts, report):
         "seed": seed,
         "has_audio": True,
         "generate_seconds": round(time.time() - started, 2),
+        "reference_videos": video_metadata,
     }
     # 요청한 정밀도와 실제로 올라간 정밀도 — 한 곳에서 만듭니다.
     out.update(common.precision_fields(_state["plan"]))

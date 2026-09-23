@@ -5,8 +5,6 @@ import { hideTags, tagCharacterNames } from "@/lib/compositionLegend";
 /**
  * **이미 써 둔 프롬프트에서 `@태그` 만 다시 잇습니다.**
  *
- *
- *
  * # 왜 LLM 을 다시 부르지 않는가
  *
  * 프롬프트를 새로 받으면 네 칸이 통째로 바뀝니다 — 손으로 고쳐 둔 문장도 같이 날아갑니다.
@@ -34,8 +32,6 @@ export interface PromptLinkPerson {
   paths: string[];
   /**
    * 그림이 **아직 없을 때** 그 사람을 세우는 한 줄(생김새·성별·키·성격).
-   *
-   *
    */
   look?: string;
   /**
@@ -53,7 +49,6 @@ export interface PromptLinkInput {
   backgroundPath?: string;
   /**
    * 배경의 이름과 생김새 — **판이 아직 없어도** 자리를 잡아 둡니다.
-   *
    */
   background?: { name: string; look?: string };
   /** 구도 그림이 아직 없을 때 구도를 글로 대신하는 한 줄. */

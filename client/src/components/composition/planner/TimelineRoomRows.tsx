@@ -1,3 +1,4 @@
+import { useT } from "@/lib/i18n";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { gutterStyle } from "./timelineParts";
 import {
@@ -72,6 +73,7 @@ export function TimelineRoomRows({
   /** 키를 시각 순으로 — 부모의 것을 그대로 씁니다(같은 규칙이어야 줄끼리 어긋나지 않습니다). */
   sortByTime: <T extends { id: string; time: number }>(keys: readonly T[]) => T[];
 }) {
+  const t = useT();
   // 이름 칸 너비는 부모가 정하고(`gutter`), 붙이는 방식은 공용 스타일이 정합니다.
   void gutter;
   return (
@@ -100,7 +102,7 @@ export function TimelineRoomRows({
             className="flex items-center gap-1 pt-1 text-[8px] font-semibold"
             style={{ color: "oklch(0.50 0.01 265)" }}
           >
-            <span style={gutterStyle}>방 · 가릴 면 · 소품</span>
+            <span style={gutterStyle}>{t("방 · 가릴 면 · 소품")}</span>
             <span className="h-px flex-1" style={{ background: "oklch(1 0 0 / 8%)" }} />
           </div>
         )}

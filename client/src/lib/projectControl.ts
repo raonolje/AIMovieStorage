@@ -1,4 +1,5 @@
 import { diffControlValues } from "./controlChanges";
+import { controlDetailSchema, projectControlValue, type ControlDetail } from "./controlProjection";
 import { z } from "zod";
 import { loadProjects, listLocalProjects, getLocalProject, saveLocalProjectAndConfirm } from "@/lib/localProjectStore";
 import { readProject, writeProjectAndConfirm } from "@/lib/projectWrite";
@@ -25,9 +26,9 @@ export const projectCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("cut.add"), id: id.optional(), sceneId: id, fields: cutFields }).strict(),
   z.object({ type: z.literal("cut.update"), id, sceneId: id, fields: cutFields }).strict(),
 ]);
-export const projectReadSchema = z.object({ projectId: id }).strict();
+export const projectReadSchema = z.object({ projectId: id, detail: controlDetailSchema }).strict();
 export const projectUpdateSchema = projectReadSchema.extend({ expectedRevision: z.string().min(1).max(200), commands: z.array(projectCommandSchema).min(1).max(100) });
-export const projectCreateSchema = projectFields.extend({ title: name, operationId: z.string().min(1).max(300) });
+export const projectCreateSchema = projectFields.extend({ title: name, operationId: z.string().min(1).max(300), detail: controlDetailSchema });
 export const projectChangesSchema = projectReadSchema.extend({ sinceRevision: z.string().min(1).max(200) });
 export const projectReadJsonSchema = z.toJSONSchema(projectReadSchema);
 export const projectUpdateJsonSchema = z.toJSONSchema(projectUpdateSchema);
@@ -97,15 +98,18 @@ function requireDraft(projectId: string) {
   if (!draft) throw new ProjectControlError("project_not_found", "프로젝트를 찾지 못했습니다. 목록을 다시 읽어 주세요.");
   return draft;
 }
-function snapshot(projectId: string, state: Observation) { return { projectId, revision: state.revision, draft: clone(state.draft) }; }
+function snapshot(projectId: string, state: Observation, detail: ControlDetail = "full") {
+  const projected = projectControlValue(state.draft, detail);
+  return { projectId, revision: state.revision, draft: projected.value, projection: projected.projection };
+}
 export async function listProjectsControl() {
   await ensureReady();
   return listLocalProjects().map((item) => ({ ...item, title: readProject(item.id)?.title ?? item.title }));
 }
-export async function getProjectSnapshot(projectId: string) {
+export async function getProjectSnapshot(projectId: string, detail: ControlDetail = "full") {
   await ensureReady();
-  const request = parse(projectReadSchema, { projectId });
-  return snapshot(projectId, observe(projectId, requireDraft(request.projectId)));
+  const request = parse(projectReadSchema, { projectId, detail });
+  return snapshot(projectId, observe(projectId, requireDraft(request.projectId)), request.detail);
 }
 export async function getProjectChanges(input: unknown) {
   const request = parse(projectChangesSchema, input);
@@ -115,7 +119,10 @@ export async function getProjectChanges(input: unknown) {
   const start = state.history.findIndex((entry) => entry.from === request.sinceRevision);
   const entries = start < 0 ? [] : state.history.slice(start);
   const fullSnapshotRequired = start < 0 || entries.some((entry) => entry.truncated);
-  return { projectId: request.projectId, revision: state.revision, changes: entries.flatMap((entry) => entry.changes), fullSnapshotRequired, ...(fullSnapshotRequired ? { snapshot: snapshot(request.projectId, state) } : {}) };
+  const projected = projectControlValue(entries.flatMap((entry) => entry.changes), request.detail);
+  return { projectId: request.projectId, revision: state.revision, changes: projected.value, projection: projected.projection,
+    fullSnapshotRequired: fullSnapshotRequired || projected.projection.truncated,
+    ...(fullSnapshotRequired ? { snapshot: snapshot(request.projectId, state, request.detail) } : {}) };
 }
 function replaceById<T extends { id: string }>(items: T[], target: string, update: (item: T) => T): T[] {
   if (!items.some((item) => item.id === target)) throw new ProjectControlError("target_not_found", `대상 ${target} 을 찾지 못했습니다.`);
@@ -185,8 +192,8 @@ export async function updateProjectControl(input: unknown) {
       throw new ProjectControlError("revision_conflict", "적용 직전에 프로젝트가 바뀌었습니다. 최신 상태를 다시 읽어 주세요.", { actualRevision: latest.revision });
     }
     const latest = observe(request.projectId, requireDraft(request.projectId));
-    if (!outcome.persisted) throw new ProjectControlError("save_failed", outcome.why || "편집 내용을 파일에 저장하지 못했습니다.", { applied: Boolean(outcome.draft), snapshot: snapshot(request.projectId, latest) });
-    return { ...snapshot(request.projectId, latest), persisted: true, created: commands.flatMap((command) => command.type.endsWith(".add") && "id" in command ? [{ type: command.type, id: command.id }] : []) };
+    if (!outcome.persisted) throw new ProjectControlError("save_failed", outcome.why || "편집 내용을 파일에 저장하지 못했습니다.", { applied: Boolean(outcome.draft), snapshot: snapshot(request.projectId, latest, request.detail) });
+    return { ...snapshot(request.projectId, latest, request.detail), persisted: true, created: commands.flatMap((command) => command.type.endsWith(".add") && "id" in command ? [{ type: command.type, id: command.id }] : []) };
   } finally { working.delete(request.projectId); pendingControllerEdits.delete(request.projectId); }
 }
 
@@ -199,19 +206,19 @@ export async function createProjectControl(input: unknown) {
   if (working.has(projectId)) throw new ProjectControlError("project_busy", "이 프로젝트를 만드는 중입니다. 같은 요청으로 다시 확인해 주세요.");
   working.add(projectId);
   try {
-    const { operationId: _operation, ...fields } = request;
+    const { operationId: _operation, detail: _detail, ...fields } = request;
     const fingerprint = JSON.stringify(fields);
     const existing = getLocalProject(projectId);
     if (existing) {
       if ((existing.draft as unknown as CreationDraft).controllerCreation?.fingerprint !== fingerprint) throw new ProjectControlError("operation_conflict", "같은 생성 요청 열쇠에 다른 내용이 들어왔습니다.");
       const confirmation = await saveLocalProjectAndConfirm(requireDraft(projectId), projectId);
       if (confirmation.outcome !== "written" && confirmation.outcome !== "same") throw new ProjectControlError("save_failed", "새 프로젝트의 파일 저장을 확인하지 못했습니다.", { outcome: confirmation.outcome });
-      return { ...snapshot(projectId, observe(projectId, requireDraft(projectId))), persisted: true, reused: true };
+      return { ...snapshot(projectId, observe(projectId, requireDraft(projectId)), request.detail), persisted: true, reused: true };
     }
     const draft: CreationDraft = { ...newProjectDraft(), ...fields, controllerCreation: { fingerprint } };
     const saved = await saveLocalProjectAndConfirm(draft, projectId);
     if (saved.outcome !== "written" && saved.outcome !== "same") throw new ProjectControlError("save_failed", "새 프로젝트를 저장하지 못했습니다.", { outcome: saved.outcome });
-    return { ...snapshot(projectId, observe(projectId, requireDraft(projectId), "controller")), persisted: true, reused: false };
+    return { ...snapshot(projectId, observe(projectId, requireDraft(projectId), "controller"), request.detail), persisted: true, reused: false };
   } finally { working.delete(projectId); }
 }
 
@@ -220,7 +227,7 @@ export function registerProjectNavigation(navigate: (projectId: string) => void)
   return () => { if (navigation === navigate) navigation = null; };
 }
 export async function openProjectControl(projectId: string) {
-  const current = await getProjectSnapshot(projectId);
+  const current = await getProjectSnapshot(projectId, "summary");
   if (!navigation) throw new ProjectControlError("navigation_unavailable", "프로젝트 화면 연결이 준비되지 않았습니다.");
   navigation(projectId);
   return { projectId: current.projectId, opened: true };

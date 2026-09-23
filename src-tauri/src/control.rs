@@ -26,6 +26,46 @@ use tokio::{
 const REQUEST_LIMIT: u64 = 2 * 1024 * 1024;
 const RESPONSE_LIMIT: u64 = 32 * 1024 * 1024;
 
+fn response_bytes(value: &Value, limit: usize) -> Res<Vec<u8>> {
+    struct BoundedWriter {
+        bytes: Vec<u8>,
+        limit: usize,
+        exceeded: bool,
+    }
+    impl Write for BoundedWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() > self.limit.saturating_sub(self.bytes.len()) {
+                self.exceeded = true;
+                return Err(std::io::Error::other("응답 크기 제한"));
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    // 끝 개행까지 수신 제한 안에 들어와야 합니다. 초과 자료를 계속 직렬화하지 않습니다.
+    let mut writer = BoundedWriter {
+        bytes: Vec::new(),
+        limit: limit.saturating_sub(1),
+        exceeded: false,
+    };
+    if let Err(error) = serde_json::to_writer(&mut writer, value) {
+        if !writer.exceeded {
+            return Err(error.to_string());
+        }
+        let message = "응답 자료가 너무 큽니다. detail: summary로 다시 조회하세요. 편집이 이미 적용됐을 수 있으므로 바로 반복하지 마세요.";
+        writer.bytes = serde_json::to_vec(&json!({"result": {
+            "isError": true,
+            "content": [{"type": "text", "text": message}],
+            "structuredContent": {"code": "response_too_large", "message": message, "retryDetail": "summary"}
+        }})).map_err(|e| e.to_string())?;
+    }
+    writer.bytes.push(b'\n');
+    Ok(writer.bytes)
+}
+
 fn directory() -> Res<PathBuf> {
     // 실제 작품과 실행 중인 앱의 연결 정보를 통합 시험이 건드리지 않도록 격리합니다.
     #[cfg(debug_assertions)]
@@ -211,8 +251,7 @@ async fn serve_connection(
         Ok(v) => json!({"result":v}),
         Err(e) => json!({"error":e}),
     };
-    let mut bytes = serde_json::to_vec(&value).map_err(|e| e.to_string())?;
-    bytes.push(b'\n');
+    let bytes = response_bytes(&value, RESPONSE_LIMIT as usize)?;
     writer.write_all(&bytes).await.map_err(|e| e.to_string())
 }
 
@@ -353,6 +392,27 @@ pub fn run_mcp() -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn oversized_response_is_a_complete_small_error_not_a_truncated_frame() {
+        let value = json!({"result": {"content": [{"type": "text", "text": "가".repeat(20_000)}]}});
+        let bytes = response_bytes(&value, 4096).unwrap();
+        assert!(bytes.len() < 4096);
+        assert_eq!(bytes.last(), Some(&b'\n'));
+        let parsed: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            parsed["result"]["structuredContent"]["code"],
+            "response_too_large"
+        );
+        assert_eq!(parsed["result"]["isError"], true);
+    }
+    #[test]
+    fn response_boundary_counts_newline_and_utf8_bytes() {
+        let value = json!({"result": "안녕"});
+        let encoded = serde_json::to_vec(&value).unwrap();
+        let bytes = response_bytes(&value, encoded.len() + 1).unwrap();
+        assert_eq!(bytes.len(), encoded.len() + 1);
+        assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), value);
+    }
     #[test]
     fn atomic_journal_replaces_complete_file() {
         let dir = tempfile::tempdir().unwrap();

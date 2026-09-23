@@ -38,6 +38,24 @@ const settingsKey = "frameforge.localMemoryPolicy.v1";
 const adaptive: LocalMemoryPolicy = { mode: "adaptive", ramPercent: 80, vramPercent: 90 };
 
 describe("로컬 생성의 메모리 정책", () => {
+  it("모델별 정밀도는 공통값을 덮고 재설치 origin에서도 이어지며 명시한 생성 설정을 보존한다", async () => {
+    let api = await load();
+    await api.savePrecision("int8");
+    await api.savePrecision("int4", "wanvideo");
+    await api.savePrecision("auto", "ltx25");
+    expect(api.loadPrecision("wanvideo")).toBe("int4");
+    expect(api.loadPrecision("ltx25")).toBe("auto");
+    expect(api.loadPrecision("qwenimage")).toBe("int8");
+    expect(() => api.savePrecision("int4", "minimaxh3")).toThrow("지원하지");
+    newOrigin(); vi.resetModules(); api = await load();
+    await api.runLocal("wanvideo", "compare.mp4", { prompt: "시험" });
+    expect(native.invoke).toHaveBeenLastCalledWith("local_run", expect.objectContaining({ opts: expect.objectContaining({ precision: "int4" }) }));
+    await api.runLocal("wanvideo", "compare.mp4", { prompt: "시험", precision: "int8" });
+    expect(native.invoke).toHaveBeenLastCalledWith("local_run", expect.objectContaining({ opts: expect.objectContaining({ precision: "int8" }) }));
+    await api.savePrecision("inherit", "wanvideo");
+    expect(api.loadPrecision("wanvideo")).toBe("int8");
+  });
+
   it("설정이 없거나 깨져 있으면 기본 해제이며 스냅샷 참조를 안정적으로 유지한다", async () => {
     const api = await load();
     expect(api.getLocalMemoryPolicy()).toEqual({ mode: "release", ramPercent: 85, vramPercent: 85 });

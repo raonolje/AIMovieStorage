@@ -945,6 +945,7 @@ ${draft.promptKo ?? ""}`)
             stem={variationStem}
             assetType={generatedAssetType}
             cropKind={kind}
+            faceSetSize={kind === "background" ? autoEquirectOf(draft.blueprint, spaceKind, draft.panoramaSpace, draft.exteriorSpace, null, `${draft.promptEn ?? ""}\n${draft.promptKo ?? ""}`)?.stamp : undefined}
             // 변형에는 spaceKind 가 없어 부모 것을 씁니다 — 파노라마 위 면 이름(천장/하늘)용.
             spaceKind={spaceKind}
           />

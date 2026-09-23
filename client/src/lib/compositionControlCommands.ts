@@ -464,6 +464,11 @@ export const compositionCommandSchema = z.discriminatedUnion("op", [
   z
     .object({
       op: z.literal("display.update"),
+      shadows: z.object({
+        mode: z.enum(["auto", "contact", "directional", "off"]),
+        strength: z.number().min(0).max(1),
+        softness: z.number().min(0).max(1),
+      }).strict().optional(),
       showFloor: z.boolean().optional(),
       showLabels: z.boolean().optional(),
       showCharacterPaths: z.boolean().optional(),

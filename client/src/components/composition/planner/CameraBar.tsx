@@ -1,3 +1,4 @@
+import { useT } from "@/lib/i18n";
 import {
   CAMERA_FOV_MAX,
   CAMERA_FOV_MIN,
@@ -15,8 +16,6 @@ import PlannerRange from "@/components/composition/planner/PlannerRange";
 
 /**
  * 3D 화면 **왼쪽 위**에 붙는 카메라 손잡이 — 샷 크기(렌즈 화각)와 조작 속도.
- *
- *
  *
  * 둘 다 **화면을 보면서 돌리는** 값입니다. 오른쪽 패널에 있으면 탭을 «카메라» 로 바꿔야 손이
  * 닿는데, 그러면 배치를 만지다 화각을 조금 바꾸는 일에도 탭을 오가야 했습니다. 비율 칩과 같은
@@ -36,6 +35,7 @@ export function PlannerCameraBar({
   setStateRaw: UpdateComposition;
   mark: () => void;
 }) {
+  const t = useT();
   const fov = state.camera.fovDegrees;
   /*
     35mm 판 환산 초점거리. 「40도」 보다 「35mm 렌즈」 가 훨씬 잘 읽힙니다.
@@ -69,7 +69,7 @@ export function PlannerCameraBar({
         className="flex items-center justify-between text-[9px]"
         style={{ color: "oklch(0.52 0.01 265)" }}
       >
-        <span>샷 크기 — 렌즈 화각</span>
+        <span>{t("샷 크기 — 렌즈 화각")}</span>
         <span
           className="tabular-nums"
           style={{ color: "oklch(0.72 0.15 200)" }}
@@ -104,11 +104,11 @@ export function PlannerCameraBar({
             onClick={() =>
               setState((current) => setCameraFovIn(current, preset.value))
             }
-            title={preset.hint}
+            title={t(preset.hint)}
             className="flex-1 rounded px-0.5 py-0.5 text-[8px] font-semibold"
             style={chip(Math.abs(fov - preset.value) < 0.5)}
           >
-            {preset.label}
+            {t(preset.label)}
           </button>
         ))}
       </div>
@@ -125,7 +125,7 @@ export function PlannerCameraBar({
           borderColor: "oklch(1 0 0 / 8%)",
         }}
       >
-        <span>조작 속도 — 회전·이동·줌</span>
+        <span>{t("조작 속도 — 회전·이동·줌")}</span>
         <span
           className="tabular-nums"
           style={{ color: "oklch(0.72 0.15 200)" }}
@@ -150,7 +150,7 @@ export function PlannerCameraBar({
             onClick={() =>
               setState((current) => setCameraSpeedIn(current, preset))
             }
-            title="Shift 를 누르면 걸음이 0.3배(정밀), Alt 면 3배입니다"
+            title={t("Shift 를 누르면 걸음이 0.3배(정밀), Alt 면 3배입니다")}
             className="flex-1 rounded px-0.5 py-0.5 text-[8px] font-semibold"
             style={chip(Math.abs(speed - preset) < 0.001)}
           >

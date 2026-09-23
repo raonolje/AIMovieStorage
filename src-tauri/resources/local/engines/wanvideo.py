@@ -186,6 +186,10 @@ def generate(output, opts, report):
         kwargs["negative_prompt"] = negative
     width = int(opts.get("width") or 1280)
     height = int(opts.get("height") or 720)
+    # I2V도 크기를 명시해야 합니다. 입력 그림만 resize하면 파이프라인의
+    # 기본 832×480으로 다시 줄어들어 요청·결과 메타데이터와 실제 파일이 달라집니다.
+    kwargs["width"] = width
+    kwargs["height"] = height
 
     image_path = (opts.get("image") or "").strip()
     if image_path:
@@ -195,10 +199,6 @@ def generate(output, opts, report):
             raise IOError("첫 장면 그림을 찾지 못했습니다: {}".format(image_path))
         first = Image.open(image_path).convert("RGB").resize((width, height))
         kwargs["image"] = first
-    else:
-        kwargs["width"] = width
-        kwargs["height"] = height
-
     result = common.run_attention_safe(pipe, lambda: pipe(**kwargs))
     report(95, "mp4 로 내보내는 중")
     # 「여기만 움직인다」 흑백 마스크가 왔으면 검은 곳을 첫 장면에 묶습니다(`common.freeze_by_mask`).

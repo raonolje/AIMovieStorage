@@ -1,3 +1,5 @@
+import { waitVideoFrameEvent } from "./videoFrameWait";
+
 /**
  * 영상 → 사람별 관절 좌표(모션 캡처).
  *
@@ -55,6 +57,19 @@ export interface CapturedPerson {
   repaired?: { joints: number; frames: number; swaps: number };
 }
 
+/** 손 검출 성공과 기존 손 데이터 보존을 구분하는 추가 추적 기록입니다. */
+export interface HandTrackingDiagnostics {
+  method: "whole-frame+body-roi";
+  frames: number;
+  detectorCalls: number;
+  roiCount: number;
+  detectedHands: number;
+  validHands: number;
+  appliedHands: number;
+  roiAppliedHands: number;
+  unchangedFrames: number;
+}
+
 export interface CaptureResult {
   width: number;
   height: number;
@@ -68,6 +83,7 @@ export interface CaptureResult {
   engine: string;
   /** 분석 때 적용한 좌우 반전. 나중에 손만 다시 읽을 때 같은 좌표계를 씁니다. */
   mirrored?: boolean;
+  handTracking?: HandTrackingDiagnostics;
   persons: CapturedPerson[];
 }
 
@@ -151,20 +167,10 @@ export interface PoseDetector {
 /** 잘라 볼 한 사람 그림의 한 변(픽셀). 관절 모델 입력(256)보다 조금 크게 — 줄일 때 뭉개지지 않게. */
 const CROP_SIZE = 320;
 
-const seekTo = (video: HTMLVideoElement, time: number) =>
-  new Promise<void>((resolve) => {
-    // 같은 자리로 seek 하면 `seeked` 가 안 오는 브라우저가 있어 바로 돌아갑니다.
-    if (Math.abs(video.currentTime - time) < 1e-4) {
-      resolve();
-      return;
-    }
-    const done = () => {
-      video.removeEventListener("seeked", done);
-      resolve();
-    };
-    video.addEventListener("seeked", done);
-    video.currentTime = time;
-  });
+const seekTo = (video: HTMLVideoElement, time: number, signal?: AbortSignal) =>
+  // 같은 자리로 seek 하면 `seeked` 가 안 오는 브라우저가 있어 바로 돌아갑니다.
+  Math.abs(video.currentTime - time) < 1e-4 ? Promise.resolve() :
+    waitVideoFrameEvent(video, "seeked", () => { video.currentTime = time; }, signal);
 
 const toPoints = (list: { x: number; y: number; z: number; visibility?: number }[]): CapturePoint[] =>
   list.map((p) => ({ x: p.x, y: p.y, z: p.z, v: p.visibility ?? 1 }));
@@ -560,7 +566,7 @@ export async function captureVideo(
   const tracker = new PersonTracker(aspect);
   for (const [index, time] of times.entries()) {
     if (options.signal?.aborted) throw new DOMException("취소", "AbortError");
-    await seekTo(video, time);
+    await seekTo(video, time, options.signal);
     frameContext.drawImage(video, 0, 0, width, height);
     tracker.retire(time);
 

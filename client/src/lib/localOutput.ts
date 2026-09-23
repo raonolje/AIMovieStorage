@@ -1,5 +1,5 @@
 import {
-  deleteProjectMediaFile,
+  releaseEmptyProjectAsset,
   safeFileName,
   saveProjectMediaAsset,
   type ProjectAssetType,
@@ -25,8 +25,8 @@ import { runLocal, type LocalEngineId, type LocalRunOptions } from "@/lib/localE
  * 그래서 **돌려받은 경로(`result.output`)가 진짜**입니다. 자리 경로를 카드에 붙이면
  * 0바이트 파일을 가리켜 그림이 깨지고(액박), 그 그림으로 굽는 스토리보드는 하얗게 나옵니다.
  *
- * 남은 빈 파일도 여기서 치웁니다 — 폴더에 0바이트 짝이 하나씩 쌓이면 어느 것이 진짜인지
- * 알 수 없어집니다.
+ * 남은 빈 파일도 성공·실패·취소 뒤에 치웁니다. 정리가 성공 뒤에만 있으면 엔진을
+ * 올리다 실패한 자리가 계속 남습니다. 네이티브에서 아직 0바이트인지 확인해 결과는 지킵니다.
  */
 export interface LocalOutput {
   /** 실제로 뽑힌 파일의 경로. 카드에 붙일 것은 늘 이쪽입니다. */
@@ -34,6 +34,7 @@ export interface LocalOutput {
   /** 확장자 없는 파일 이름. 화면에 적고 `@태그` 로도 씁니다. */
   name: string;
   seconds: number;
+  meta?: Record<string, unknown>;
 }
 
 const stemOf = (path: string) =>
@@ -65,19 +66,21 @@ export async function runLocalToProject(input: {
   });
   if (!saved?.path) throw new Error("결과를 놓을 자리를 만들지 못했습니다.");
 
-  const result = await runLocal(input.engine, saved.path, input.opts, {
-    timeoutSecs: input.timeoutSecs,
-    onProgress: input.onProgress ? (event) => input.onProgress!(event.message || "") : undefined,
-  });
-
-  /*
-    자리로 잡아 둔 빈 파일은 치웁니다. **결과가 그 자리에 놓인 경우에는 건드리지
-    않습니다** — 그때는 그것이 결과 파일 자체입니다.
-  */
-  if (result.output !== saved.path) {
-    await deleteProjectMediaFile(input.projectName, saved.path).catch(() => {
-      // 못 지워도 그림은 제대로 나옵니다. 빈 파일 하나가 남을 뿐입니다.
+  let resultPath: string | undefined;
+  try {
+    const result = await runLocal(input.engine, saved.path, input.opts, {
+      timeoutSecs: input.timeoutSecs,
+      onProgress: input.onProgress ? (event) => input.onProgress!(event.message || "") : undefined,
     });
+    resultPath = result.output;
+    return { path: result.output, name: stemOf(result.output) || stem, seconds: result.seconds, meta: result.meta };
+  } finally {
+    // 결과가 첫 자리에 놓였다면 보존합니다. 실패·취소도 빈 자리만 해제하며,
+    // 정리 오류 때문에 원래 엔진 오류나 이미 받은 결과가 가려져서는 안 됩니다.
+    if (resultPath !== saved.path) {
+      await releaseEmptyProjectAsset(input.projectName, saved.path).catch((error) => {
+        console.warn("로컬 생성의 빈 예약 파일을 정리하지 못했습니다.", error);
+      });
+    }
   }
-  return { path: result.output, name: stemOf(result.output) || stem, seconds: result.seconds };
 }

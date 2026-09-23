@@ -1,6 +1,8 @@
+import { useT } from "@/lib/i18n";
 import { HOLDS_ENTITY_CARD } from "@/lib/useTutorialPanel";
 import { useState, type DragEvent } from "react";
 import PlannerRange from "@/components/composition/planner/PlannerRange";
+import ShadowPanel from "./ShadowPanel";
 import { Grid3X3, X } from "lucide-react";
 import { NumberInput, PanelSection } from "@/components/composition/fields";
 import {
@@ -170,8 +172,6 @@ export interface EnvironmentPanelProps extends SectionToggles {
     remove: (id: string) => void;
     /**
      * **다른 작품에서 방 끌어오기** 를 여는 자리. 안 주면 단추가 안 보입니다.
-     *
-     *
      */
     borrow?: () => void;
   };
@@ -179,7 +179,6 @@ export interface EnvironmentPanelProps extends SectionToggles {
   onOpenGallery: () => void;
   /**
    * **장소 라이브러리**(옛 배경 단계) 열기 — 계보(관계도)·보유 에셋을 봅니다.
-   *
    */
   onOpenLibrary?: () => void;
   /**
@@ -248,15 +247,17 @@ export function EnvironmentPanel({
   setStateRaw,
   mark,
 }: EnvironmentPanelProps) {
+  const t = useT();
   const rooms = roomsOf(state);
 
   return (
     <div className="space-y-3">
+      <ShadowPanel state={state} setState={setState} setStateRaw={setStateRaw} mark={mark} />
       {/*
         앵커는 PanelSection 의 `tour` 로 넘깁니다 — 뿌리 <section> 에 달려야 방이 하나도 없을 때도
         머리줄을 잡을 수 있습니다. 여기 open 은 늘 참이라 접혀서 앵커가 사라질 일은 없습니다.
       */}
-      <PanelSection title="방" tour="env-room-section" open onToggle={() => undefined}>
+      <PanelSection title={t("방")} tour="env-room-section" open onToggle={() => undefined}>
         {/*
           방은 **처음에 없습니다**().
           목록에서 방을 누르면 그 아래가 펴지고, 거기부터가 그 방의 속성입니다.
@@ -315,7 +316,7 @@ export function EnvironmentPanel({
           /*
             **장소 카드는 이 창 안에 있습니다.**
             전개도 여섯 면·파노라마·앵커 찍기·표시하기는 장소 그림에서 하는 일인데, 그 카드로 가는
-            길이 여기 하나뿐이라 안내 창이 먼저 이 문을 눌러 줍니다.
+            길이 여기 하나뿐이라 안내 창이 먼저 이 문을 가리킵니다.
           */
           data-tour-open={PLACE_LIBRARY_OPENS}
           className="flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] font-semibold"
@@ -325,7 +326,7 @@ export function EnvironmentPanel({
             color: "oklch(0.84 0.16 290)",
           }}
         >
-          <Grid3X3 className="h-3 w-3" /> 장소 라이브러리 — 관계도 · 보유 에셋
+          <Grid3X3 className="h-3 w-3" /> {t("장소 라이브러리 — 관계도 · 보유 에셋")}
         </button>
       )}
 
@@ -337,7 +338,7 @@ export function EnvironmentPanel({
       {roomLibrary && (
         <PanelSection
           tour="env-room-library"
-          title="방 라이브러리"
+          title={t("방 라이브러리")}
           count={roomLibrary.presets.length}
           open={openSections.roomLibrary ?? false}
           onToggle={() => toggleSection("roomLibrary")}
@@ -356,7 +357,7 @@ export function EnvironmentPanel({
                 color: "oklch(0.78 0.12 200)",
               }}
             >
-              다른 작품에서 방 끌어오기
+              {t("다른 작품에서 방 끌어오기")}
             </button>
           )}
           {rooms.length > 0 && (
@@ -370,7 +371,7 @@ export function EnvironmentPanel({
                 color: "oklch(0.86 0.12 30)",
               }}
             >
-              지금 방 저장 — 방 + 안의 소품까지
+              {t("지금 방 저장 — 방 + 안의 소품까지")}
             </button>
           )}
           {roomLibrary.presets.length === 0 ? (
@@ -412,7 +413,7 @@ export function EnvironmentPanel({
         </PanelSection>
       )}
 
-      <PanelSection tour="env-display" title="화면" open onToggle={() => undefined}>
+      <PanelSection tour="env-display" title={t("화면")} open onToggle={() => undefined}>
         <label className="flex items-center gap-2 text-[10px]" style={{ color: "oklch(0.62 0.01 265)" }}>
           <input
             type="checkbox"
@@ -421,7 +422,7 @@ export function EnvironmentPanel({
               setState((current) => ({ ...current, showLabels: event.target.checked }))
             }
           />
-          이름표 — 캡처·영상에는 나오지 않습니다
+          {t("이름표 — 캡처·영상에는 나오지 않습니다")}
         </label>
         <label
           className="mt-1.5 flex items-center gap-2 text-[10px]"
@@ -434,14 +435,14 @@ export function EnvironmentPanel({
               setState((current) => ({ ...current, showCharacterPaths: event.target.checked }))
             }
           />
-          인물 동선
+          {t("인물 동선")}
         </label>
 
         {/* 조명을 하나도 안 켰는데 배경만 환하면 인물이 배경 위에 오려 붙인 것처럼 보입니다. */}
         {rooms.length > 0 && (
           <div className="mt-2 text-[10px]" style={{ color: "oklch(0.52 0.01 265)" }}>
             <span className="flex items-center justify-between">
-              <span>배경 밝기 — 하늘 조명이 없을 때</span>
+              <span>{t("배경 밝기 — 하늘 조명이 없을 때")}</span>
               <span className="tabular-nums">{state.skylessBrightness.toFixed(2)}</span>
             </span>
             <PlannerRange
@@ -543,6 +544,7 @@ function RoomProperties({
   setSelected?: (value: string) => void;
   roomVideo?: EnvironmentPanelProps["roomVideo"];
 }) {
+  const t = useT();
   const outdoor = room.outdoor === true;
   /**
    * **호리존**인가 — 그림을 안 붙이는 방. 장소·전개도·파노라마·6면 세트·가릴 면 칸이 전부 빠지고
@@ -632,7 +634,7 @@ function RoomProperties({
       {domeLike ? (
         <div data-tour="env-room-size" className="grid grid-cols-2 gap-1">
           <label className="text-[9px]" style={{ color: "oklch(0.55 0.01 265)" }}>
-            반지름 (m)
+            {t("반지름 (m)")}
             <NumberInput
               value={Math.round((room.width / 2) * 100) / 100}
               step={0.5}
@@ -659,11 +661,11 @@ function RoomProperties({
             [
               ["width", "가로", room.width],
               ["depth", "깊이", room.depth],
-              ["height", outdoor ? "높이" : "층고", room.height],
+              ["height", outdoor ? t("높이") : t("층고"), room.height],
             ] as const
           ).map(([key, label, value]) => (
             <label key={key} className="text-[9px]" style={{ color: "oklch(0.55 0.01 265)" }}>
-              {label} (m)
+              {t(label)} (m)
               <NumberInput
                 value={Math.round(value * 100) / 100}
                 step={0.1}
@@ -677,9 +679,8 @@ function RoomProperties({
         </div>
       )}
       <p className="text-[9px] leading-relaxed" style={{ color: "oklch(0.48 0.01 265)" }}>
-        밑면이 바닥(y=0)이라 <b>인물이 뜨지 않습니다.</b> {domeLike ? "반지름" : outdoor ? "한 변" : "방 크기"}가 곧
-        축척이에요 — 줄이면 인물이 차지하는 비율이 커져 배경보다 커 보입니다.
-        {domeLike && " 파노라마의 지평선은 눈높이 1.6 m 에 옵니다."}
+        {t("밑면은 바닥(y=0)입니다. 방 크기를 줄이면 배경에 비해 인물이 더 커 보입니다.")}
+        {domeLike && <> {t("파노라마의 지평선은 눈높이 1.6m에 옵니다.")}</>}
       </p>
 
       {/*
@@ -708,7 +709,7 @@ function RoomProperties({
                 setDrift(driftDirection, event.target.checked ? driftSpeed : 0)
               }
             />
-            배경 흐름 — 그림을 흘려 배경을 움직입니다
+            {t("배경 흐름 — 그림을 흘려 배경을 움직입니다")}
           </label>
           {drift && (
             <>
@@ -736,7 +737,7 @@ function RoomProperties({
                 <span className="flex items-center justify-between">
                   <span>속도 — 초당 그림의 몇 배</span>
                   <span className="tabular-nums">
-                    {driftSpeed.toFixed(3)} · 한 바퀴 {Math.round(1 / driftSpeed)} 초
+                    {driftSpeed.toFixed(3)} · 한 바퀴 {Math.round(1 / driftSpeed)} {t("초")}
                   </span>
                 </span>
                 <PlannerRange
@@ -751,7 +752,7 @@ function RoomProperties({
                 />
               </div>
               <p className="text-[9px] leading-relaxed" style={{ color: "oklch(0.45 0.01 265)" }}>
-                재생·눈금 끌기·<b>레퍼런스 영상</b>에 모두 그 시각대로 찍힙니다. 그림이 한 장을 넘어가면 좌우가
+                재생·눈금 끌기·<b>{t("레퍼런스 영상")}</b>에 모두 그 시각대로 찍힙니다. 그림이 한 장을 넘어가면 좌우가
                 이어 붙으므로, 이음매가 안 맞는 사진은 느리게 두거나 «흐름» 을 켤 면만 남기는 편이 낫습니다.
                 {boxLike && " 네 벽은 같은 쪽으로 흐르고 천장·바닥은 반대로 갑니다."}
               </p>
@@ -793,7 +794,7 @@ function RoomProperties({
                 )
               }
             />
-            배경 영상 — 면에 영상을 걸어 실제로 움직입니다
+            {t("배경 영상 — 면에 영상을 걸어 실제로 움직입니다")}
           </label>
           {room.video && (
             <>
@@ -895,7 +896,7 @@ function RoomProperties({
                 />
               )}
               <p className="text-[9px] leading-relaxed" style={{ color: "oklch(0.45 0.01 265)" }}>
-                재생하면 같이 돌고, 멈추면 멈추고, 눈금을 옮기면 그 시각의 프레임이 뜹니다 — <b>레퍼런스 영상</b>에도
+                재생하면 같이 돌고, 멈추면 멈추고, 눈금을 옮기면 그 시각의 프레임이 뜹니다 — <b>{t("레퍼런스 영상")}</b>에도
                 그대로 찍힙니다. 2~4초 루프면 이음매가 눈에 안 띕니다.
                 {!faceImage && " 이 면에 그림이 없어 «만들기» 가 안 보입니다 — 먼저 전개도나 파노라마를 거세요."}
                 {!roomVideo.ownerName && " 이 방에 이어 둔 장소가 없어 «만들기» 가 안 보입니다 — 아래에서 장소를 고르거나 만드세요."}
@@ -923,7 +924,7 @@ function RoomProperties({
         <div data-tour="env-horizon-color" className="space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[9px] font-semibold" style={{ color: "oklch(0.52 0.01 265)" }}>
-              호리존 색
+              {t("호리존 색")}
             </span>
             <label
               className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 text-[9px] tabular-nums"
@@ -986,7 +987,7 @@ function RoomProperties({
       {outdoor && (
         <div data-tour="env-outdoor-shape" className="space-y-1">
           <span className="text-[9px] font-semibold" style={{ color: "oklch(0.52 0.01 265)" }}>
-            무엇으로 두를까
+            {t("무엇으로 두를까")}
           </span>
           <div className="grid grid-cols-2 gap-1">
             {([
@@ -1020,7 +1021,7 @@ function RoomProperties({
       {boxLike && (
         <div data-tour="env-occlude-faces">
           <p className="text-[9px] font-semibold" style={{ color: "oklch(0.52 0.01 265)" }}>
-            뒤를 가릴 면 — 누른 면만 벽이 됩니다
+            {t("뒤를 가릴 면 — 누른 면만 벽이 됩니다")}
           </p>
           <div className="mt-1 grid grid-cols-3 gap-1">
             {COMPOSITION_CUBE_FACES.map((face) => {
@@ -1039,7 +1040,7 @@ function RoomProperties({
                     color: on ? "oklch(0.84 0.13 200)" : "oklch(0.60 0.01 265)",
                   }}
                 >
-                  {CUBE_FACE_LABELS[face]}
+                  {t(CUBE_FACE_LABELS[face])}
                 </button>
               );
             })}
@@ -1058,9 +1059,9 @@ function RoomProperties({
               className="mt-0.5"
             />
             <span>
-              <b style={{ color: "oklch(0.80 0.01 265)" }}>방 밖에서 외벽 투시</b>
+              <b style={{ color: "oklch(0.80 0.01 265)" }}>{t("방 밖에서 외벽 투시")}</b>
               <br />
-              외벽 그림을 붙인 방을 <b>밖</b>에서 볼 때, 안에 선 인물을 가리는 외벽만 반투명하게 걷습니다(<b>기본</b>).
+              {t("외벽 그림을 붙인 방을 밖에서 볼 때, 인물을 가리는 외벽만 반투명하게 표시합니다. 기본으로 켜져 있습니다.")}
             </span>
           </label>
         </div>
@@ -1115,14 +1116,14 @@ function RoomProperties({
                     color: "oklch(0.82 0.14 200)",
                   }}
                 >
-                  «{placeName}» 열기 — 프롬프트·그림
+                  {t("{name} 열기 — 프롬프트·그림", { name: placeName })}
                 </button>
                 {onPickPlace && (
                   <button
                     type="button"
                     onClick={() => onPickPlace("")}
                     title="이 공간에서 장소를 뺍니다 — 카드와 그림은 그대로 남습니다"
-                    aria-label="장소 빼기"
+                    aria-label={t("장소 빼기")}
                     className="shrink-0 rounded-md px-2 py-1.5"
                     style={{ background: "oklch(1 0 0 / 6%)", color: "oklch(0.62 0.16 25)" }}
                   >
@@ -1150,14 +1151,14 @@ function RoomProperties({
                   color: "oklch(0.82 0.14 200)",
                 }}
               >
-                {domeLike ? "파노라마 만들기" : "전개도 만들기"}
+                {domeLike ? t("파노라마 만들기") : t("전개도 만들기")}
               </button>
             )}
           </div>
           <p className="text-[9px] leading-relaxed" style={{ color: "oklch(0.45 0.01 265)" }}>
-            지금 치수 {room.width.toFixed(1)} × {room.depth.toFixed(1)} × {room.height.toFixed(1)} m 가 프롬프트에 그대로
-            박힙니다. 카드에서 그림을 등록하면{" "}
-            {domeLike ? "파노라마 한 장이 이 실외의 돔으로" : "여섯 면이 잘려 이 방에"} 걸립니다.
+            {t("지금 치수 {width} × {depth} × {height}m가 프롬프트에 들어갑니다. 등록한 그림은 방 모양에 맞춰 연결합니다.", {
+              width: room.width.toFixed(1), depth: room.depth.toFixed(1), height: room.height.toFixed(1),
+            })}
           </p>
         </div>
       )}
@@ -1295,7 +1296,7 @@ function RoomProperties({
         <div data-tour="env-face-sets" className="space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[9px] font-semibold" style={{ color: "oklch(0.52 0.01 265)" }}>
-              6면 세트 {faceSets.length > 0 && `(${faceSets.length})`}
+              {t("6면 세트")} {faceSets.length > 0 && `(${faceSets.length})`}
             </span>
             <button
               type="button"
@@ -1304,12 +1305,12 @@ function RoomProperties({
               className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold"
               style={{ background: "oklch(0.55 0.15 200 / 14%)", color: "oklch(0.72 0.15 200)" }}
             >
-              <Grid3X3 className="h-2.5 w-2.5" /> 그림 전체보기
+              <Grid3X3 className="h-2.5 w-2.5" /> {t("그림 전체보기")}
             </button>
           </div>
           {faceSets.length === 0 ? (
             <p className="text-[9px] leading-relaxed" style={{ color: "oklch(0.45 0.01 265)" }}>
-              아직 없습니다 — 위 «전개도 만들기» 로 뽑은 그림이 잘리면 여기 뜹니다.
+              {t("아직 없습니다 — 위 «전개도 만들기» 로 뽑은 그림이 잘리면 여기 뜹니다.")}
             </p>
           ) : (
             <div className="composition-scroll grid max-h-56 grid-cols-2 gap-1.5 overflow-y-auto pr-1">
@@ -1383,6 +1384,7 @@ function RoomProps({
   selected?: string;
   setSelected?: (value: string) => void;
 }) {
+  const t = useT();
   const props = objectsInRoom(state, room.id);
   const pickedId = selected?.startsWith("object:") ? selected.slice(7) : null;
   const picked = props.find((item) => item.id === pickedId) ?? null;
@@ -1398,13 +1400,13 @@ function RoomProps({
   return (
     <div data-tour="env-room-props" className="space-y-1.5">
       <span className="text-[9px] font-semibold" style={{ color: "oklch(0.52 0.01 265)" }}>
-        이 방의 소품 {props.length > 0 && `(${props.length})`}
+        {t("이 방의 소품")} {props.length > 0 && `(${props.length})`}
       </span>
 
       <div className="grid grid-cols-3 gap-1">
         {OBJECT_KINDS.map((kind) => (
           <button
-            key={kind.label}
+            key={t(kind.label)}
             type="button"
             onClick={() =>
               setState((current) => {
@@ -1413,12 +1415,12 @@ function RoomProps({
                 return seated.state;
               })
             }
-            title={`«${room.name}» 안에 ${kind.label} 을(를) 세웁니다`}
+            title={`«${room.name}» 안에 ${t(kind.label)} 을(를) 세웁니다`}
             className="flex items-center gap-1 rounded px-1.5 py-1 text-[9px]"
             style={{ background: "oklch(1 0 0 / 5%)", color: "oklch(0.64 0.01 265)" }}
           >
             <kind.icon className="h-3 w-3 shrink-0" style={{ opacity: 0.7 }} />
-            {kind.label}
+            {t(kind.label)}
           </button>
         ))}
       </div>
@@ -1514,8 +1516,7 @@ function RoomProps({
           </label>
 
           {/*
-            **벽과 조명에는 에셋이 없습니다.**
-          */}
+            **벽과 조명에는 에셋이 없습니다.*          */}
           {SWAPPABLE_KINDS.includes(picked.kind) && (
             <>
               <select

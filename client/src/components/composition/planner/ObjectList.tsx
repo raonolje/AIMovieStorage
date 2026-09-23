@@ -94,7 +94,7 @@ export function ObjectList({
               <button
                 type="button"
                 // 소품을 골라야 조명·시트로 바꿔 그리기·관절에 붙이기·에셋 만들기 칸이 생깁니다.
-                data-tour-switch="layout-light layout-object-swap layout-object-asset layout-attach-bone layout-object-group"
+                data-tour-open="layout-light layout-object-swap layout-object-asset layout-attach-bone layout-object-group"
                 onClick={(event) => {
                   /*
                     Ctrl(맥은 ⌘) 로 누르면 **함께 잡습니다** — 둘 이상이면 아래에 «묶기» 가 뜹니다.

@@ -567,15 +567,33 @@ pub async fn magnific_check() -> Res<usize> {
 // 올리고 · 뽑고 · 내려받기
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn mime_of(path: &str) -> &'static str {
-    match path.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+fn mime_of(path: &str) -> Res<&'static str> {
+    let path = PathBuf::from(path);
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    // 잘못된 종류로 자리를 받으면 파일 바이트가 맞아도 마지막 등록에서 거절됩니다.
+    // 모르는 형식을 JPEG로 보내지 않고, 서버가 허용하는 종류만 명시합니다.
+    let mime = match extension.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
         "png" => "image/png",
+        "svg" => "image/svg+xml",
         "webp" => "image/webp",
         "mp4" => "video/mp4",
         "mov" => "video/quicktime",
         "webm" => "video/webm",
-        _ => "image/jpeg",
-    }
+        "m4v" => "video/x-m4v",
+        "wav" => "audio/wav",
+        "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "ogg" => "audio/ogg",
+        "flac" => "audio/flac",
+        "glb" => "model/gltf-binary",
+        _ => return Err("마그니픽에 올릴 수 없는 파일 형식입니다. 파일 확장자를 확인해 주세요.".into()),
+    };
+    Ok(mime)
 }
 
 /// 우리 폴더의 파일을 마그니픽에 올리고 **creation id** 를 받습니다.
@@ -584,8 +602,8 @@ fn mime_of(path: &str) -> &'static str {
 /// 세 걸음입니다: 자리 받기(presigned PUT) → 바이트 올리기 → creation 으로 굳히기.
 #[tauri::command]
 pub async fn magnific_upload(path: String) -> Res<String> {
+    let mime = mime_of(&path)?;
     let bytes = fs::read(&path).map_err(|e| err("올릴 파일을 읽지 못했습니다", e))?;
-    let mime = mime_of(&path);
     let asked = call_tool("creations_request_upload", json!({ "mimeType": mime })).await?;
     let asked = payload_of(&asked);
     /*
@@ -634,7 +652,57 @@ pub async fn magnific_upload(path: String) -> Res<String> {
     )
     .await?;
     identifier_of(&payload_of(&made))
-        .ok_or_else(|| "올린 그림의 id 를 받지 못했습니다.".to_string())
+        .ok_or_else(|| "올린 파일의 id 를 받지 못했습니다.".to_string())
+}
+
+#[cfg(test)]
+mod upload_mime_tests {
+    use super::*;
+
+    #[test]
+    fn uploads_audio_with_its_real_media_type_instead_of_jpeg() {
+        for (file, expected) in [
+            ("노래.구간.WAV", "audio/wav"),
+            ("song.mp3", "audio/mpeg"),
+            ("song.M4A", "audio/mp4"),
+            ("song.ogg", "audio/ogg"),
+            ("song.flac", "audio/flac"),
+        ] {
+            assert_eq!(mime_of(file).unwrap(), expected, "{file}");
+        }
+    }
+
+    #[test]
+    fn keeps_supported_visual_media_types_and_gltf_binary_distinct() {
+        for (file, expected) in [
+            ("face.jpg", "image/jpeg"),
+            ("face.JPEG", "image/jpeg"),
+            ("face.png", "image/png"),
+            ("face.webp", "image/webp"),
+            ("outline.svg", "image/svg+xml"),
+            ("dance.mp4", "video/mp4"),
+            ("dance.mov", "video/quicktime"),
+            ("dance.webm", "video/webm"),
+            ("dance.m4v", "video/x-m4v"),
+            ("character.glb", "model/gltf-binary"),
+        ] {
+            assert_eq!(mime_of(file).unwrap(), expected, "{file}");
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_and_extensionless_names_without_guessing_from_directories() {
+        for file in ["song.aac", "file", "folder.wav/file", ".wav", "file.", "song.wav.exe", ""] {
+            assert!(mime_of(file).is_err(), "{file}");
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_unsupported_upload_before_file_read_or_network() {
+        let error = magnific_upload("존재하지 않는 폴더/원본.unsupported".into()).await.unwrap_err();
+        assert!(error.contains("파일 형식"));
+        assert!(!error.contains("읽지 못했습니다"));
+    }
 }
 
 /// 글 안에서 `키: 값` 을 집어냅니다 — 마그니픽이 JSON 대신 TOON 글로 답할 때.
@@ -699,16 +767,46 @@ fn identifier_of(value: &Value) -> Option<String> {
 }
 
 fn url_of(value: &Value) -> Option<String> {
-    find_str(value, &["url", "assetUrl", "downloadUrl"], true, 0)
+    // 영상의 url은 1080p 미리보기일 수 있습니다. 따로 제공된 원본을 저장해야 요청한 품질을 잃지 않습니다.
+    find_str(value, &["downloadUrl"], true, 0)
+        .or_else(|| find_str(value, &["url", "assetUrl"], true, 0))
 }
 
 /// 뽑으라고 시키고 **creation id** 를 받습니다. 기다리지는 않습니다.
 #[tauri::command]
 pub async fn magnific_generate(kind: String, args: Value) -> Res<String> {
-    let tool = if kind == "video" { "video_generate" } else { "images_generate" };
-    let made = call_tool(tool, args).await?;
-    identifier_of(&payload_of(&made))
-        .ok_or_else(|| format!("«{tool}» 이 결과 id 를 주지 않았습니다."))
+    Ok(magnific_generate_details(kind, args).await?.identifier)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationDetails {
+    pub identifier: String,
+    /// 서버 접수 결과입니다. 파일에서 측정한 크기·길이와 같다고 가정하지 않습니다.
+    pub response: Value,
+}
+
+async fn generate_with<F, Fut>(kind: String, args: Value, call: F) -> Res<GenerationDetails>
+where
+    F: FnOnce(&'static str, Value) -> Fut,
+    Fut: std::future::Future<Output = Res<Value>>,
+{
+    let tool = match kind.as_str() {
+        "video" => "video_generate",
+        "image" => "images_generate",
+        _ => return Err("지원하지 않는 마그니픽 생성 종류입니다.".into()),
+    };
+    // 구형 문자열 명령과 상세 명령이 이 호출 한 번을 공유합니다. 응답 해석 실패로 다시 생성하지 않습니다.
+    let response = payload_of(&call(tool, args).await?);
+    let identifier = identifier_of(&response)
+        .ok_or_else(|| format!("«{tool}» 이 결과 id 를 주지 않았습니다. 생성 여부를 마그니픽에서 확인해 주세요."))?;
+    Ok(GenerationDetails { identifier, response })
+}
+
+/// 기존 문자열 명령은 유지하고 새 화면은 모델 변경 안내까지 받습니다.
+#[tauri::command]
+pub async fn magnific_generate_details(kind: String, args: Value) -> Res<GenerationDetails> {
+    generate_with(kind, args, call_tool).await
 }
 
 #[derive(Serialize)]
@@ -719,6 +817,7 @@ pub struct WaitResult {
     pub url: Option<String>,
     pub failed: bool,
     pub message: Option<String>,
+    pub response: Value,
 }
 
 /// 다 됐는지 한 번 물어봅니다(최대 25초까지 붙잡고 기다립니다).
@@ -745,6 +844,7 @@ pub async fn magnific_wait(identifier: String) -> Res<WaitResult> {
         failed,
         // 실패했을 때만 답을 통째로 붙입니다 — 까닭이 그 안에 있습니다.
         message: if failed { Some(text) } else { None },
+        response: value,
     })
 }
 
@@ -880,6 +980,59 @@ pub async fn magnific_recent(limit: Option<u32>, query: Option<String>) -> Res<V
   토큰은 앱이 설정 폴더에 둔 것(`magnific-mcp.json`)을 그대로 읽습니다. 연결이 안 돼
   있으면 첫 걸음에서 「연결되어 있지 않습니다」 로 멈춥니다.
 */
+#[cfg(test)]
+mod generation_metadata_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn downloads_original_video_and_falls_back_for_images() {
+        let video = json!({"results":[{"status":"completed","results":{
+            "url":"https://example.com/preview.mp4",
+            "downloadUrl":"https://example.com/original.mp4",
+            "thumbnailUrl":"https://example.com/thumbnail.jpg"
+        }}]});
+        assert_eq!(url_of(&video).as_deref(), Some("https://example.com/original.mp4"));
+        assert_eq!(url_of(&json!({"url":"https://example.com/preview.mp4","results":{"downloadUrl":"https://example.com/original.mp4"}})).as_deref(), Some("https://example.com/original.mp4"));
+        assert_eq!(url_of(&json!({"results":{"url":"https://example.com/render.png"}})).as_deref(), Some("https://example.com/render.png"));
+        assert_eq!(url_of(&Value::String("url: https://example.com/preview.mp4\ndownloadUrl: https://example.com/original.mp4".into())).as_deref(), Some("https://example.com/original.mp4"));
+    }
+
+    #[tokio::test]
+    async fn generates_once_and_keeps_server_adjustment_metadata() {
+        let calls = Cell::new(0);
+        let response = json!({"identifier":"one", "modelNotice":"비율 조정", "models":[{"requested":"2:1", "accepted":"16:9"}]});
+        let result = generate_with("image".into(), json!({"aspectRatio":"2:1"}), |tool, args| {
+            calls.set(calls.get() + 1);
+            assert_eq!(tool, "images_generate");
+            assert_eq!(args["aspectRatio"], "2:1");
+            let payload = response.clone();
+            async move { Ok(json!({"structuredContent":payload})) }
+        }).await.unwrap();
+        assert_eq!(calls.get(), 1);
+        assert_eq!(result.identifier, "one");
+        assert_eq!(result.response, response);
+    }
+
+    #[tokio::test]
+    async fn preserves_toon_and_does_not_retry_a_missing_identifier() {
+        let toon = "identifier: video-one\nmodelNotice: 길이 조정\nmodels[1]{slug,duration}:\n  sample,5";
+        let result = generate_with("video".into(), json!({}), |tool, _| async move {
+            assert_eq!(tool, "video_generate");
+            Ok(json!({"content":[{"type":"text","text":toon}]}))
+        }).await.unwrap();
+        assert_eq!(result.identifier, "video-one");
+        assert_eq!(result.response, Value::String(toon.into()));
+        let calls = Cell::new(0);
+        let failed = generate_with("image".into(), json!({}), |_, _| {
+            calls.set(calls.get() + 1);
+            async { Ok(json!({"structuredContent":{"modelNotice":"접수 상태 확인 필요"}})) }
+        }).await;
+        assert!(failed.is_err());
+        assert_eq!(calls.get(), 1);
+    }
+}
+
 #[cfg(test)]
 mod live_tests {
     use super::*;

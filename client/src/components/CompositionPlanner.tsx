@@ -161,7 +161,7 @@ export interface CompositionPlannerProps {
    *
    *
    */
-  onVideoSaved?: (path: string, seconds: number) => void;
+  onVideoSaved?: (path: string, seconds: number) => void | Promise<void>;
   /** 인물 이름·키를 여기서 고쳤을 때 프로젝트에 올려보냅니다 */
   onCharacterUpdate?: (
     id: string,
@@ -691,6 +691,7 @@ export default function CompositionPlanner({
     context: { characterIds: characters.map(item => item.id), imageIds: media.availableBackgrounds.map(item => item.id) },
     capture: () => captureRef.current,
     stopPlayback: () => { setPlaying(false); setPreviewing(false); },
+    exportVideo: video.exportVideo,
     commit: onControlCommit
       ? (saved, captures) => persist(saved, () => onControlCommit(saved, captures))
       : undefined,
@@ -783,12 +784,12 @@ export default function CompositionPlanner({
         className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-none border-0 p-0 text-white sm:max-w-none"
         style={{ background: "oklch(0.13 0.009 265)" }}
       >
-        <DialogTitle className="sr-only">구도 잡기</DialogTitle>
+        <DialogTitle className="sr-only">{t("구도 잡기")}</DialogTitle>
         <DialogDescription className="sr-only">
-          카메라와 인물 자리를 3차원에서 정합니다
+          {t("카메라와 인물 자리를 3차원에서 정합니다")}
         </DialogDescription>
 
-        <div className="relative flex h-full min-h-0 flex-col">
+        <div className="relative flex h-full min-h-0 min-w-0 flex-col">
           {/* ── 머리줄 ─────────────────────────────────────────────── */}
           <PlannerHeader
             summary={summary}
@@ -1308,7 +1309,11 @@ export default function CompositionPlanner({
                   }}
                   playhead={playhead}
                   usedVideoPath={usedVideoPath}
-                  onUseRender={(path, seconds) => onVideoSaved?.(path, seconds)}
+                  onUseRender={(path, seconds) => {
+                    void Promise.resolve().then(() => onVideoSaved?.(path, seconds)).catch(error => {
+                      toast.error(t("레퍼런스 영상 경로를 저장하지 못했습니다."), { description: error instanceof Error ? error.message : String(error) });
+                    });
+                  }}
                   projectName={projectName}
                   sceneTitle={sceneTitle}
                   cutOrder={cutOrder}

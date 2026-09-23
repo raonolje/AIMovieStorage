@@ -161,7 +161,7 @@ export function TimelinePanel({
       */}
       <PanelSection
         tour="timeline-mocap"
-        title="영상에서 모션 가져오기"
+        title={t("영상에서 모션 가져오기")}
         open={openSections.motionCapture ?? true}
         onToggle={() => toggleSection("motionCapture")}
       >
@@ -178,18 +178,17 @@ export function TimelinePanel({
             color: "oklch(0.80 0.16 160)",
           }}
         >
-          영상 올려서 캐릭터에 모션 입히기
+          {t("영상 올려서 캐릭터에 모션 입히기")}
         </button>
         <p className="mt-2 text-[9px] leading-relaxed" style={{ color: "oklch(0.42 0.01 265)" }}>
-          전신이 보이는 영상에서 사람마다 이동 · 몸 방향 · 관절을 읽어 캐릭터 키로 넣습니다. 여러 명이면 번호마다 캐릭터를 고릅니다.
-          고정 카메라 · 앞이나 옆에서 찍은 영상이 가장 정확합니다.
+          {t("전신이 보이는 영상에서 사람마다 이동 · 몸 방향 · 관절을 읽어 캐릭터 키로 넣습니다. 여러 명이면 번호마다 캐릭터를 고릅니다. 고정 카메라 · 앞이나 옆에서 찍은 영상이 가장 정확합니다.")}
         </p>
       </PanelSection>
 
       {/* GLB 애니메이션 트랙 — 블렌더 결과물을 씬에 얹습니다. */}
       <PanelSection
         tour="timeline-glb"
-        title="GLB 애니메이션"
+        title={t("GLB 애니메이션")}
         count={(state.glbTracks || []).length}
         open={openSections.glb}
         onToggle={() => toggleSection("glb")}
@@ -223,7 +222,7 @@ export function TimelinePanel({
             color: "oklch(0.84 0.16 55)",
           }}
         >
-          블렌더 작업 지시문 만들기
+          {t("블렌더 작업 지시문 만들기")}
         </button>
         <input
           ref={glbInputRef}
@@ -246,7 +245,7 @@ export function TimelinePanel({
             color: "oklch(0.78 0.16 160)",
           }}
         >
-          GLB 파일 추가 (.glb / .gltf)
+          {t("GLB 파일 추가 (.glb / .gltf)")}
         </button>
 
         {(state.glbTracks || []).map((track) => (
@@ -268,7 +267,7 @@ export function TimelinePanel({
               <button
                 type="button"
                 onClick={() => updateGlb(track.id, { visible: !track.visible })}
-                title={track.visible ? "숨기기" : "보이기"}
+                title={track.visible ? t("숨기기") : "보이기"}
                 className="rounded p-0.5 hover:bg-white/10"
               >
                 {track.visible ? (
@@ -389,12 +388,12 @@ export function TimelinePanel({
                   className="text-[9px]"
                   style={{ color: "oklch(0.76 0.16 160)" }}
                 >
-                  클립 길이 {track.clipDuration.toFixed(2)}초
+                  클립 길이 {track.clipDuration.toFixed(2)}{t("초")}
                   {(track.speed || 1) !== 1 && (
                     <span style={{ color: "oklch(0.80 0.16 160)" }}>
                       {" "}
                       → 재생{" "}
-                      {(track.clipDuration / (track.speed || 1)).toFixed(2)}초
+                      {(track.clipDuration / (track.speed || 1)).toFixed(2)}{t("초")}
                     </span>
                   )}
                   <span style={{ color: "oklch(0.52 0.01 265)" }}>
@@ -425,7 +424,7 @@ export function TimelinePanel({
                 className="mb-1 text-[10px] font-semibold"
                 style={{ color: "oklch(0.45 0.01 265)" }}
               >
-                회전
+                {t("회전")}
               </p>
               <AxisVectorFields
                 value={track.rotation}
@@ -468,14 +467,13 @@ export function TimelinePanel({
           className="mt-2 text-[9px] leading-relaxed"
           style={{ color: "oklch(0.42 0.01 265)" }}
         >
-          블렌더에서 glTF/GLB 로 내보내면 애니메이션이 함께 들어옵니다. 3D
-          화면에 끌어다 놓아도 됩니다.
+          {t("블렌더에서 glTF/GLB 로 내보내면 애니메이션이 함께 들어옵니다. 3D 화면에 끌어다 놓아도 됩니다.")}
         </p>
       </PanelSection>
 
       <PanelSection
         tour="timeline-render"
-        title="레퍼런스 영상"
+        title={t("레퍼런스 영상")}
         open={openSections.video}
         onToggle={() => toggleSection("video")}
       >
@@ -484,10 +482,10 @@ export function TimelinePanel({
           한자리에 있어야 «몇 프레임짜리 컷인가» 가 한눈에 읽힙니다.
         */}
         <p className="text-[9px]" style={{ color: "oklch(0.45 0.01 265)" }}>
-          {captureFormat.width}×{captureFormat.height} ·{" "}
-          {Math.round(timeline.duration * timeline.fps)}프레임 ({timeline.fps}
-          fps · {timeline.duration}초) — 길이와 fps 는 화면 아래 타임라인에서
-          고칩니다.
+          {t("{width}×{height} · {frames}프레임 ({fps}fps · {seconds}초) — 길이와 fps는 아래 타임라인에서 고칩니다.", {
+            width: captureFormat.width, height: captureFormat.height,
+            frames: Math.round(timeline.duration * timeline.fps), fps: timeline.fps, seconds: timeline.duration,
+          })}
         </p>
 
         {/*
@@ -501,7 +499,7 @@ export function TimelinePanel({
             options={[
               ...SPLIT_OPTIONS.map((option) => ({
                 id: option.id as (typeof SPLIT_OPTIONS)[number]["id"] | "music",
-                label: option.label,
+                label: t(option.label),
                 hint: option.hint,
               })),
               ...(music?.sections.length
@@ -560,7 +558,7 @@ export function TimelinePanel({
                   color: "oklch(0.70 0.14 25)",
                 }}
               >
-                취소
+                {t("취소")}
               </button>
             </div>
           </div>
@@ -577,8 +575,8 @@ export function TimelinePanel({
             }}
           >
             {splitSeconds && partCount > 1
-              ? `● 레퍼런스 영상 ${partCount}조각 만들기 (MP4)`
-              : "● 레퍼런스 영상 만들기 (MP4)"}
+              ? t("● 레퍼런스 영상 {count}조각 만들기 (MP4)", { count: partCount })
+              : t("● 레퍼런스 영상 만들기 (MP4)")}
           </button>
         )}
 
@@ -590,7 +588,7 @@ export function TimelinePanel({
         {renders.length > 0 && (
           <div data-tour="timeline-renders-list" className="mt-2">
             <p className="mb-1 text-[9px] font-semibold" style={{ color: "oklch(0.52 0.01 265)" }}>
-              뽑아 둔 영상 {renders.length}편 — 누르면 이 컷이 그것을 씁니다
+              {t("뽑아 둔 영상")} {renders.length}편 — 누르면 이 컷이 그것을 씁니다
             </p>
             <div className="composition-scroll max-h-32 space-y-1 overflow-y-auto pr-1">
               {[...renders].reverse().map((render) => {
@@ -608,7 +606,7 @@ export function TimelinePanel({
                       }}
                     >
                       {picked ? "● " : "○ "}
-                      {render.seconds.toFixed(1)}초{render.part ? ` · ${render.part}조각` : ""} ·{" "}
+                      {render.seconds.toFixed(1)}{t("초")}{render.part ? ` · ${render.part}조각` : ""} ·{" "}
                       {render.path.split(/[\/]/).pop()}
                     </button>
                     <button
@@ -632,9 +630,7 @@ export function TimelinePanel({
           className="mt-2 text-[9px] leading-relaxed"
           style={{ color: "oklch(0.42 0.01 265)" }}
         >
-          카메라 무빙과 GLB 애니메이션이 이 시계를 함께 따릅니다. 미리보기
-          중에는 화면을 돌리면 해제됩니다. 영상에는 격자·이름표·경로선·앵커가
-          나오지 않습니다.
+          {t("카메라 무빙과 GLB 애니메이션이 이 시계를 함께 따릅니다. 미리보기 중에는 화면을 돌리면 해제됩니다. 영상에는 격자·이름표·경로선·앵커가 나오지 않습니다.")}
           {" "}{t("레퍼런스 영상의 인물은 회색으로 출력합니다. 편집 화면의 식별 색은 유지됩니다.")}
         </p>
       </PanelSection>

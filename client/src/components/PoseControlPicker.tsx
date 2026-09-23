@@ -57,7 +57,6 @@ export default function PoseControlPicker({
         ownerName: source.name,
         result: source.result,
         personNumber,
-        mirror: source.mirror,
         onProgress: (done, total) => setStatus(`뼈 그림 ${done}/${total}`),
       });
       onChange(made);

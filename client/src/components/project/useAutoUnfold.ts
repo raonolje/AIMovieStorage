@@ -2,9 +2,13 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import {
   backgroundColorOf,
+  assessCrossFaces,
+  measureCrossFaces,
   cutCrossFaces,
   looksLikeCrossUnfold,
 } from "@/lib/crossUnfold";
+import { crossUnfoldWarning } from "@/lib/crossUnfoldWarnings";
+import { t } from "@/lib/i18n";
 import { saveFaceSet } from "@/lib/faceSetSave";
 import { faceFileToken } from "@/lib/faceSets";
 import { assetSrc, loadImageForCanvas, type ProjectAssetType } from "@/lib/mediaLibrary";
@@ -122,8 +126,6 @@ export function setAutoUnfoldEnabled(on: boolean): void {
 /**
  * 전개도가 들어오면 **자동으로 여섯 면을 잘라 저장합니다.**
  *
- *
- *
  * 전개도는 우리가 프롬프트를 정해 뽑으므로 판 배치가 늘 같습니다(가로 십자). 그러니
  * 사람이 창을 열어 선을 확인하고 저장을 누르는 일은 **매번 같은 손놀림**입니다.
  * 그림이 카드에 붙는 순간 여기서 대신 합니다.
@@ -149,8 +151,7 @@ export function setAutoUnfoldEnabled(on: boolean): void {
  *
  * 자른 뒤에도 전개도는 목록에 남습니다 — 다시
  * 자르거나, 선을 고쳐 다시 뽑을 때 그것이 재료입니다. 대신 `unfoldedAt` 을 찍어 **두 번
- * 자르지 않습니다.**
- */
+ * 자르지 않습니다.* */
 export function useAutoUnfold(options: {
   /** 이 카드의 생성 이미지. 전개도를 여기서 찾습니다. */
   images: GeneratedImageAsset[] | undefined;
@@ -280,14 +281,24 @@ export function useAutoUnfold(options: {
         return;
       }
 
-      const faces = cutCrossFaces(source, lines, {
-        background: backgroundColorOf(source),
-      });
+      const background = backgroundColorOf(source);
+      const faces = cutCrossFaces(source, lines, { background, targetSize: equirect?.stamp });
       if (faces.length < 6) {
         // 선은 찾았는데 여섯 칸이 안 나오면 사람이 손으로 맞추는 편이 낫습니다.
         markChecked(candidate.id);
         toast.message("전개도로 보이는데 여섯 칸을 다 자르지 못했습니다", {
           description: `${candidate.name} — 가위로 열어 «전개도» 탭에서 선을 맞춰 주세요.`,
+        });
+        return;
+      }
+
+      const inspection = assessCrossFaces(measureCrossFaces(faces, background), equirect?.stamp);
+      if (!inspection.safe) {
+        // 원본은 등록된 채로 둡니다. 누락된 후면을 둘로 쪼개 만들어 자동으로 방에 입히면 문이 크게 늘어납니다.
+        markChecked(candidate.id);
+        toast.warning(t("전개도 경계를 확인해 주세요 — 자동 6면 저장을 보류했습니다"), {
+          description: `${candidate.name}\n${inspection.issues.map((issue) => crossUnfoldWarning(issue, spaceKind)).join("\n")}\n${t("원본은 그대로 있습니다. 가위 → 전개도에서 선을 맞추거나, 빠진 면을 포함해 다시 생성하세요.")}`,
+          duration: 15000,
         });
         return;
       }

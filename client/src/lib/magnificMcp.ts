@@ -2,6 +2,11 @@ import { useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { isDesktopApp } from "@/lib/llm";
 import { safeFileName, saveProjectMediaAsset, type ProjectAssetType } from "@/lib/mediaLibrary";
+import { loadMagnificModels } from "@/lib/magnificModels";
+import { assertMagnificVideoInputs, findMagnificVideoModel } from "@/lib/magnificVideoInputs";
+import { t } from "@/lib/i18n";
+import { toast } from "sonner";
+import { generationResponse, generationNotices, measureMagnificMedia, measuredDifferences, type MagnificGenerationMetadata } from "./magnificGenerationMetadata";
 
 /**
  * **마그니픽 MCP** — 창을 거치지 않고 끝까지 뽑습니다.
@@ -119,6 +124,7 @@ interface WaitResult {
   url?: string | null;
   failed: boolean;
   message?: string | null;
+  response?: unknown;
 }
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
@@ -141,11 +147,33 @@ export async function generateWithMagnific(input: {
   onBeat?: (message: string) => void;
   /** 그만두라는 신호. 참이 되면 기다리기를 멈춥니다(뽑던 것은 마그니픽에 남습니다). */
   stopped?: () => boolean;
-}): Promise<{ path: string; name: string }> {
-  const identifier = await invoke<string>("magnific_generate", {
+  onMetadata?: (metadata: MagnificGenerationMetadata, path?: string) => void;
+}): Promise<{ path: string; name: string; metadata: MagnificGenerationMetadata }> {
+  const requested = JSON.parse(JSON.stringify({ kind: input.kind, args: input.args })) as MagnificGenerationMetadata["requested"];
+  let args = input.args;
+  if (input.kind === "video") {
+    const selected = String(args.slug ?? args.model ?? "");
+    if (selected || args.references || args.keyframes) {
+      const model = findMagnificVideoModel(await loadMagnificModels("video"), selected);
+      if (selected && !model) throw new Error(t("선택한 Magnific 영상 모델이 현재 목록에 없습니다. 모델 목록을 새로 불러와 다시 고르세요."));
+      assertMagnificVideoInputs(model, args);
+      if (model) args = { ...args, slug: model.slug };
+    }
+  }
+  // 구형 명령으로 재시도하지 않습니다. 접수 뒤 응답만 유실됐을 때 생성이 두 번 될 수 있습니다.
+  const accepted = await invoke<{ identifier: string; response: unknown }>("magnific_generate_details", {
     kind: input.kind,
-    args: input.args,
+    args,
   });
+  const identifier = accepted.identifier;
+  const metadata: MagnificGenerationMetadata = { requested, submitted: JSON.parse(JSON.stringify(args)),
+    accepted: { identifier, response: generationResponse(accepted.response) }, measured: { status: "pending" },
+    notices: generationNotices(accepted.response) };
+  const showNotices = (notices: string[]) => {
+    if (notices.length) toast.warning(t("Magnific 생성 안내"), { description: notices.join("\n").slice(0, 1200), duration: 15000 });
+  };
+  input.onMetadata?.(metadata);
+  showNotices(metadata.notices);
   input.onBeat?.("마그니픽이 만드는 중");
 
   let url = "";
@@ -153,6 +181,11 @@ export async function generateWithMagnific(input: {
   for (let turn = 0; turn < 40 && !url; turn += 1) {
     if (input.stopped?.()) throw new Error("멈췄습니다. 뽑던 것은 마그니픽에 남아 있습니다.");
     const reply = await invoke<WaitResult>("magnific_wait", { identifier });
+    if (reply.response !== undefined && (reply.url || reply.failed)) {
+      metadata.completion = generationResponse(reply.response);
+      const notices = generationNotices(reply.response).filter(notice => !metadata.notices.includes(notice));
+      metadata.notices.push(...notices); input.onMetadata?.(metadata); showNotices(notices);
+    }
     if (reply.failed) throw new Error(reply.message || "마그니픽이 만들다 실패했습니다.");
     if (reply.url) {
       url = reply.url;
@@ -187,5 +220,9 @@ export async function generateWithMagnific(input: {
   if (!saved?.path) throw new Error("결과를 놓을 자리를 만들지 못했습니다.");
   input.onBeat?.("내려받는 중");
   await invoke<string>("magnific_download", { url, outputPath: saved.path });
-  return { path: saved.path, name: saved.name || stem };
+  input.onMetadata?.(metadata, saved.path);
+  metadata.measured = await measureMagnificMedia(saved.path, input.kind).catch(() => ({ status: "unavailable" as const }));
+  const differences = measuredDifferences(requested.args, metadata.measured);
+  metadata.notices.push(...differences); input.onMetadata?.(metadata, saved.path); showNotices(differences);
+  return { path: saved.path, name: saved.name || stem, metadata };
 }

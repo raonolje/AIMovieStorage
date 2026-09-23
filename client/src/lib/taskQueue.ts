@@ -118,7 +118,9 @@ export interface TaskJournalAdapter {
 const operations = new Map<string, QueueTask>();
 let journalAdapter: TaskJournalAdapter | null = null;
 let journalInitialization: Promise<void> | null = null;
-let journalWrites: Promise<void> = Promise.resolve();
+type JournalWrite = { journal: TaskJournalSnapshot; error: string | null };
+let journalWrites: Promise<JournalWrite> | null = null;
+let queuedJournalWrite: object | null = null;
 let journalError: string | null = null;
 // 설치본에서는 원본 작업 기록을 읽기 전에 옛 웹뷰 기록으로 생성부터 시작하면 안 됩니다.
 let journalReady = typeof window === "undefined" || !("__TAURI_INTERNALS__" in window);
@@ -129,30 +131,41 @@ function snapshotJournal(): TaskJournalSnapshot {
 
 function queueJournalWrite() {
   if (!journalAdapter) return;
-  const journal = snapshotJournal();
+  // 프레임마다 이전 기록 뒤에 쓰기를 붙이면 렌더가 끝나도 수천 번의 fsync가 남습니다.
+  // 아직 시작하지 않은 쓰기는 최신 상태 하나로 합치고, 시작한 기록은 바꾸지 않습니다.
+  if (queuedJournalWrite) return;
+  const queued = {};
+  queuedJournalWrite = queued;
   const adapter = journalAdapter;
-  journalWrites = journalWrites.then(async () => {
+  journalWrites = (journalWrites ?? Promise.resolve()).then(async () => {
+    if (queuedJournalWrite === queued) queuedJournalWrite = null;
+    const journal = snapshotJournal();
     try {
       await adapter.write(journal);
       journalError = null;
+      return { journal, error: null };
     } catch (error) {
       journalError = String(error instanceof Error ? error.message : error);
       listeners.forEach((listener) => listener());
+      return { journal, error: journalError };
     }
   });
 }
 
-/** 기록 실패를 숨기면 외부 조종기는 실행하지 않은 일도 안전하게 접수됐다고 믿습니다. */
-export async function flushTaskJournal(): Promise<void> {
+/** 뒤따르는 진행률을 끝없이 기다리지 않고, 기다린 쓰기에 실제 저장된 상태만 읽습니다. */
+export async function readTaskJournal(): Promise<TaskJournalSnapshot> {
   await whenTaskJournalReady();
-  // 기다리는 사이 완료·취소 기록이 뒤에 붙을 수 있습니다. 옛 쓰기만 기다린 뒤 최신 메모리
-  // 상태를 돌려주면 «완료»를 받은 직후 재시작했는데 결과가 없는 상태로 되살아납니다.
-  for (;;) {
-    const pending = journalWrites;
-    await pending;
-    if (pending === journalWrites) break;
-  }
-  if (journalError) throw new Error(`작업 기록을 저장하지 못했습니다: ${journalError}`);
+  const pending = journalWrites;
+  if (!pending) return snapshotJournal();
+  const saved = await pending;
+  if (saved.error) throw new Error(`작업 기록을 저장하지 못했습니다: ${saved.error}`);
+  // 이후 메모리 상태를 돌려주면 아직 쓰지 않은 완료 결과까지 저장됐다고 알리게 됩니다.
+  return JSON.parse(JSON.stringify(saved.journal)) as TaskJournalSnapshot;
+}
+
+/** 접수·실행·취소 시점까지의 기록 실패를 숨기면 같은 외부 명령이 다시 실행될 수 있습니다. */
+export async function flushTaskJournal(): Promise<void> {
+  await readTaskJournal();
 }
 
 export function getTaskJournalError(): string | null {
@@ -187,7 +200,9 @@ export function registerTaskJournal(adapter: TaskJournalAdapter): Promise<void> 
       }
       tasks.forEach((task) => { if (task.operationId) operations.set(task.operationId, task); });
       // 재시작하면서 달라진 상태도 먼저 남깁니다. 그 전에 러너가 돌면 같은 결과를 두 번 만들 수 있습니다.
-      await adapter.write(snapshotJournal());
+      const restored = snapshotJournal();
+      await adapter.write(restored);
+      journalWrites = Promise.resolve({ journal: restored, error: null });
       journalAdapter = adapter;
       journalReady = true;
       journalError = null;
@@ -427,11 +442,29 @@ export function getTask(id: string): QueueTask | null {
   return task ? JSON.parse(JSON.stringify(task)) as QueueTask : null;
 }
 
+/** 완료 뒤 세션이 닫혀도 같은 요청의 재전송은 원래 작업을 확인할 수 있어야 합니다. */
+export function getTaskByOperationId(operationId: string): QueueTask | null {
+  load();
+  const task = operations.get(operationId.trim());
+  return task ? JSON.parse(JSON.stringify(task)) as QueueTask : null;
+}
+
 export function listTasks(filter: { projectId?: string; status?: TaskStatus } = {}): QueueTask[] {
   load();
   return JSON.parse(JSON.stringify(tasks.filter((task) =>
     (!filter.projectId || task.projectId === filter.projectId) && (!filter.status || task.status === filter.status),
   ))) as QueueTask[];
+}
+
+/** 조회 도중 뒤에 새 작업이 붙어도 그 작업 전체가 끝나기를 기다리지 않습니다. */
+export async function getPersistedTask(id: string): Promise<QueueTask | null> {
+  const saved = await readTaskJournal();
+  return saved.tasks.find(task => task.id === id) ?? saved.operations.find(task => task.id === id) ?? null;
+}
+
+export async function listPersistedTasks(filter: { projectId?: string; status?: TaskStatus } = {}): Promise<QueueTask[]> {
+  const saved = await readTaskJournal();
+  return saved.tasks.filter(task => (!filter.projectId || task.projectId === filter.projectId) && (!filter.status || task.status === filter.status));
 }
 
 /** 결과 등록도 같은 작업 기록에 넣어야 재접속한 조종기가 만든 파일을 다시 찾습니다. */

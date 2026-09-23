@@ -11,6 +11,10 @@
 
 규칙:
 
+- `data-tour-switch`는 보기 탭(`data-tour-switch-kind="tab"`)과 접기/펴기
+  (`data-tour-switch-kind="expand"`, `aria-expanded`)에만 씁니다. 튜토리얼이 대신 눌러도
+  작품 데이터가 바뀌지 않아야 합니다. 생성·저장·선택·창 열기는 `data-tour-open`으로
+  안내만 하며, 실제 실행은 사용자가 직접 누를 때만 합니다.
 - 목록 안에 같은 요소가 여럿이면(인물 패널 · 컷 카드 · 장면 줄) **모든 것**에 같은 앵커를 달아도
   됩니다. 띄우는 쪽이 첫 번째 것을 잡습니다.
 - 접이식 안에 있는 요소(«수치 입력 · 색», «위치 · 회전 숫자»)는 접혀 있으면 못 잡습니다 — 접이식의
@@ -216,6 +220,7 @@
 | `env-room-props` | `EnvironmentPanel.tsx` | «이 방의 소품» 제목 줄 (L1038) |
 | `env-room-library` | `EnvironmentPanel.tsx` | `<PanelSection title="방 라이브러리">` (L256); «장소 라이브러리» 단추는 바로 위 (L245) |
 | `env-display` | `EnvironmentPanel.tsx` | `<PanelSection title="화면">` (L333) |
+| `env-shadows` | `planner/ShadowPanel.tsx` | 환경 탭의 그림자 판 — 자동 · 접지 그늘 · 방향광 · 끄기, 세기·부드러움 손잡이 |
 
 ## 구도잡기 — 타임라인 탭 (`composition/planner/TimelinePanel.tsx` · `MusicSection.tsx`)
 

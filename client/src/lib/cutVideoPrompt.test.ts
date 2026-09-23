@@ -21,6 +21,20 @@ describe("dedupePhrases", () => {
 });
 
 describe("buildCutVideoPrompt — 질감 한 줄", () => {
+  it("블로킹의 손짓을 보존하며 특정 실내 조명을 모든 컷에 강제하지 않는다", () => {
+    const video = buildCutVideoPrompt({ hasRefVideo: true, acting: "왼손 엄지를 든다", lookEn: "hard sunlight, warm rim light" });
+    expect(video.en).toContain("3D blocking guide");
+    expect(video.en).toContain("smooth plastic surfaces or blank faces");
+    expect(video.en).toContain("Preserve the reference finger poses and gestures");
+    expect(video.en).toContain("short contact shadows where feet or objects actually touch the floor");
+    expect(video.en).toContain("Do not pin raised feet");
+    expect(video.en).toContain("each person's hands and forearms");
+    expect(video.en).toContain("hard sunlight");
+    expect(video.en).not.toMatch(/fluorescent|loosely curled|no shadows/i);
+    expect(video.ko).toContain("손가락의 자세와 제스처");
+    expect(video.ko).toContain("조명·접지");
+    expect(buildCutVideoPrompt({ acting: "달린다" }).en).not.toContain("3D blocking guide");
+  });
   it("레퍼런스가 있을 때만 손·피부에 인형 색을 옮기지 말라고 두 언어에 적는다", () => {
     const input = { title: "손 인사", description: "손을 흔든다", plannedSeconds: 4 };
     const video = buildCutVideoPrompt({ ...input, hasRefVideo: true });

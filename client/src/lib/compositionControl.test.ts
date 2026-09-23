@@ -37,7 +37,7 @@ function fixture(initial = normalizeComposition()) {
   let state = initial;
   const past: CompositionState[] = [];
   const future: CompositionState[] = [];
-  const commit = vi.fn(async () => ({ persisted: true }));
+  const commit = vi.fn(async (_state: CompositionState) => ({ persisted: true }));
   const capture = vi.fn(async () => ({
     guide: "data:image/png;base64,Zw==",
     plate: "data:image/png;base64,cA==",
@@ -82,6 +82,75 @@ function fixture(initial = normalizeComposition()) {
 }
 
 describe("구도 명령 관문", () => {
+  it("큰 모캡 구도는 기본 요약으로 열고 내부 조회는 원래 키를 보존합니다", async () => {
+    const original = addMannequinIn(normalizeComposition(), "female", "performer");
+    const keys = Array.from({ length: 2400 }, (_, index) => ({
+      id: `pose-${index}`, time: index / 30, value: { x: 0, y: 0, z: 0 },
+      bones: Object.fromEntries(Array.from({ length: 54 }, (_, bone) => [`bone-${bone}`, { x: index / 1000, y: bone / 100, z: 0 }])),
+    }));
+    const f = fixture({ ...original, motionTracks: [{ id: "dance", targetId: "performer", channel: "pose", keys }] });
+    const opened = await openComposition(identity);
+    expect(opened.projection.detail).toBe("summary");
+    expect(opened.projection.omitted).toEqual(expect.arrayContaining([expect.objectContaining({ count: 2400 })]));
+    expect(JSON.stringify(opened).length).toBeLessThan(100_000);
+    expect(opened.state.mannequins[0].id).toBe("performer");
+    expect(opened.state.motionTracks![0]).toMatchObject({ id: "dance", targetId: "performer", channel: "pose", keys: [] });
+    expect(f.state().motionTracks![0].keys).toBe(keys);
+    const full = getCompositionSession(f.sessionId);
+    expect(full.projection.detail).toBe("full");
+    expect(full.state.motionTracks![0].keys).toHaveLength(2400);
+    full.state.motionTracks![0].keys[0].value.x = 99;
+    expect(keys[0].value.x).toBe(0);
+
+    const edited = await applyCompositionCommands({ sessionId: f.sessionId, expectedRevision: 0,
+      commands: [{ op: "camera.set", fovDegrees: 51 }] });
+    expect(edited.projection.detail).toBe("summary");
+    expect(edited.state.motionTracks![0].keys).toEqual([]);
+    const undone = await undoComposition({ sessionId: f.sessionId, expectedRevision: 1 });
+    expect(undone.projection.detail).toBe("summary");
+    expect(f.state().motionTracks![0].keys).toBe(keys);
+    const redone = await redoComposition({ sessionId: f.sessionId, expectedRevision: 2, detail: "full" });
+    expect(redone.state.motionTracks![0].keys).toHaveLength(2400);
+    const committed = await commitComposition({ sessionId: f.sessionId, expectedRevision: 3 });
+    expect(committed.projection.detail).toBe("summary");
+    expect(f.commit.mock.calls[0][0].motionTracks![0].keys).toHaveLength(2400);
+    f.user(current => ({ ...current, camera: { ...current.camera, fovDegrees: 59 } }));
+    await expect(applyCompositionCommands({ sessionId: f.sessionId, expectedRevision: 3,
+      commands: [{ op: "camera.set", fovDegrees: 40 }] })).rejects.toMatchObject({ code: "revision_conflict" });
+    f.port.settle = async () => { throw new Error("화면 확인 실패"); };
+    await expect(applyCompositionCommands({ sessionId: f.sessionId, expectedRevision: 4,
+      commands: [{ op: "camera.set", fovDegrees: 61 }] })).rejects.toMatchObject({
+      code: "edit_confirmation_failed",
+      details: { applied: true, snapshot: { revision: 5, projection: { detail: "summary" }, state: { motionTracks: [{ keys: [] }] } } },
+    });
+  });
+  it("긴 변경 이력도 본문을 요약하고 판과 변경 경로는 놓치지 않습니다", () => {
+    const f = fixture(addMannequinIn(normalizeComposition(), "female", "performer"));
+    for (let index = 0; index < 120; index++) {
+      f.user(current => ({ ...current, mannequins: current.mannequins.map(item => ({ ...item, name: `${"x".repeat(45_000)}-${index}` })) }));
+    }
+    const summary = getCompositionChanges({ sessionId: f.sessionId, sinceRevision: 0 });
+    expect(summary.revision).toBe(120);
+    expect(summary.changes).toHaveLength(120);
+    expect(summary.changes.every((change, index) => change.revision === index + 1 && change.changedPaths.includes("/mannequins/0/name"))).toBe(true);
+    expect(summary.changesProjection.detail).toBe("summary");
+    expect(summary.changesProjection.truncated).toBe(true);
+    expect(summary.fullSnapshotRequired).toBe(true);
+    expect(JSON.stringify(summary).length).toBeLessThan(1_000_000);
+    const full = getCompositionChanges({ sessionId: f.sessionId, sinceRevision: 119, detail: "full" });
+    expect(full.changes).toHaveLength(1);
+    expect(String(full.changes[0].changes[0].after)).toHaveLength(45_004);
+  });
+  it("그림자 세기 0과 바닥 격자는 따로 저장되고 함께 되돌릴 수 있습니다", async () => {
+    const f = fixture();
+    const before = f.state();
+    await applyCompositionCommands({ sessionId: f.sessionId, expectedRevision: 0,
+      commands: [{ op: "display.update", showFloor: false, shadows: { mode: "contact", strength: 0, softness: 0.8 } }] });
+    expect(f.state().showFloor).toBe(false);
+    expect(f.state().shadows).toEqual({ mode: "contact", strength: 0, softness: 0.8 });
+    await undoComposition({ sessionId: f.sessionId, expectedRevision: 1 });
+    expect(f.state()).toBe(before);
+  });
   it("스키마 없는 키와 실행 코드를 거부하고 원래 상태를 지킵니다", () => {
     const state = normalizeComposition();
     for (const commands of [

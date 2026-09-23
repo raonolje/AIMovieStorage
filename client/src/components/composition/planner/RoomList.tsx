@@ -1,3 +1,4 @@
+import { useT } from "@/lib/i18n";
 import { useState } from "react";
 import { Eye, EyeOff, Pencil, Plus, X } from "lucide-react";
 import { NumberInput } from "@/components/composition/fields";
@@ -18,8 +19,6 @@ import { confirmDialog } from "@/components/ConfirmDialog";
 
 /**
  * 세워 둔 **방들** — 고르기·더하기·지우기와 활성 방의 자리.
- *
- *
  *
  * # 왜 방을 나누는가 — 크게 만들면 되지 않나
  *
@@ -45,6 +44,7 @@ export function RoomList({
    */
   renderProperties?: (room: CompositionRoom) => React.ReactNode;
 }) {
+  const t = useT();
   const rooms = roomsOf(state);
   const active = activeRoomOf(state);
   /**
@@ -95,7 +95,7 @@ export function RoomList({
           className="text-[9px] font-semibold"
           style={{ color: "oklch(0.52 0.01 265)" }}
         >
-          방 {rooms.length > 1 && `(${rooms.length})`}
+          {t("방")} {rooms.length > 1 && `(${rooms.length})`}
         </span>
         {/*
           ── 실내 · 실외 ────────────────────────────────────────────────
@@ -109,21 +109,21 @@ export function RoomList({
             // 방을 세워야 치수·가릴 면·전개도·6면 세트 칸이 생깁니다 — 튜토리얼이
             // 「먼저 «실내» 를 누르세요」 라고 가리킵니다().
             data-tour-open="env-room-size env-occlude-faces env-room-make-image env-face-sets env-room-props env-room-section"
-            title="여섯 면을 붙일 실내 방입니다. 이미 방이 있으면 오른쪽에 벽을 맞대어 세웁니다"
+            title={t("여섯 면을 붙일 실내 방입니다. 이미 방이 있으면 오른쪽에 벽을 맞대어 세웁니다")}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold"
             style={{ background: "oklch(0.55 0.15 200 / 26%)", color: "oklch(0.80 0.13 200)" }}
           >
-            <Plus className="h-3 w-3" /> 실내
+            <Plus className="h-3 w-3" /> {t("실내")}
           </button>
           <button
             type="button"
             onClick={() => addRoom("outdoor")}
             data-tour-open="env-outdoor-shape env-panoramas"
-            title="파노라마 한 장을 두르는 돔입니다. 한 변 100 m 짜리 공터로 서고, 크기는 아래 칸에서 바꿉니다"
+            title={t("파노라마 한 장을 두르는 돔입니다. 한 변 100 m 짜리 공터로 서고, 크기는 아래 칸에서 바꿉니다")}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold"
             style={{ background: "oklch(0.72 0.16 60 / 26%)", color: "oklch(0.86 0.14 60)" }}
           >
-            <Plus className="h-3 w-3" /> 실외
+            <Plus className="h-3 w-3" /> {t("실외")}
           </button>
           {/*
             ── 호리존 ──────────────────────────────────────────────────
@@ -134,11 +134,11 @@ export function RoomList({
             type="button"
             onClick={() => addRoom("horizon")}
             data-tour-open="env-horizon-color"
-            title="단색 호리존 스튜디오 — 색을 고르는 방, 제품 컷용. 전개도·파노라마 없이 여섯 면이 한 가지 색으로 이어집니다"
+            title={t("단색 호리존 스튜디오 — 색을 고르는 방, 제품 컷용. 전개도·파노라마 없이 여섯 면이 한 가지 색으로 이어집니다")}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold"
             style={{ background: "oklch(0.80 0.02 300 / 24%)", color: "oklch(0.90 0.03 300)" }}
           >
-            <Plus className="h-3 w-3" /> 호리존
+            <Plus className="h-3 w-3" /> {t("호리존")}
           </button>
         </span>
       </div>
@@ -217,7 +217,7 @@ export function RoomList({
                 <button
                   type="button"
                   onClick={() => setEditing({ id: room.id, text: room.name })}
-                  title="이름 고치기"
+                  title={t("이름 고치기")}
                   className="shrink-0 rounded p-1"
                   style={{ color: "oklch(0.58 0.01 265)" }}
                 >
@@ -258,7 +258,7 @@ export function RoomList({
                     if (yes)
                       setState((current) => removeRoomIn(current, room.id));
                   }}
-                  title="이 방을 지웁니다"
+                  title={t("이 방을 지웁니다")}
                   className="shrink-0 rounded p-1"
                   style={{ color: "oklch(0.62 0.16 25)" }}
                 >
@@ -294,7 +294,7 @@ export function RoomList({
                   className="block text-[9px]"
                   style={{ color: "oklch(0.50 0.01 265)" }}
                 >
-                  {field.label}
+                  {t(field.label)}
                 </span>
                 <NumberInput
                   value={Math.round(field.value * 100) / 100}

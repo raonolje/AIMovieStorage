@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { isDesktopApp } from "@/lib/llm";
 import { PANORAMA_DIR, SIX_FACES_DIR } from "@/lib/faceSets";
 import { MOTION_MASK_ACTION } from "@/lib/motionMask";
+import { ASSET_UPLOAD_CHUNK_BYTES, uploadProjectAsset } from "@/lib/assetUpload";
 
 /**
  * 그림·영상 파일을 폴더와 주고받는 창구.
@@ -462,9 +463,7 @@ export async function saveProjectMediaAsset(
   const baseDirectory = getMediaLibrarySettings().baseDirectory.trim();
   if (!isDesktopApp() || !baseDirectory || !options.projectName.trim()) return null;
 
-  const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-  const path = await invoke<string>("save_project_asset", {
-    request: {
+  const request = {
       baseDirectory,
       projectName: options.projectName,
       assetType: options.assetType,
@@ -473,9 +472,12 @@ export async function saveProjectMediaAsset(
       stem: options.stem?.trim() || null,
       subdir: options.subdir || null,
       number: options.number ?? null,
-      bytes,
-    },
-  });
+  };
+  const path = file.size > ASSET_UPLOAD_CHUNK_BYTES
+    ? await uploadProjectAsset(file, request)
+    : await invoke<string>("save_project_asset", {
+        request: { ...request, bytes: Array.from(new Uint8Array(await file.arrayBuffer())) },
+      });
   // 저장된 이름을 함께 돌려줍니다.
   //
   // **폴더에 놓인 이름과 화면에 뜨는 이름이 같아야 합니다.** 파일 이름이 곧
@@ -686,6 +688,13 @@ export async function deleteProjectMediaFile(
   } catch {
     return false;
   }
+}
+
+/** 생성 실패·취소 때 남은 자리만 해제합니다. 실제 결과는 네이티브의 크기 검사로 보호합니다. */
+export async function releaseEmptyProjectAsset(projectName: string, filePath: string): Promise<boolean> {
+  const baseDirectory = getMediaLibrarySettings().baseDirectory.trim();
+  if (!isDesktopApp() || !baseDirectory || !projectName.trim() || !filePath) return false;
+  return invoke<boolean>("release_empty_project_asset", { baseDirectory, projectName, path: filePath });
 }
 
 /**

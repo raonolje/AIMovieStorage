@@ -1,4 +1,6 @@
 import { isDesktopApp } from "@/lib/llm";
+import { EDITION } from "@/lib/edition";
+import { t } from "@/lib/i18n";
 
 /*
   **앱 자동 업데이트.**
@@ -34,7 +36,7 @@ export interface UpdateInfo {
 
 /** 업데이트가 아예 안 되는 판인가 — 비공개판·브라우저. */
 export function updatesUnavailable(): boolean {
-  return !isDesktopApp();
+  return !isDesktopApp() || EDITION !== "public";
 }
 
 /**
@@ -88,6 +90,10 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
 export async function installUpdate(
   onProgress?: (got: number, total: number | null) => void,
 ): Promise<void> {
+  // 화면 밖의 호출도 같은 판정을 거쳐야 원본판이 공개판 설치 경로로 들어가지 않습니다.
+  if (updatesUnavailable()) {
+    throw new Error(t("자동 업데이트는 공개판 데스크톱 앱에서만 사용할 수 있습니다."));
+  }
   const { check } = await import("@tauri-apps/plugin-updater");
   const { relaunch } = await import("@tauri-apps/plugin-process");
   const update = await check();

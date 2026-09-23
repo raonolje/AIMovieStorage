@@ -1,6 +1,8 @@
+import { useT } from "@/lib/i18n";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isTypingTarget } from "@/lib/isTypingTarget";
 import TimelineMusicRow from "@/components/composition/planner/TimelineMusicRow";
+import { CameraPathWarnings } from "./CameraPathWarnings";
 import { TimelineRoomRows } from "./TimelineRoomRows";
 import { ANCHOR_SPOTS, CAMERA_KEY_ROWS, GUTTER, gutterStyle, HANDHELD_PRESETS, MOTION_CHANNELS, TIMELINE_FIELD, TimelineSelect, amountHintOf, amountUnitOf, timelineFieldStyle } from "./timelineParts";
 import { toast } from "sonner";
@@ -31,8 +33,6 @@ import { resolveAnchorSource } from "@/lib/cameraMoves";
  */
 /**
  * 3D 화면 **아래에 붙는 카메라 무빙 타임라인** — 클립을 시간 위에 쌓습니다.
- *
- *
  *
  * # 왜 «레이어» 가 아니라 «줄» 인가
  *
@@ -80,8 +80,6 @@ export function PlannerMoveTimeline({
   /**
    * 인물 줄에서 **오른쪽 단추**를 눌렀을 때. 안 주면 메뉴가 안 뜹니다.
    *
-   *
-   *
    * 메뉴 자체는 **구도잡기 창**이 띄웁니다 — 분석 줄 목록과 모캡 창을 그쪽이 들고 있어서,
    * 타임라인이 그것을 알면 두 화면이 서로를 끌어안게 됩니다.
    */
@@ -128,6 +126,7 @@ export function PlannerMoveTimeline({
     ratio: number,
   ) => { x: number; y: number; z: number } | null;
 }) {
+  const t = useT();
   const moves = sortedMoves(cameraMovesOf(state));
   /** 저장해 둔 카메라 — 클립마다 «어디서 출발할지» 를 고르는 목록입니다. */
   const shots = cameraShotsOf(state);
@@ -346,7 +345,6 @@ export function PlannerMoveTimeline({
   /**
    * 값을 손으로 고치는 중인 **자유 경로 키**. null 이면 안 고치는 중.
    *
-   *
    * 화면에서 카메라를 옮겨 찍는 쪽이 빠르지만, 「정확히 x=2」 같은 값은 손이 빠릅니다.
    */
   const [freeKey, setFreeKey] = useState<{
@@ -362,14 +360,11 @@ export function PlannerMoveTimeline({
   /**
    * 고른 키. Delete 로 지웁니다.
    *
-   *
    * 예전에는 **누르면 곧바로 지워졌습니다** — 옮기려고 누른 것까지 사라졌습니다.
    * 이제 누르면 고르고, 끌면 옮기고, Delete 로 지웁니다.
    */
   /**
    * **고무줄로 잡아 둔 키들** — 그 시간대의 것을 **전부**.
-   *
-   *
    *
    * 처음에는 «한 사람의 한 채널» 로 좁혔는데 맞습니다. 한 사람의 이동·회전·자세는 **같은 순간의 한 동작**
    * 이라, 채널마다 따로 옮기면 팔만 먼저 가는 춤이 됩니다. 사람이 여럿이어도 마찬가지고요
@@ -673,8 +668,6 @@ export function PlannerMoveTimeline({
   /**
    * 초 → 트랙 안의 비율. **1 을 넘을 수 있습니다.**
    *
-   *
-   *
    * 키는 **지워지지 않았습니다.** 여기서 1 로 잘라 버려서, 끝을 넘은 키가 전부 오른쪽 끝에
    * 겹쳐 쌓인 것입니다 — 스무 개가 한 점으로 보이니 «빠졌다» 로 읽힙니다.
    * 이제 자르지 않고, 줄마다 넘치는 것을 **가립니다**(`overflow-hidden`).
@@ -846,7 +839,7 @@ export function PlannerMoveTimeline({
         }}
       >
         <span className="text-[10px] font-semibold" style={{ color: "oklch(0.72 0.01 265)" }}>
-          타임라인
+          {t("타임라인")}
         </span>
         <button
           type="button"
@@ -854,10 +847,10 @@ export function PlannerMoveTimeline({
           data-tour="bottom-play"
           className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold"
           style={{ background: "oklch(0.70 0.15 160 / 16%)", color: "oklch(0.84 0.15 160)" }}
-          title="재생 · 멈춤 (스페이스)"
+          title={t("재생 · 멈춤 (스페이스)")}
         >
           {playing ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-          {playing ? "멈춤" : "재생"}
+          {playing ? t("멈춤") : t("재생")}
         </button>
         <span className="text-[10px] tabular-nums" style={{ color: "oklch(0.62 0.12 200)" }}>
           {playhead.toFixed(2)}s / {duration.toFixed(1)}s
@@ -872,11 +865,13 @@ export function PlannerMoveTimeline({
           type="button"
           onClick={() => setCollapsed(false)}
           data-tour-switch="bottom-timeline bottom-collapse bottom-duration bottom-fps bottom-shot-presets bottom-clip-start bottom-anchor bottom-clip-amount bottom-clip-length bottom-axis bottom-easing bottom-layers bottom-room-rows"
-          title="타임라인 펴기 (Ctrl+Space)"
+          data-tour-switch-kind="expand"
+          aria-expanded={false}
+          title={t("타임라인 펴기 (Ctrl+Space)")}
           className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold"
           style={{ background: "oklch(1 0 0 / 6%)", color: "oklch(0.78 0.01 265)" }}
         >
-          <ChevronsUp className="h-3 w-3" /> 펴기
+          <ChevronsUp className="h-3 w-3" /> {t("펴기")}
           <span style={{ color: "oklch(0.48 0.01 265)" }}>Ctrl+Space</span>
         </button>
       </div>,
@@ -910,7 +905,7 @@ export function PlannerMoveTimeline({
         type="button"
         onClick={() => setCollapsed(true)}
         data-tour="bottom-collapse"
-        title="타임라인을 아래로 접기 (Ctrl+Space) — 재생 단추는 남습니다"
+        title={t("타임라인을 아래로 접기 (Ctrl+Space) — 재생 단추는 남습니다")}
         className="absolute -top-3 right-3 z-20 flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-semibold"
         style={{
           background: "oklch(0.13 0.01 265)",
@@ -918,7 +913,7 @@ export function PlannerMoveTimeline({
           color: "oklch(0.78 0.01 265)",
         }}
       >
-        <ChevronsDown className="h-3 w-3" /> 접기
+        <ChevronsDown className="h-3 w-3" /> {t("접기")}
         <span style={{ color: "oklch(0.48 0.01 265)" }}>Ctrl+Space</span>
       </button>
 
@@ -954,7 +949,7 @@ export function PlannerMoveTimeline({
             <button
               type="button"
               onClick={() => setFreeKey(null)}
-              title="닫기"
+              title={t("닫기")}
               className="shrink-0 rounded p-0.5"
               style={{ color: "oklch(0.60 0.01 265)" }}
             >
@@ -1062,7 +1057,7 @@ export function PlannerMoveTimeline({
             <button
               type="button"
               onClick={() => setGraphPanel(null)}
-              title="닫기"
+              title={t("닫기")}
               className="shrink-0 rounded p-0.5"
               style={{ color: "oklch(0.60 0.01 265)" }}
             >
@@ -1096,12 +1091,13 @@ export function PlannerMoveTimeline({
         </div>
       )}
 
+      <CameraPathWarnings state={state} duration={duration} onSeek={onSeek} onSelectMove={setSelectedId} />
       <div className="mb-1 flex items-center gap-2">
         <span
           className="text-[9px] font-semibold"
           style={{ color: "oklch(0.62 0.01 265)" }}
         >
-          카메라 무빙 — 앞 클립이 끝난 자세에서 다음이 출발합니다
+          {t("카메라 무빙 — 앞 클립이 끝난 자세에서 다음이 출발합니다")}
         </span>
         {/*
           ── 무빙이 어디서 출발하는가 ────────────────────────────────────
@@ -1144,7 +1140,7 @@ export function PlannerMoveTimeline({
             const before = allKeyTimes.filter((t) => t < playhead - 0.001);
             if (before.length) onSeek(before[before.length - 1]);
           }}
-          title="앞 키프레임으로"
+          title={t("앞 키프레임으로")}
           className="rounded px-1 py-0.5"
           style={{ color: "oklch(0.66 0.14 90)" }}
         >
@@ -1156,7 +1152,7 @@ export function PlannerMoveTimeline({
             const after = allKeyTimes.find((t) => t > playhead + 0.001);
             if (after !== undefined) onSeek(after);
           }}
-          title="다음 키프레임으로"
+          title={t("다음 키프레임으로")}
           className="rounded px-1 py-0.5"
           style={{ color: "oklch(0.66 0.14 90)" }}
         >
@@ -1166,7 +1162,7 @@ export function PlannerMoveTimeline({
           type="button"
           onClick={() => onPlay(!playing)}
           data-tour="bottom-play"
-          title={playing ? "멈추기" : "처음부터 재생"}
+          title={playing ? t("멈추기") : t("처음부터 재생")}
           className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold"
           style={{
             background: playing
@@ -1180,7 +1176,7 @@ export function PlannerMoveTimeline({
           ) : (
             <Play className="h-3 w-3" />
           )}
-          {playing ? "멈춤" : "재생"}
+          {playing ? t("멈춤") : t("재생")}
         </button>
         <span
           className="tabular-nums text-[9px]"
@@ -1342,7 +1338,7 @@ export function PlannerMoveTimeline({
                       : "oklch(0.60 0.01 265)",
                   }}
                 >
-                  따라가기
+                  {t("따라가기")}
                 </button>
               )}
               <button
@@ -1359,7 +1355,7 @@ export function PlannerMoveTimeline({
                     : "oklch(0.60 0.01 265)",
                 }}
               >
-                손으로
+                {t("손으로")}
               </button>
               {/*
               ── 어느 클립의 앵커를 따라갈까 ──────────────────────────────
@@ -1381,8 +1377,8 @@ export function PlannerMoveTimeline({
                       : "own"
                 }
                 options={[
-                  { id: "own", label: "앵커: 내 것" },
-                  { id: "lock", label: "앵커: 전부 첫 클립" },
+                  { id: "own", label: t("앵커: 내 것") },
+                  { id: "lock", label: t("앵커: 전부 첫 클립") },
                   ...moves
                     .filter((item) => item.id !== selectedMove.id)
                     .map((item) => ({
@@ -1478,7 +1474,7 @@ export function PlannerMoveTimeline({
                 return withShot;
               });
             }}
-            title={`${preset.label} — ${preset.hint}${
+            title={`${t(preset.label)} — ${preset.hint}${
               shotUsesAnchor(preset.kind)
                 ? " · 앵커(기준점)를 중심으로 움직입니다"
                 : " · 앵커와 무관합니다(제자리 회전·평행 이동·화각)"
@@ -1512,7 +1508,7 @@ export function PlannerMoveTimeline({
               className="mt-0.5 block truncate text-[9px] font-semibold"
               style={{ color: "oklch(0.70 0.01 265)" }}
             >
-              {preset.label}
+              {t(preset.label)}
             </span>
           </button>
         ))}
@@ -1786,7 +1782,7 @@ export function PlannerMoveTimeline({
                 className="text-[9px]"
                 style={{ color: "oklch(0.56 0.01 265)" }}
               >
-                이동량
+                {t("이동량")}
               </span>
               {/*
                 
@@ -1823,7 +1819,7 @@ export function PlannerMoveTimeline({
             className="ml-1 text-[9px]"
             style={{ color: "oklch(0.56 0.01 265)" }}
           >
-            길이
+            {t("길이")}
           </span>
           <input
             type="number"
@@ -1848,7 +1844,7 @@ export function PlannerMoveTimeline({
             className="text-[9px]"
             style={{ color: "oklch(0.52 0.01 265)" }}
           >
-            초
+            {t("초")}
           </span>
           {/* 자유 경로는 «찍어 둔 자리» 라 이동량이 없습니다 — 대신 키를 찍습니다. */}
           {selectedPreset?.kind === "free" && (
@@ -1883,7 +1879,7 @@ export function PlannerMoveTimeline({
                 className="text-[9px]"
                 style={{ color: "oklch(0.72 0.13 200)" }}
               >
-                {pickedAmountKey.key.time.toFixed(2)}초
+                {pickedAmountKey.key.time.toFixed(2)}{t("초")}
               </span>
               <input
                 type="number"
@@ -1924,9 +1920,9 @@ export function PlannerMoveTimeline({
               title="무엇을 축으로 돌지 — 수평은 사람 주위를 돌고, 수직은 위아래로 넘어갑니다"
               value={selectedMove.axis}
               options={[
-                { id: "y", label: "축: 수평" },
-                { id: "x", label: "축: 수직" },
-                { id: "xy", label: "축: 나선" },
+                { id: "y", label: t("축: 수평") },
+                { id: "x", label: t("축: 수직") },
+                { id: "xy", label: t("축: 나선") },
               ]}
               onChange={(axis) =>
                 setState((current) =>
@@ -1962,7 +1958,7 @@ export function PlannerMoveTimeline({
                   : "oklch(0.60 0.01 265)",
               }}
             >
-              앵커 보기
+              {t("앵커 보기")}
             </button>
           )}
           <button
@@ -1986,7 +1982,7 @@ export function PlannerMoveTimeline({
                 : "oklch(0.60 0.01 265)",
             }}
           >
-            앵커 표시
+            {t("앵커 표시")}
           </button>
           {/*
             ── 손떨림 ──────────────────────────────────────────────────
@@ -2000,7 +1996,7 @@ export function PlannerMoveTimeline({
             className="text-[9px]"
             style={{ color: "oklch(0.56 0.01 265)" }}
           >
-            손떨림
+            {t("손떨림")}
           </span>
           <input
             type="number"
@@ -2049,7 +2045,7 @@ export function PlannerMoveTimeline({
                   color: on ? "oklch(0.86 0.13 200)" : "oklch(0.58 0.01 265)",
                 }}
               >
-                {preset.label}
+                {t(preset.label)}
               </button>
             );
           })}
@@ -2076,7 +2072,7 @@ export function PlannerMoveTimeline({
                   : "oklch(0.60 0.01 265)",
             }}
           >
-            속도 그래프
+            {t("속도 그래프")}
           </button>
         </div>
       )}
@@ -2187,7 +2183,7 @@ export function PlannerMoveTimeline({
                     tour="bottom-clip-start"
                     value={move.cameraShotId ?? ""}
                     tone={Boolean(shot)}
-                    placeholder={shots.length ? "이어서" : "구도 없음"}
+                    placeholder={shots.length ? t("이어서") : t("구도 없음")}
                     title={
                       shot
                         ? `«${shot.name}» 구도에서 출발합니다 — 이 시각에 컷이 바뀝니다`
@@ -2196,7 +2192,7 @@ export function PlannerMoveTimeline({
                     options={
                       shots.length
                         ? [
-                            { id: "", label: "이어서" },
+                            { id: "", label: t("이어서") },
                             ...shots.map((item) => ({
                               id: item.id,
                               label: item.name,
@@ -2269,7 +2265,7 @@ export function PlannerMoveTimeline({
                         }),
                       );
                     }}
-                    title={`${preset?.label ?? move.shotId} — 몸통을 끌면 시각, 오른쪽 끝을 끌면 길이, 두 번 누르면 초 입력 · 골라 두고 Delete 로 삭제`}
+                    title={`${t(preset?.label ?? move.shotId)} — 몸통을 끌면 시각, 오른쪽 끝을 끌면 길이, 두 번 누르면 초 입력 · 골라 두고 Delete 로 삭제`}
                     className="absolute inset-y-0 flex cursor-grab items-center overflow-hidden rounded pl-1.5 pr-4 text-[9px] font-semibold"
                     style={{
                       left: `${left}%`,
@@ -2282,7 +2278,7 @@ export function PlannerMoveTimeline({
                     }}
                   >
                     <span className="truncate">
-                      {preset?.label ?? move.shotId}
+                      {t(preset?.label ?? move.shotId)}
                     </span>
                     {/*
                   자유 클립에 찍어 둔 자리들. 클립 막대 위에 점으로 보여 줘야 «언제 어디를
@@ -2395,7 +2391,7 @@ export function PlannerMoveTimeline({
                         <span
                           className="min-w-0 flex-1 truncate pl-3 text-[8px] font-semibold"
                           style={{ color: row.color }}
-                          title={`${preset.label} 의 ${row.label} 키 ${mine.length}개`}
+                          title={`${t(preset.label)} 의 ${row.label} 키 ${mine.length}개`}
                         >
                           ↳ {row.label}
                         </span>
@@ -2498,7 +2494,7 @@ export function PlannerMoveTimeline({
             className="flex items-center gap-1 pt-1 text-[8px] font-semibold"
             style={{ color: "oklch(0.50 0.01 265)" }}
           >
-            <span style={gutterStyle}>인물 · 소품</span>
+            <span style={gutterStyle}>{t("인물 · 소품")}</span>
             <span className="h-px flex-1" style={{ background: "oklch(1 0 0 / 8%)" }} />
           </div>
         )}
@@ -2725,15 +2721,15 @@ export function PlannerMoveTimeline({
                             <span style={{ color: joints.length ? channel.color : "oklch(0.36 0.01 265)" }}>
                               {poseOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                             </span>
-                            <span className="truncate">{channel.label}</span>
+                            <span className="truncate">{t(channel.label)}</span>
                           </button>
                         ) : (
                           <span
                             className="min-w-0 flex-1 truncate pl-4 text-[9px] font-semibold"
                             style={{ color: channel.color }}
-                            title={`${target.name} 의 ${channel.label} 키 ${keys.length}개${keys.length === 1 ? " (하나뿐이라 안 움직입니다)" : ""}`}
+                            title={`${target.name} 의 ${t(channel.label)} 키 ${keys.length}개${keys.length === 1 ? " (하나뿐이라 안 움직입니다)" : ""}`}
                           >
-                            ↳ {channel.label}
+                            ↳ {t(channel.label)}
                           </span>
                         )}
                         <button
@@ -2744,7 +2740,7 @@ export function PlannerMoveTimeline({
                           title={
                             channel.id === "pose"
                               ? `재생 머리(${playhead.toFixed(2)}초) 자리에 지금 보이는 자세(관절 전부)를 키로 찍습니다 — 관절을 고른 채 K 와 같습니다`
-                              : `재생 머리(${playhead.toFixed(2)}초) 자리에 «지금 ${channel.label}» 을 키로 찍습니다`
+                              : `재생 머리(${playhead.toFixed(2)}초) 자리에 «지금 ${t(channel.label)}» 을 키로 찍습니다`
                           }
                           // 오른쪽을 띄웁니다 — 0초의 키 점(폭 20px)이 이름 칸으로 반쯤 걸쳐 「+」 를 덮었습니다.
                           className="mr-2.5 shrink-0 rounded px-1.5 py-px text-[10px] font-semibold"
@@ -2817,7 +2813,7 @@ export function PlannerMoveTimeline({
                               title={
                                 summary
                                   ? `${target.name} · 자세 · ${key.time.toFixed(2)}초 — ${bonesHere.join(", ")} · 끌면 이 관절들이 한 번에 옮겨지고, Delete 면 한 번에 지웁니다`
-                                  : `${target.name} · ${channel.label} · ${key.time.toFixed(2)}초 — 끌어서 옮기고, 눌러 고른 뒤 Delete 로 지웁니다`
+                                  : `${target.name} · ${t(channel.label)} · ${key.time.toFixed(2)}초 — 끌어서 옮기고, 눌러 고른 뒤 Delete 로 지웁니다`
                               }
                               className="absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 cursor-ew-resize items-center justify-center"
                               style={{ left: `${ratioOf(ghost ?? key.time) * 100}%`, width: 20, height: 18, zIndex: 5, opacity: ghost !== null ? 0.6 : 1 }}

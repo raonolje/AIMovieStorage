@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { HOLDS_MOCAP, useTutorialPanel } from "@/lib/useTutorialPanel";
 import { modalCard } from "@/components/modalShell";
-import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { invoke } from "@tauri-apps/api/core";
 import { Film, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { mediaOwnerName } from "@/lib/projectNames";
-import { MODEL_URLS, modelTemplates } from "@/components/composition/viewport/sceneHelpers";
 import type { CompositionCharacterSource, CompositionState } from "@/lib/composition";
-import { addMannequinIn, applyCapturedMotionIn, uid, type UpdateComposition } from "@/lib/compositionEdit";
+import { addMannequinIn, uid, type UpdateComposition } from "@/lib/compositionEdit";
+import { applyRetargetedCaptureIn, loadCaptureRetargetRig } from "@/lib/capturedMotionApply";
 import { isDesktopApp } from "@/lib/llm";
 import { useLocalEngines } from "@/lib/localEngines";
 import { assetSrc } from "@/lib/mediaLibrary";
@@ -33,16 +31,14 @@ import {
 } from "@/lib/mocapStore";
 import type { FootPlantReport } from "@/lib/footPlant";
 import {
-  createRetargetRig,
-  placeCapturedMotion,
   retargetPerson,
-  type PlacedFrame,
   type RetargetFrame,
   type RetargetRig,
 } from "@/lib/motionRetarget";
 import { mannequinBody } from "@/lib/rig";
 import { useT } from "@/lib/i18n";
 import { HAND_CONNECTIONS } from "@/lib/handCapture";
+import { handTrackingSummary } from "@/lib/handTrackingSummary";
 
 /**
  * **영상에서 모션 가져오기** 창.
@@ -153,6 +149,7 @@ export function MotionCaptureDialog({
    */
   const selectedRef = useRef<VideoSource | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const fileImportQueue = useRef<Promise<void>>(Promise.resolve());
   // 진행률은 상태로 두지 않습니다 — 장마다 setState 하면 구도잡기 전체가 다시 그려집니다(`useReferenceVideo` 와 같은 까닭).
   const { engines } = useLocalEngines();
   const desktop = isDesktopApp();
@@ -263,13 +260,21 @@ export function MotionCaptureDialog({
 
   /** 브라우저에서 고른 파일은 **프로젝트 폴더에 넣고** 그 경로로 씁니다. */
   const addFile = async (file: File) => {
-    const saved = await saveMocapVideo(projectName, file).catch(() => null);
-    /*
-      **화면에도 정리된 이름으로 올립니다**(). 폴더는 「춤선이 너무 예뻤던…」 인데 목록은 이모지투성이 원본 이름이면
-      같은 영상인지 알 수가 없습니다. 결과 JSON 의 이름도 이것을 따릅니다.
-    */
-    addSource(mediaOwnerName(file.name), saved, saved ? null : URL.createObjectURL(file));
-    if (saved) toast.success("영상을 프로젝트 폴더에 담았습니다.", { description: saved });
+    const notice = desktop ? toast.loading(t("영상을 프로젝트 폴더에 저장하는 중입니다.")) : undefined;
+    try {
+      const saved = await saveMocapVideo(projectName, file);
+      /*
+        **화면에도 정리된 이름으로 올립니다**(). 폴더는 「춤선이 너무 예뻤던…」 인데 목록은 이모지투성이 원본 이름이면
+        같은 영상인지 알 수가 없습니다. 결과 JSON 의 이름도 이것을 따릅니다.
+      */
+      addSource(mediaOwnerName(file.name), saved, saved ? null : URL.createObjectURL(file));
+      if (saved) toast.success(t("영상을 프로젝트 폴더에 담았습니다."), { id: notice });
+    } catch (error) {
+      // 미리보기만 있는 줄을 추가하면 로컬 분석 시점에야 경로 오류가 납니다.
+      toast.error(t("영상을 저장하지 못했습니다. 다시 가져와 주세요."), {
+        id: notice, description: error instanceof Error ? error.message : String(error),
+      });
+    }
   };
 
   const pickVideos = async () => {
@@ -279,7 +284,7 @@ export function MotionCaptureDialog({
         /*
           **고른 영상을 프로젝트 폴더로 담습니다.** 여태 경로만 기억해서, 프로젝트를 통째로
           옮기면 분석 결과만 남고 원본은 남의 폴더에 있었습니다().
-          담지 못하면 원래 경로로 그냥 씁니다 — 분석은 되어야 하니까요.
+          저장 실패를 원본 경로로 숨기지 않습니다.
         */
         for (const path of paths) {
           const { path: stored, name } = await importMocapVideo(projectName, path);
@@ -474,15 +479,6 @@ export function MotionCaptureDialog({
   const analyze = (source: VideoSource) => enqueueMocap(projectName, source.id);
 
   /** 성별 인형 틀 — 화면이 이미 읽어 둔 것을 쓰고, 없으면 읽습니다(같은 캐시). */
-  const loadTemplate = async (gender?: string) => {
-    const url = MODEL_URLS[mannequinBody(gender)];
-    const cached = modelTemplates.get(url);
-    if (cached) return cached;
-    const gltf = await new GLTFLoader().loadAsync(url);
-    modelTemplates.set(url, gltf.scene);
-    return gltf.scene as THREE.Group;
-  };
-
   /** 모든 영상의 짝 — 사람 조각을 캐릭터마다 모은 것과, 같은 시간에 한 캐릭터에 두 사람이 겹치는지. */
   const plan = useMemo(() => {
     type Piece = { source: VideoSource; key: string; persons: CapturedPerson[]; from: number; to: number };
@@ -553,7 +549,7 @@ export function MotionCaptureDialog({
           gender = plannerCharacters.find((item) => item.id === piece.key)?.gender;
         }
         const body = mannequinBody(gender);
-        if (!rigs.has(body)) rigs.set(body, createRetargetRig(await loadTemplate(gender)));
+        if (!rigs.has(body)) rigs.set(body, await loadCaptureRetargetRig(gender));
         const person = {
           number: piece.persons[0].number,
           samples: piece.persons.flatMap((item) => item.samples).sort((a, b) => a.time - b.time),
@@ -574,7 +570,6 @@ export function MotionCaptureDialog({
       setState((current) => {
         let next = current;
         for (const fresh of freshIds.values()) next = addMannequinIn(next, fresh.gender, fresh.id);
-        const placements: { characterId: string; frames: PlacedFrame[] }[] = [];
         /*
           대형은 영상마다 따로 잽니다 — 서로 다른 영상의 사람끼리는 간격을 알 수 없습니다.
           **넣는 것도 영상마다** 따로 부릅니다. 한꺼번에 넣으면 어느 트랙이 어느 모션에서
@@ -584,22 +579,9 @@ export function MotionCaptureDialog({
         for (const source of snapshot) {
           const own = jobs.filter((job) => job.source.id === source.id);
           if (!own.length || !source.result) continue;
-          const placed = placeCapturedMotion(
-            own.map((job) => {
-              const character = built.characters.find((item) => item.characterId === job.id);
-              return {
-                characterId: job.id,
-                frames: job.frames,
-                position: character?.position ?? { x: 0, y: 0, z: 0 },
-                rotation: character?.rotation ?? { x: 0, y: 0, z: 0 },
-              };
-            }),
-            { start: source.start, captureStart: source.result.start, formation: source.formation },
-          );
-          placements.push(...placed);
-          built = applyCapturedMotionIn(built, placed, channels, {
-            id: source.id,
-            name: source.name,
+          built = applyRetargetedCaptureIn(built, own.map(job => ({ characterId: job.id, frames: job.frames })), {
+            timelineStart: source.start, captureStart: source.result.start, formation: source.formation,
+            channels, source: { id: source.id, name: source.name },
           });
         }
         return built;
@@ -720,7 +702,9 @@ export function MotionCaptureDialog({
           multiple
           className="hidden"
           onChange={(event) => {
-            for (const file of Array.from(event.target.files ?? [])) void addFile(file);
+            for (const file of Array.from(event.target.files ?? [])) {
+              fileImportQueue.current = fileImportQueue.current.then(() => addFile(file));
+            }
             event.target.value = "";
           }}
         />
@@ -806,12 +790,20 @@ export function MotionCaptureDialog({
                   <p className="mt-0.5 text-[9px]" style={{ color: source.message ? "oklch(0.75 0.14 60)" : textColor(0.48) }}>
                     {busy(source)
                       ? "분석 중…"
-                      : source.message
+                      : source.raw?.handTracking && source.status === "done"
+                        ? handTrackingSummary(source.raw)
+                        : source.message
                         ? source.message
                         : count === undefined
                           ? `${engineOptions.find((option) => option.id === source.engine)?.label ?? source.engine} · 분석 전`
                           : `${count}명 · 짝 ${used} · ${source.start.toFixed(2)}초부터`}
                   </p>
+                  {!busy(source) && source.raw?.handTracking && <p className="text-[9px] tabular-nums" style={{ color: textColor(0.48) }}>
+                    {t("손 추적 {frames}장 · 검출 {detected}회 · 유효 {valid}회 · 적용 {applied}회", {
+                      frames: source.raw.handTracking.frames, detected: source.raw.handTracking.detectedHands,
+                      valid: source.raw.handTracking.validHands, applied: source.raw.handTracking.appliedHands,
+                    })}
+                  </p>}
                 </div>
               );
             })}

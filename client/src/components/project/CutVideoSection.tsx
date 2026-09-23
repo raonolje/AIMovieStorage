@@ -1,5 +1,6 @@
 import { Film, Loader2, Sparkles } from "lucide-react";
 import LocalGenerateButton from "@/components/LocalGenerateButton";
+import MagnificVideoCapability from "@/components/MagnificVideoCapability";
 import PromptResultPanels from "@/components/PromptResultPanels";
 import { assetSrc } from "@/lib/mediaLibrary";
 import { cutStem, sceneFolderName } from "@/lib/projectNames";
@@ -9,7 +10,6 @@ import type { Cut, GeneratedImageAsset } from "@/lib/projectTypes";
 /**
  * **컷을 영상으로 뽑는 칸.**
  *
- *
  * 그림 프롬프트와 칸을 나눈 까닭은 `lib/cutVideoPrompt.ts` 에 적어 두었습니다 —
  * 한 칸에 섞으면 그림 쪽 자세가 흐려집니다.
  *
@@ -17,6 +17,7 @@ import type { Cut, GeneratedImageAsset } from "@/lib/projectTypes";
  */
 export default function CutVideoSection({
   cut,
+  videoModel,
   patchCut,
   applyVideoPrompt,
   runVideoPrompt,
@@ -33,12 +34,12 @@ export default function CutVideoSection({
   sendCutVideoToMagnific,
 }: {
   cut: Cut;
+  videoModel?: string;
   patchCut: (patch: Partial<Cut> | ((cut: Cut) => Partial<Cut>)) => void;
   /** 규칙으로만 짓는 「영상 프롬프트」. */
   applyVideoPrompt: () => void;
   /**
    * LLM 으로 받는 「프롬프트 작성」 — 규칙 뼈대 위에 상황·환경·동작·표정을 채웁니다.
-   *
    */
   runVideoPrompt: () => void;
   videoBusy: boolean;
@@ -246,6 +247,7 @@ ${new Date(render.at).toLocaleString()}`}
           </div>
         )}
 
+        <MagnificVideoCapability modelId={videoModel} hasRefVideo={cut.useRefVideo !== false && Boolean(cut.refVideoPath)} />
         <PromptResultPanels
           compact
           owner={{ kind: "cut", name: `컷 ${cut.order}`, cutId: cut.id }}

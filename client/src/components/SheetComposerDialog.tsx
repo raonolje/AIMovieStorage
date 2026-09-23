@@ -149,7 +149,6 @@ export default function SheetComposerDialog({
   onSheetCreated: (image: GeneratedImageAsset) => void;
   /**
    * 고치는 중인 시트. 있으면 «다시 굽기» 가 이 항목을 갈아 끼웁니다.
-   *
    */
   editing?: GeneratedImageAsset;
   /** 다시 구운 시트. previousPath 는 지운 옛 파일 — 경로를 열쇠로 든 곳(표시·구도 배경)을 갈아 끼우려고 넘깁니다. */
@@ -375,8 +374,6 @@ export default function SheetComposerDialog({
 
   /**
    * 칸의 그림을 바꿉니다. 상자 크기는 그대로 — 칸이 곧 규격입니다.
-   *
-   *
    */
   const replaceSlot = (placementId: string, imageId: string) =>
     commit((current) =>

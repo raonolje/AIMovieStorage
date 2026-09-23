@@ -6,11 +6,10 @@ import { aspectOf, enginesOf, type BatchEngine } from "@/lib/batchRun";
 import { targetModelOf, targetModels } from "@/lib/modelRules";
 import LoraPicker from "@/components/LoraPicker";
 import type { ProjectDraft } from "@/lib/projectTypes";
+import { videoCapabilityLabel } from "@/lib/magnificVideoInputs";
 
 /**
  * **무엇으로 뽑을까** — 생성기·모델·해상도. 이미지와 영상을 따로 고릅니다.
- *
- *
  *
  * 그래서 이 부품이 **일괄 생성 창**(주제 설정)에 삽니다. 「넣고 이미지·영상까지 바로 뽑기」
  * 를 켜는 자리와 **무엇으로 뽑을지 고르는 자리**가 같아야, 켜 놓고 확인 탭까지 갔다 올
@@ -241,6 +240,7 @@ export default function BatchToolsField({
           )}
           {catalog.models.length ? `모델 ${catalog.models.length}` : "목록 불러오기"}
         </button>
+        {catalog === videoModels && <p className="w-full text-[10px] text-white/60">{videoCapabilityLabel(catalog.models.find(item => item.slug === model))}</p>}
         {catalog.failed && (
           <span className="text-[10px]" style={{ color: "oklch(0.76 0.15 25)" }}>
             {catalog.failed}

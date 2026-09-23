@@ -26,6 +26,10 @@ _engine = ImageEngine(
     default_guidance=0.0,
     negative_guidance_threshold=None,
     bf16_gb=32.0,
+    # 이 층만 4차원 [배치, 토큰, 특징, 텍스트층] 을 받습니다. bnb 0.48.1 int8 은
+    # 3차원만 펴므로 outlier 열 계산에서 실패합니다(2026-09-23 실측).
+    # 텍스트층 수만큼의 작은 가중치는 그대로 두고 큰 DiT 층의 양자화는 유지합니다.
+    quantization_skip_modules=("text_fusion.projector",),
     notes="8 스텝 증류판. 화풍 로라를 겹쳐 쓰는 자리. 스텝·guidance 를 올리지 마세요.",
 )
 

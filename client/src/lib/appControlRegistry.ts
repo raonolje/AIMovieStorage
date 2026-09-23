@@ -1,5 +1,12 @@
 import { z } from "zod";
+import { controlDetailSchema, projectControlValue } from "./controlProjection";
 import { EDITION } from "./edition";
+import { compositionApplyMocapSchema, applyCompositionMocap } from "./compositionMocapControl";
+import { compositionExportVideoSchema, enqueueCompositionVideoExport } from "./compositionVideoExport";
+import {
+  mocapListSchema, mocapAnalyzeSchema, mocapHandsSchema, mocapResultSchema,
+  listControlMocap, enqueueControlMocap, enqueueControlMocapHands, getControlMocapResult,
+} from "./controlMocap";
 import {
   listCompositionTargets,
   listCompositionSessions,
@@ -17,7 +24,7 @@ import {
   compositionChangesRequestSchema,
   COMPOSITION_COMMANDS,
 } from "./compositionControl";
-import { listTasks, getTask, stopTask, flushTaskJournal } from "./taskQueue";
+import { getTask, stopTask, getPersistedTask, listPersistedTasks } from "./taskQueue";
 import {
   controlEngineCatalog,
   listControlAssets,
@@ -74,8 +81,18 @@ export interface AppControlTool {
 }
 export const controlTools: AppControlTool[] = [];
 export function result(value: unknown): ControlToolResult {
+  const text = JSON.stringify(value);
+  // 같은 자료가 text와 structuredContent에 함께 실립니다. 전체 상태가 큰 경우
+  // 네이티브 전송을 중간에서 자르기 전에 작은 명시 오류와 재조회 방법을 돌려줍니다.
+  if (text.length > 4 * 1024 * 1024 || new TextEncoder().encode(text).length > 4 * 1024 * 1024) {
+    const current = value && typeof value === "object" ? value as Record<string, unknown> : {};
+    const outcome = Object.fromEntries(["projectId", "sessionId", "revision", "persisted", "persistedLatest"]
+      .filter(key => ["string", "number", "boolean"].includes(typeof current[key])).map(key => [key, current[key]]));
+    throw Object.assign(new Error("응답 자료가 너무 큽니다. detail: summary로 다시 조회하세요. 편집 명령은 이미 적용됐을 수 있으므로 같은 편집을 바로 반복하지 마세요."),
+      { code: "response_too_large", details: { ...outcome, retryDetail: "summary", responseLimitBytes: 4 * 1024 * 1024 } });
+  }
   return {
-    content: [{ type: "text", text: JSON.stringify(value) }],
+    content: [{ type: "text", text }],
     structuredContent:
       value && typeof value === "object" && !Array.isArray(value)
         ? (value as Record<string, unknown>)
@@ -117,7 +134,12 @@ export function addControlTool<T>(
   });
 }
 const empty = z.object({}).strict();
+addControlTool("composition_export_video", "Queue the open composition as an MP4 reference video (default 15 seconds, 1920×1080, 24 fps). Requires the matching project/session and expectedRevision. Reuse operationId for retries; inspect the returned task with job_get. Completion requires file and project reference persistence; composition state itself is not committed.", compositionExportVideoSchema, false, enqueueCompositionVideoExport);
 const id = z.string().min(1).max(300);
+addControlTool("mocap_sources_list", "List project-local motion capture sources and included body-analysis engines.", mocapListSchema, true, input => listControlMocap(input.projectId));
+addControlTool("mocap_analyze", "Queue body motion capture from a video asset or mocap source already registered in this project. Reuse operationId on retries. No arbitrary path input. Missing model weights may be downloaded.", mocapAnalyzeSchema, false, enqueueControlMocap, false, true);
+addControlTool("mocap_track_hands", "Queue MediaPipe hand tracking on a saved body capture. Preserves body samples and existing hands where none are detected. Reuse operationId; job_cancel and the mocap UI cancel the same operation.", mocapHandsSchema, false, enqueueControlMocapHands);
+addControlTool("mocap_result", "Read saved motion capture metadata. Set personNumber to retrieve up to 30 joint samples per page; omitted personNumber returns summary only.", mocapResultSchema, true, getControlMocapResult);
 addControlTool(
   "bgm_projects_list",
   "List music projects separately from video projects.",
@@ -188,10 +210,10 @@ addControlTool(
 );
 addControlTool(
   "project_get",
-  "Read the current live draft and revision, including unsaved manual changes.",
+  "Read the current live draft and full-state revision, including unsaved manual changes. detail defaults to summary: large keyframes and inline media are omitted with explicit counts/ranges. Small camera keys and stable IDs remain. Use full only for small projects.",
   projectReadSchema,
   true,
-  (input) => getProjectSnapshot(input.projectId),
+  (input) => getProjectSnapshot(input.projectId, input.detail),
 );
 addControlTool(
   "project_create",
@@ -202,7 +224,7 @@ addControlTool(
 );
 addControlTool(
   "project_update",
-  "Apply a typed batch of story, character, background, scene and cut edits. Uses current editor state and waits for persistence. Stale revisions are rejected.",
+  "Apply a typed batch of story, character, background, scene and cut edits. Uses full current editor state and waits for persistence. Stale revisions are rejected. Result detail defaults to summary; omitted fields are never written back.",
   projectUpdateSchema,
   false,
   updateProjectControl,
@@ -275,10 +297,10 @@ addControlTool(
 );
 addControlTool(
   "composition_get",
-  "Read live composition, stable entity IDs, available assets, units and revision.",
-  z.object({ sessionId: id }).strict(),
+  "Read live composition, stable entity IDs, available assets, units and full-state revision. detail defaults to summary with explicit omitted keyframe counts/ranges; small camera keys remain. Use full only for small compositions.",
+  z.object({ sessionId: id, detail: controlDetailSchema }).strict(),
   true,
-  (input) => getCompositionSession(input.sessionId),
+  (input) => getCompositionSession(input.sessionId, input.detail),
 );
 addControlTool(
   "composition_apply",
@@ -286,6 +308,13 @@ addControlTool(
   compositionApplyRequestSchema,
   false,
   applyCompositionCommands,
+);
+addControlTool(
+  "composition_apply_mocap",
+  "Apply one person from a saved project-local mocap source to a placed character/mannequin. Uses the editor's retargeting, one undo entry and expectedRevision. Optional sourceStartSeconds/durationSeconds trim the original-video interval; timelineStartSeconds sets its destination. Defaults use the saved source. Mirror follows the analyzed result, with no second flip. Selected channels replace keys only within that interval. Returns compact metadata; call composition_commit to save. No arbitrary file paths.",
+  compositionApplyMocapSchema,
+  false,
+  applyCompositionMocap,
 );
 addControlTool(
   "composition_undo",
@@ -388,7 +417,7 @@ addControlTool(
 );
 addControlTool(
   "media_generate",
-  "Queue local image/video generation and attach the new result to a target. Reuse operationId on retries; use a new ID only to intentionally generate again. No LLM API call.",
+  "Queue local image/video generation and attach the new result to a target. Reuse operationId on retries; use a new ID only to intentionally generate again. No LLM API call. H3 video references require options.reference_video_range=first5s or full; long references can be expensive. Completion metadata includes decoded and effective conditioning lengths.",
   generateMediaSchema,
   false,
   enqueueControlGeneration,
@@ -406,7 +435,7 @@ addControlTool(
 );
 addControlTool(
   "jobs_list",
-  "List durable job status and results. GPU cancellation is cooperative; cancelling prevents later attachment when possible.",
+  "List durably saved job status and results. Reads wait only for the bounded journal write captured by the request, not later progress; poll again for newer status. GPU cancellation is cooperative.",
   z
     .object({
       projectId: id.optional(),
@@ -417,18 +446,16 @@ addControlTool(
     .strict(),
   true,
   async (input) => {
-    await flushTaskJournal();
-    return { jobs: listTasks(input).map(publicTask) };
+    return { jobs: (await listPersistedTasks(input)).map(publicTask) };
   },
 );
 addControlTool(
   "job_get",
-  "Read one durable job including output paths and attachment outcome.",
+  "Read one durably saved job including output paths and attachment outcome. Reads wait only for the bounded journal write captured by the request, not later progress; poll again for newer status.",
   z.object({ jobId: id }).strict(),
   true,
   async (input) => {
-    await flushTaskJournal();
-    const task = getTask(input.jobId);
+    const task = await getPersistedTask(input.jobId);
     if (!task) throw new Error("작업을 찾지 못했습니다.");
     return publicTask(task);
   },
@@ -442,8 +469,7 @@ addControlTool(
     const task = getTask(input.jobId);
     if (!task) throw new Error("작업을 찾지 못했습니다.");
     stopTask(input.jobId);
-    await flushTaskJournal();
-    return publicTask(getTask(input.jobId)!);
+    return publicTask((await getPersistedTask(input.jobId))!);
   },
 );
 function publicTask(task: NonNullable<ReturnType<typeof getTask>>) {
@@ -478,6 +504,7 @@ export async function dispatchAppControl(
       message?: unknown;
       details?: unknown;
     };
+    const projectedDetails = projectControlValue(coded.details ?? null, "summary");
     const failure = {
       code:
         typeof coded.code === "string"
@@ -486,7 +513,8 @@ export async function dispatchAppControl(
             ? "invalid_request"
             : "operation_failed",
       message: error instanceof Error ? error.message : String(error),
-      details: coded.details,
+      details: projectedDetails.value,
+      ...(projectedDetails.projection.truncated ? { detailsProjection: projectedDetails.projection } : {}),
     };
     return { ...result(failure), isError: true };
   }

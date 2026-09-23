@@ -885,6 +885,7 @@ ${background.promptKo ?? ""}`),
             stem={folder?.stemBase}
             assetType={folder?.generatedAssetType ?? "background-generated"}
             cropKind="background"
+            faceSetSize={autoEquirectOf(background.blueprint, spaceKind, background.panoramaSpace, background.exteriorSpace, null, `${background.promptEn ?? ""}\n${background.promptKo ?? ""}`)?.stamp}
             // 파노라마 여섯 면의 위 면 이름 — 실내 «천장», 아니면 «하늘».
             spaceKind={spaceKind}
           />

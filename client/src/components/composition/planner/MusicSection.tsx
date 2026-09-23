@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useT } from "@/lib/i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { Music, Plus, Scissors, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -55,6 +56,7 @@ export function MusicSection({
   open: boolean;
   onToggle: () => void;
 }) {
+  const t = useT();
   const music = musicOf(state);
   const timeline = timelineOf(state);
   /** BGM 화면에서 뽑아 둔 곡. 이 칸을 열 때 한 번 읽습니다 — 다시 열면 새로 읽히니 갓 뽑은 곡도 뜹니다. */
@@ -123,7 +125,7 @@ export function MusicSection({
   };
 
   return (
-    <PanelSection tour="timeline-music" title="노래" open={open} onToggle={onToggle}>
+    <PanelSection tour="timeline-music" title={t("노래")} open={open} onToggle={onToggle}>
       {!music ? (
         <div data-tour="timeline-music-pick" className="space-y-1.5">
           {/*

@@ -5,8 +5,6 @@ import type { RetargetFrame, RetargetRig } from "@/lib/motionRetarget";
 /**
  * **디딘 발 고정** — 땅에 붙어 있는 동안은 발이 그 자리에 머물게 합니다.
  *
- *
- *
  * # 왜 따로 사는가
  *
  * 이 파일은 `motionRetarget` 이 **켜 달라고 할 때만** 부르는 한 단계입니다. 끄면 예전 결과가

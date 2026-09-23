@@ -77,8 +77,6 @@ export interface AlternateLineageProps<T extends AlternateEntity> {
 /**
  * 「다른 원본」 상자 — 인물·장소 패널 안의 **또 하나의 미니 계보 목록**.
  *
- *
- *
  * 모양은 「보유 애셋」 상자(`OwnedAssetLineage`)와 같습니다 — 원본마다 이름 줄(이름 칸 + X)
  * 밑에 작은 계보(원본 → 변형), 끝에 «캐릭터 생성» 단추. 계보 조작은 같은 `useEntityLineage`
  * 이고 `owner` 를 줘서 폴더만 주인 것으로 돌립니다(«냥이_어린시절_001»). 원본 편집 창은

@@ -10,7 +10,6 @@ import type { CharacterComposition } from "@/lib/composition";
 /**
  * 고른 인물의 **자리와 방향 수치**. 소품의 `ObjectFields` 와 같은 모양으로, **접힌 채로** 뜹니다.
  *
- *
  * 평소에는 화면에서 끌어 맞추고, 숫자로 딱 맞춰야 할 때만 폅니다.
  *
  * 크기 칸은 없습니다 — 인물의 크기는 **키(cm)** 가 정합니다(위 칸).

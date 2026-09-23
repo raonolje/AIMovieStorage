@@ -7,6 +7,8 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OUTDOOR_EYE_HEIGHT } from "@/lib/unfoldPrompt";
 import { characterColorMap } from "@/lib/compositionColors";
 import { referenceMannequinMaterials } from "@/lib/referenceMannequin";
+import { shadowsOf } from "@/lib/compositionShadows";
+import { createGroundShadows } from "./viewport/groundShadows";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { toast } from "sonner";
@@ -94,6 +96,7 @@ import {
   outerGroupOf,
   roomsOf,
   cameraShotsOf,
+  cameraMoveBasePoseOf,
   lockAnchorsOf,
 } from "@/lib/compositionEdit";
 
@@ -293,6 +296,7 @@ interface ViewportScene {
   foreground: THREE.Group;
   ambient: THREE.AmbientLight;
   keyLight: THREE.DirectionalLight;
+  groundShadows: ReturnType<typeof createGroundShadows>;
 
   characterRoots: Map<string, THREE.Group>;
   characterRigs: Map<string, THREE.Object3D>;
@@ -661,26 +665,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
     「카메라 1 에서 시작해 앵커를 돈다」 로 고정됩니다. 저장 구도가 하나도 없을 때만
     예전처럼 지금 화면을 씁니다(무빙을 못 놓게 막아 두었으니 드문 경우입니다).
   */
-  const moveBasePose = (() => {
-    const shots = cameraShotsOf(composition);
-    const shot =
-      shots.find((item) => item.id === composition.activeShotId) ?? shots[0];
-    if (shot)
-      return {
-        position: { ...shot.position },
-        target: { ...shot.target },
-        // 저장한 화각이 곧 이 구도의 «1배» 입니다.
-        fovScale:
-          composition.camera.fovDegrees > 0
-            ? shot.fovDegrees / composition.camera.fovDegrees
-            : 1,
-      };
-    return {
-      position: { ...composition.camera.position },
-      target: { ...composition.camera.target },
-      fovScale: 1,
-    };
-  })();
+  const moveBasePose = cameraMoveBasePoseOf(composition);
   const baseCameraRef = useRef<CameraPose>(moveBasePose);
   baseCameraRef.current = moveBasePose;
   /*
@@ -914,10 +899,9 @@ export default function CompositionViewport(props: CompositionViewportProps) {
     renderer.setPixelRatio(previewPixelRatio);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    // 바닥면을 숨기면 그림자도 같이 사라져야 합니다. 그림자를 받을 면이 없어도
-    // 오브젝트끼리 드리우는 그림자가 남아 캡처에 찍히므로 그림자 맵 자체를 끕니다.
-    renderer.shadowMap.enabled = composition.showFloor;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // 격자는 거리 안내이고 그림자는 접지 안내이므로 서로 독립시킵니다.
+    renderer.shadowMap.enabled = shadowsOf(composition).resolvedMode === "directional";
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.domElement.style.width = "100%";
     renderer.domElement.style.height = "100%";
     renderer.domElement.style.display = "block";
@@ -979,7 +963,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
       음수). 격자 폭의 1.5배(72 m)까지 물리면 격자 전체가 near~far 안에 듭니다.
     */
     key.position.set(4, 8, 5).setLength(FLOOR_SIZE * 1.5);
-    key.castShadow = composition.showFloor;
+    key.castShadow = shadowsOf(composition).resolvedMode === "directional";
     /*
       그림자 카메라는 **바닥 격자와 같은 넓이**를 덮어야 합니다.
 
@@ -1032,6 +1016,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
       foreground,
       ambient,
       keyLight: key,
+      groundShadows: createGroundShadows(foreground),
       characterRoots: new Map(),
       characterRigs: new Map(),
       objectRoots: new Map(),
@@ -1816,6 +1801,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
       hidden: THREE.Object3D[];
       shadowAuto: boolean;
       bodyMaterials: ReturnType<typeof referenceMannequinMaterials>;
+      controlsEnabled: boolean;
     } | null = null;
 
     let animationFrame = 0;
@@ -1880,6 +1866,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
       */
       placeBackgroundRig(ctx.background, camera);
 
+      ctx.groundShadows.update(handlersRef.current.composition, ctx.characterRoots, ctx.characterRigs);
       renderer.render(scene, camera);
 
       if (previewing) {
@@ -1971,6 +1958,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
         hidden.push(ctx.foreground);
       }
       try {
+        ctx.groundShadows.update(handlersRef.current.composition, ctx.characterRoots, ctx.characterRigs);
         renderer.render(scene, camera);
         return renderer.domElement.toDataURL("image/png");
       } finally {
@@ -1986,6 +1974,8 @@ export default function CompositionViewport(props: CompositionViewportProps) {
     handlersRef.current.onVideoRenderReady?.({
       canvas: renderer.domElement,
       begin: (width, height) => {
+        // 방금 끝낸 드래그의 화질 복원 타이머도 캔버스 크기를 바꾸므로 내보내기 전에 거둡니다.
+        if (restoreQualityTimer) window.clearTimeout(restoreQualityTimer);
         videoRenderState = {
           size: renderer.getSize(new THREE.Vector2()),
           pixelRatio: renderer.getPixelRatio(),
@@ -1993,7 +1983,9 @@ export default function CompositionViewport(props: CompositionViewportProps) {
           hidden: [],
           shadowAuto: renderer.shadowMap.autoUpdate,
           bodyMaterials: referenceMannequinMaterials(),
+          controlsEnabled: controls.enabled,
         };
+        controls.enabled = false;
         const helper = transform.getHelper();
         if (helper.visible) {
           helper.visible = false;
@@ -2043,11 +2035,13 @@ export default function CompositionViewport(props: CompositionViewportProps) {
         // 배경 흐름도 같은 까닭 — 빠뜨리면 화면에서만 흐르고 영상에는 정지 배경이 굽힙니다.
         applyBackgroundDrift(time);
         placeBackgroundRig(ctx.background, camera);
+        ctx.groundShadows.update(handlersRef.current.composition, ctx.characterRoots, ctx.characterRigs);
         renderer.render(scene, camera);
       },
       end: () => {
         if (!videoRenderState) return;
         videoRenderState.bodyMaterials.restore();
+        controls.enabled = videoRenderState.controlsEnabled;
         renderer.setPixelRatio(videoRenderState.pixelRatio);
         renderer.setSize(
           videoRenderState.size.x,
@@ -2062,11 +2056,15 @@ export default function CompositionViewport(props: CompositionViewportProps) {
           node.visible = true;
         });
         videoRenderState = null;
+        // 내보내는 동안 바뀐 창·패널 크기는 지금 반영합니다. 시작 때 크기로만 돌아가면 화면이 늘어집니다.
+        resize();
       },
     });
 
     // ── 크기 맞추기 ───────────────────────────────────────────────────
     const resize = () => {
+      // 인코더가 요구한 해상도를 ResizeObserver가 덮으면 MP4의 프레임 크기가 도중에 달라집니다.
+      if (videoRenderState) return;
       if (!host.clientWidth || !host.clientHeight) return;
       renderer.setSize(host.clientWidth, host.clientHeight, false);
       // aspect 0 = 자유 화면(«3D 배치») — 호스트 비율을 그대로 씁니다.
@@ -2109,6 +2107,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
         여기까지 왔다면 이 씬은 끝난 것이라, 남은 `<video>` 는 디코더만 붙들고 있습니다.
       */
       releaseRoomVideoTextures(ctx.background.videoCache, new Set());
+      ctx.groundShadows.dispose();
       renderer.dispose();
       renderer.domElement.remove();
       fpsBadge.remove();
@@ -2249,17 +2248,24 @@ export default function CompositionViewport(props: CompositionViewportProps) {
     );
   }, [composition.foregroundZoom, zoomPivot]);
 
+  const shadowSettings = shadowsOf(composition);
   // ── 조명 세기·그림자 ──────────────────────────────────────────────────
   useEffect(() => {
     const ctx = sceneRef.current;
     if (!ctx) return;
-    ctx.ambient.intensity = hasSkyLight ? 0.35 : 0.7;
-    ctx.keyLight.castShadow = composition.showFloor;
-    // 바닥면을 숨기면 그림자도 같이 사라져야 합니다. 그림자를 받을 면이 없어도
-    // 오브젝트끼리 드리우는 그림자가 남아 캡처에 찍히므로 그림자 맵 자체를 끕니다.
-    ctx.renderer.shadowMap.enabled = composition.showFloor;
+    const contact = shadowSettings.resolvedMode === "contact";
+    ctx.ambient.intensity = hasSkyLight ? 0.35 : contact ? 0.9 : 0.7;
+    ctx.keyLight.intensity = contact ? 0.55 : 0.9;
+    const directional = shadowSettings.resolvedMode === "directional";
+    ctx.scene.traverse(node => {
+      if (!(node instanceof THREE.DirectionalLight || node instanceof THREE.PointLight || node instanceof THREE.SpotLight)) return;
+      node.castShadow = directional;
+      node.shadow.intensity = shadowSettings.strength;
+      node.shadow.radius = 1 + shadowSettings.softness * 6;
+    });
+    ctx.renderer.shadowMap.enabled = directional;
     ctx.renderer.shadowMap.needsUpdate = true;
-  }, [hasSkyLight, composition.showFloor]);
+  }, [hasSkyLight, shadowSettings.resolvedMode, shadowSettings.strength, shadowSettings.softness, objectKey]);
 
   /*
     ── 바닥 ─────────────────────────────────────────────────────────────
@@ -2284,8 +2290,13 @@ export default function CompositionViewport(props: CompositionViewportProps) {
 
   useEffect(() => {
     const ctx = sceneRef.current;
-    if (!ctx || !composition.showFloor) return;
+    if (!ctx) return;
     const { grid, majorGrid, floor } = buildFloor(floorSize, floorDepth);
+    grid.visible = composition.showFloor;
+    majorGrid.visible = composition.showFloor;
+    floor.visible = shadowSettings.resolvedMode === "directional";
+    // 실제 농도는 모든 그림자 조명의 intensity가 한 번만 곱합니다.
+    floor.material.opacity = 1;
     ctx.foreground.add(grid);
     ctx.foreground.add(majorGrid);
     ctx.foreground.add(floor);
@@ -2297,7 +2308,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
       disposeOwnedMesh(majorGrid);
       disposeOwnedMesh(floor);
     };
-  }, [composition.showFloor, floorSize, floorDepth]);
+  }, [composition.showFloor, shadowSettings.resolvedMode, floorSize, floorDepth]);
 
   // ── «바닥에 세우기» 커서 ──────────────────────────────────────────────
   // 모드가 켜진 것이 커서로도 보여야 «클릭이 왜 인물을 옮기지» 하지 않습니다.
@@ -2909,7 +2920,10 @@ export default function CompositionViewport(props: CompositionViewportProps) {
               0,
               2,
             );
-            light.castShadow = composition.showFloor;
+            const shadows = shadowsOf(composition);
+            light.castShadow = shadows.resolvedMode === "directional";
+            light.shadow.intensity = shadows.strength;
+            light.shadow.radius = 1 + shadows.softness * 6;
             inner.add(light);
           }
         } else if (item.kind === "wall") {
@@ -3024,7 +3038,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
     */
     // composition.objects 의 내용은 objectKey 가 대신합니다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [objectKey, characterKey, composition.showLabels, composition.showFloor]);
+  }, [objectKey, characterKey, composition.showLabels]);
 
   // ── (d) GLB 트랙 — 로드·클립 ──────────────────────────────────────────
   useEffect(() => {

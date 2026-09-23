@@ -29,6 +29,7 @@ class ImageEngine(object):
         bf16_gb=24.0,
         guidance_parameter="guidance_scale",
         negative_guidance_threshold=None,
+        quantization_skip_modules=(),
     ):
         self.repo = repo
         self.pipeline_name = pipeline_name
@@ -39,6 +40,7 @@ class ImageEngine(object):
         self.guidance_parameter = guidance_parameter
         self.negative_guidance_threshold = negative_guidance_threshold
         self.notes = notes
+        self.quantization_skip_modules = tuple(quantization_skip_modules)
         # 이 모델을 bf16 그대로 올리는 데 필요한 VRAM(GB). 정밀도를 고르는 잣대입니다.
         self.bf16_gb = bf16_gb
         self.pipe = None
@@ -72,7 +74,10 @@ class ImageEngine(object):
         pipeline_class = getattr(diffusers, self.pipeline_name)
         common.log_precision(self.repo, plan)
         if plan["bits"]:
-            transformer = common.quantized_component(self.repo, dtype, plan["bits"])
+            quantization_options = (
+                {"skip_modules": self.quantization_skip_modules} if self.quantization_skip_modules else {}
+            )
+            transformer = common.quantized_component(self.repo, dtype, plan["bits"], **quantization_options)
             pipe = pipeline_class.from_pretrained(
                 self.repo, transformer=transformer, torch_dtype=dtype
             )

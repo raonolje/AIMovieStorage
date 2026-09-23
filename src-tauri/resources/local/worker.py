@@ -64,6 +64,7 @@ class _LineOut(object):
 sys.stdout = _LineOut()
 
 import common  # noqa: E402  (stdout 바꿔치기 뒤에 불러야 합니다)
+from control_policy import validate_control_options
 
 
 def send(payload):
@@ -204,6 +205,7 @@ def main():
             if op == "ping":
                 send({"id": job_id, "event": "done"})
             elif op == "load":
+                validate_control_options(args.engine, opts, check_files=True)
                 engine.load(root, opts)
                 send({"id": job_id, "event": "done"})
             elif op == "unload":
@@ -219,6 +221,7 @@ def main():
                     engine.prefetch(root, _reporter(job_id, stage="models"))
                 send({"id": job_id, "event": "done", "prefetched": prefetched})
             elif op == "generate":
+                validate_control_options(args.engine, opts, check_files=True)
                 started = time.time()
                 report = _reporter(job_id)
 

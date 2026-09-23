@@ -1,3 +1,4 @@
+import { useT } from "@/lib/i18n";
 import { useState } from "react";
 import {
   Eye,
@@ -180,6 +181,7 @@ export function LayoutPanel({
   openSections,
   toggleSection,
 }: LayoutPanelProps) {
+  const t = useT();
   // ── 인물 ──────────────────────────────────────────────────────────────
   const selectedCharacterId = selected.startsWith("character:")
     ? selected.slice(10)
@@ -307,7 +309,7 @@ export function LayoutPanel({
     <>
       <PanelSection
         tour="layout-characters"
-        title="인물"
+        title={t("인물")}
         count={plannerCharacters.length}
         open={openSections.characters}
         onToggle={() => toggleSection("characters")}
@@ -318,7 +320,7 @@ export function LayoutPanel({
               className="text-[10px]"
               style={{ color: "oklch(0.45 0.01 265)" }}
             >
-              이 컷에 인물이 없습니다. 아래에서 마네킹을 세워도 됩니다.
+              {t("이 컷에 인물이 없습니다. 아래에서 마네킹을 세워도 됩니다.")}
             </p>
           )}
           {plannerCharacters.map((character, index) => {
@@ -334,8 +336,8 @@ export function LayoutPanel({
               <div key={character.id} className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  // 인물을 골라야 이름·키·체격·몸 색·동선·포즈 칸이 생깁니다.
-                  data-tour-switch="layout-character-fields layout-body-color layout-gizmo-mode layout-path layout-pose-from-image layout-joints layout-hands layout-presets"
+                  // 미배치 인물은 누르면 구도에 추가되므로, 튜토리얼은 직접 누를 자리만 안내합니다.
+                  data-tour-open="layout-character-fields layout-body-color layout-gizmo-mode layout-path layout-pose-from-image layout-joints layout-hands layout-presets"
                   onClick={(event) => {
                     // Ctrl(맥은 ⌘) 로 누르면 **함께 잡습니다** — 색을 한 번에 바꾸려고.
                     if (event.ctrlKey || event.metaKey) {
@@ -447,7 +449,7 @@ export function LayoutPanel({
                 color: "oklch(0.78 0.13 250)",
               }}
             >
-              + 남성형
+              {t("+ 남성형")}
             </button>
             <button
               type="button"
@@ -458,7 +460,7 @@ export function LayoutPanel({
                 color: "oklch(0.80 0.14 20)",
               }}
             >
-              + 여성형
+              {t("+ 여성형")}
             </button>
           </div>
         </div>
@@ -476,12 +478,12 @@ export function LayoutPanel({
                   className="text-[10px] font-semibold"
                   style={{ color: "oklch(0.52 0.01 265)" }}
                 >
-                  인물 이름
+                  {t("인물 이름")}
                 </span>
                 <NameInput
-                  aria-label="인물 이름"
+                  aria-label={t("인물 이름")}
                   value={selectedCharacterSource.name}
-                  placeholder="예: 주안"
+                  placeholder={t("예: 주안")}
                   onCommit={(name) =>
                     renameCharacter(selectedCharacter.characterId, name)
                   }
@@ -492,7 +494,7 @@ export function LayoutPanel({
                   className="text-[10px] font-semibold"
                   style={{ color: "oklch(0.52 0.01 265)" }}
                 >
-                  키 (cm)
+                  {t("키 (cm)")}
                 </span>
                 <NumberInput
                   value={selectedCharacterSource.heightCm}
@@ -515,7 +517,7 @@ export function LayoutPanel({
                       className="text-[10px] font-semibold"
                       style={{ color: "oklch(0.52 0.01 265)" }}
                     >
-                      체격
+                      {t("체격")}
                     </span>
                     <select
                       value={selectedCharacterSource.build || "average"}
@@ -534,9 +536,9 @@ export function LayoutPanel({
                       className="h-8 w-full rounded-md px-2 text-xs outline-none disabled:opacity-45"
                       style={FIELD_STYLE}
                     >
-                      <option value="slim">슬림</option>
-                      <option value="average">보통</option>
-                      <option value="heavy">덩치 큰</option>
+                      <option value="slim">{t("슬림")}</option>
+                      <option value="average">{t("보통")}</option>
+                      <option value="heavy">{t("덩치 큰")}</option>
                     </select>
                   </label>
                 );
@@ -554,7 +556,7 @@ export function LayoutPanel({
               <div data-tour="layout-body-color" className="mb-3 space-y-1">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-semibold" style={{ color: "oklch(0.52 0.01 265)" }}>
-                    몸 색
+                    {t("몸 색")}
                   </span>
                   <span className="text-[9px]" style={{ color: "oklch(0.48 0.01 265)" }}>
                     {colorPick.length > 0
@@ -573,7 +575,7 @@ export function LayoutPanel({
                       color: pinnedHex ? "oklch(0.60 0.01 265)" : "oklch(0.84 0.16 290)",
                     }}
                   >
-                    자동
+                    {t("자동")}
                   </button>
                   {MANNEQUIN_COLORS.map((swatch) => (
                     <button
@@ -599,7 +601,7 @@ export function LayoutPanel({
                   */}
                   <input
                     type="color"
-                    aria-label="몸 색 직접 고르기"
+                    aria-label={t("몸 색 직접 고르기")}
                     value={pinnedHex || bodyColors.get(selectedCharacter.characterId) || "#9aa4b8"}
                     onChange={(event) => paintColor(event.target.value)}
                     className="h-6 w-8 rounded"
@@ -612,7 +614,7 @@ export function LayoutPanel({
                     className="text-[9px] underline"
                     style={{ color: "oklch(0.52 0.01 265)" }}
                   >
-                    함께 잡은 것 풀기
+                    {t("함께 잡은 것 풀기")}
                   </button>
                 )}
               </div>
@@ -719,7 +721,7 @@ export function LayoutPanel({
                   color: "oklch(0.72 0.15 200)",
                 }}
               >
-                <RotateCcw className="h-3 w-3" /> 위치·회전 초기화
+                <RotateCcw className="h-3 w-3" /> {t("위치·회전 초기화")}
               </button>
 
               {state.mannequins.some(
@@ -739,7 +741,7 @@ export function LayoutPanel({
                     color: "oklch(0.78 0.16 25)",
                   }}
                 >
-                  마네킹 제거
+                  {t("마네킹 제거")}
                 </button>
               )}
             </>
@@ -747,7 +749,7 @@ export function LayoutPanel({
 
       <PanelSection
         tour="layout-objects"
-        title="소품 · 조명"
+        title={t("소품 · 조명")}
         count={characterObjectsOf(state).length}
         open={openSections.objects}
         onToggle={() => toggleSection("objects")}
@@ -764,7 +766,7 @@ export function LayoutPanel({
             objects={characterObjectsOf(state)}
             selected={selected}
             setSelected={setSelected}
-            emptyNote="아직 없습니다 — 아래에서 골라 세우면 화면 한가운데에 섭니다."
+            emptyNote={t("아직 없습니다 — 아래에서 골라 세우면 화면 한가운데에 섭니다.")}
           />
           <div data-tour="layout-object-kinds" className="grid grid-cols-2 gap-1">
             {OBJECT_KINDS.map((kind) => (
@@ -782,7 +784,7 @@ export function LayoutPanel({
                   className="h-3 w-3 shrink-0"
                   style={{ opacity: 0.7 }}
                 />
-                {kind.label}
+                {t(kind.label)}
               </button>
             ))}
           </div>
@@ -831,7 +833,7 @@ export function LayoutPanel({
           {selectedGroup && (
             <PanelSection
               tour="layout-group-section"
-              title="덩어리"
+              title={t("덩어리")}
               open={openSections.groups !== false}
               onToggle={() => toggleSection("groups")}
             >
@@ -1234,7 +1236,7 @@ export function LayoutPanel({
       {selectedCharacter && (
         <PanelSection
           tour="layout-pose-section"
-          title="포즈"
+          title={t("포즈")}
           open={openSections.pose}
           onToggle={() => toggleSection("pose")}
         >
@@ -1262,7 +1264,7 @@ export function LayoutPanel({
               className="mb-1.5 text-[10px] font-semibold"
               style={{ color: "oklch(0.45 0.01 265)" }}
             >
-              관절 세부 조정
+              {t("관절 세부 조정")}
             </p>
             {/*
               그림 한 장에서 포즈를 통째로 가져옵니다 — 관절을 하나씩 돌리기 전에
@@ -1318,7 +1320,7 @@ export function LayoutPanel({
               className="mb-1.5 text-[10px] font-semibold"
               style={{ color: "oklch(0.45 0.01 265)" }}
             >
-              손 모양
+              {t("손 모양")}
             </p>
             <HandPosePanel
               bonePose={bonePose}

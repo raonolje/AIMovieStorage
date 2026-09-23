@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "@/lib/i18n";
 import {
   AlertTriangle,
   Check,
@@ -24,8 +25,6 @@ import {
 
 /**
  * **작업 판** — 오른쪽에서 열고 닫는 서랍.
- *
- *
  *
  * # 「멈춘 건지 진행 중인 건지」 에 답하는 법
  *
@@ -226,6 +225,7 @@ export default function TaskQueuePanel() {
 }
 
 function TaskRow({ task, now }: { task: QueueTask; now: number }) {
+  const t = useT();
   const tone = TONE[task.status];
   const since = task.startedAt ?? task.queuedAt;
   /*
@@ -327,6 +327,14 @@ function TaskRow({ task, now }: { task: QueueTask; now: number }) {
         <p className="text-[10px] leading-relaxed" style={{ color: "oklch(0.76 0.15 25)" }}>
           {task.error}
         </p>
+      )}
+      {task.result?.data?.magnific != null && (
+        <details className="text-[10px] leading-relaxed text-muted-foreground">
+          <summary className="cursor-pointer">{t("Magnific 요청·접수·파일 실측 보기")}</summary>
+          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-black/20 p-2">
+            {JSON.stringify(task.result.data.magnific, null, 2)}
+          </pre>
+        </details>
       )}
     </div>
   );

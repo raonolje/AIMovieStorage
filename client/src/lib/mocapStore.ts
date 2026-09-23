@@ -19,6 +19,9 @@ import {
   type SmoothingLevel,
 } from "@/lib/motionCapture";
 import { repairPerson, type RepairLevel } from "@/lib/motionRepair";
+import { waitVideoFrameEvent } from "./videoFrameWait";
+import { t } from "./i18n";
+import { handTrackingSummary } from "./handTrackingSummary";
 
 /**
  * **모션 캡처 분석 살림** — 창 밖에 삽니다.
@@ -88,6 +91,8 @@ export interface MocapSource {
   formation: boolean;
   /** 언제 분석했는가(ISO). 목록에 «어떤 걸 분석했는지» 를 보여 줍니다. */
   analyzedAt: string | null;
+  /** 결과 파일·목록 저장 뒤 앱이 꺼져도 같은 외부 요청을 다시 분석하지 않게 하는 표입니다. */
+  completedOperation?: { id: string; kind: "body" | "hands" };
 }
 
 interface Store {
@@ -253,7 +258,8 @@ export async function saveMocapVideo(
   project: string,
   file: File,
 ): Promise<string | null> {
-  if (!project.trim() || !isDesktopApp()) return null;
+  if (!isDesktopApp()) return null;
+  if (!project.trim()) throw new Error(t("프로젝트와 저장 폴더를 먼저 설정해 주세요."));
   /*
     올린 영상 이름을 **그대로** 폴더로 쓰고 있었습니다. 유튜브에서 받은 이름에는 이모지와
     해시태그가 줄줄이 붙어 폴더 이름이 200자를 넘었습니다(). 원래 이름은 `MocapSource.name` 에 그대로 남으니 잃지 않습니다.
@@ -264,30 +270,32 @@ export async function saveMocapVideo(
     assetType: "mocap-video",
     ownerName: owner,
     stem: owner,
-  }).catch(() => null);
-  return saved?.path ?? null;
+  });
+  if (!saved?.path) throw new Error(t("프로젝트와 저장 폴더를 먼저 설정해 주세요."));
+  return saved.path;
 }
 
 /**
  * 데스크톱 파일 고르개로 **경로만** 받은 영상을 프로젝트 폴더로 담습니다.
  *
- * 돌려주는 것은 «담은 경로와 정리된 이름» 입니다. 못 담으면 원래 경로를 그대로 씁니다 —
- * 분석은 되어야 하니까요(저장 폴더를 아직 안 골랐을 수 있습니다).
+ * 데스크톱에서는 저장 실패를 알립니다. 원래 경로로 대체하면 폴더에 담았다는 안내가 거짓이 됩니다.
  */
 export async function importMocapVideo(
   project: string,
   sourcePath: string,
 ): Promise<{ path: string; name: string }> {
-  const fileName = sourcePath.split(/[\/]/).pop() ?? sourcePath;
+  const fileName = sourcePath.split(/[\\/]/).pop() ?? sourcePath;
   const owner = mediaOwnerName(fileName);
-  if (!project.trim() || !isDesktopApp()) return { path: sourcePath, name: owner };
+  if (!isDesktopApp()) return { path: sourcePath, name: owner };
+  if (!project.trim()) throw new Error(t("프로젝트와 저장 폴더를 먼저 설정해 주세요."));
   const saved = await importProjectMediaAsset(sourcePath, {
     projectName: project,
     assetType: "mocap-video",
     ownerName: owner,
     stem: owner,
-  }).catch(() => null);
-  return saved ? { path: saved.path, name: owner } : { path: sourcePath, name: owner };
+  });
+  if (!saved?.path) throw new Error(t("프로젝트와 저장 폴더를 먼저 설정해 주세요."));
+  return { path: saved.path, name: owner };
 }
 
 /** 분석 결과를 그 영상 폴더에 JSON 으로 남깁니다 — 다시 켜도 그대로 씁니다. */
@@ -340,8 +348,51 @@ export async function loadMocapResult(
 
 // ─── 줄 서서 하나씩 ──────────────────────────────────────────────────────
 
-const queue: { project: string; id: string; kind: "body" | "hands" }[] = [];
+interface MocapQueueEntry {
+  project: string;
+  id: string;
+  kind: "body" | "hands";
+  operationId?: string;
+  resolve?: (source: MocapSource) => void;
+  reject?: (error: unknown) => void;
+}
+const queue: MocapQueueEntry[] = [];
 let running: { project: string; id: string; abort: AbortController } | null = null;
+
+/** 외부 조종에서 등록한 원본 목록도 분석 시작 전에 파일에 남깁니다. */
+export async function confirmMocapSources() {
+  persist();
+  if (isDesktopApp()) await queueMirrorWriteAndConfirm(MOCAP_MIRROR_SECTION, loadSaved());
+}
+
+/** 같은 분석 줄을 쓰되 결과 JSON과 목록 저장을 기다립니다. UI가 취소해도 이 Promise에 전달됩니다. */
+export function enqueueMocapAndWait(project: string, id: string, kind: "body" | "hands", options: {
+  operationId: string;
+  signal?: AbortSignal;
+  onProgress?: (source: MocapSource) => void;
+}): Promise<MocapSource> {
+  if (options.signal?.aborted) return Promise.reject(new DOMException("취소", "AbortError"));
+  const source = mocapSourcesOf(project).find(item => item.id === id);
+  if (!source) return Promise.reject(new Error("분석할 원본 영상을 찾지 못했습니다."));
+  if (source.status === "queued" || source.status === "running" || (running?.project === project && running.id === id))
+    return Promise.reject(new Error("이 원본 영상은 이미 분석 중입니다."));
+  if (kind === "hands" && !source.raw && !source.resultPath)
+    return Promise.reject(new Error("먼저 몸의 관절 분석을 완료해 주세요."));
+  return new Promise<MocapSource>((resolve, reject) => {
+    const progress = () => {
+      const current = mocapSourcesOf(project).find(item => item.id === id);
+      if (current) options.onProgress?.(current);
+    };
+    const cancel = () => cancelMocap(project, id);
+    const cleanup = () => { listeners.delete(progress); options.signal?.removeEventListener("abort", cancel); };
+    listeners.add(progress);
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    queue.push({ project, id, kind, operationId: options.operationId,
+      resolve: value => { cleanup(); resolve(value); }, reject: error => { cleanup(); reject(error); } });
+    patchMocapSource(project, id, current => ({ ...current, status: "queued", percent: 0, message: "차례를 기다립니다…" }));
+    void pump();
+  });
+}
 
 
 /**
@@ -367,7 +418,7 @@ export function enqueueMocap(project: string, id: string, kind: "body" | "hands"
 /** 줄에서 빼거나, 도는 중이면 멈춥니다. */
 export function cancelMocap(project: string, id: string) {
   const at = queue.findIndex((item) => item.project === project && item.id === id);
-  if (at >= 0) queue.splice(at, 1);
+  if (at >= 0) queue.splice(at, 1)[0].reject?.(new DOMException("취소", "AbortError"));
   if (running && running.project === project && running.id === id) running.abort.abort();
   patchMocapSource(project, id, (current) =>
     current.status === "queued" || current.status === "running"
@@ -381,6 +432,7 @@ async function pump() {
   const next = queue.shift()!;
   const source = (store.byProject[next.project] ?? []).find((item) => item.id === next.id);
   if (!source) {
+    next.reject?.(new Error("분석할 원본 영상이 목록에서 제거됐습니다."));
     void pump();
     return;
   }
@@ -405,7 +457,9 @@ async function pump() {
     // 결과 파일만 남고 목록이 옛 경로를 가리키면 재시작 뒤 새 분석이 사라집니다.
     // 목록 파일까지 확인하는 동안에는 완료 표시를 하지 않습니다.
     stagedRaw = raw;
-    patchMocapSource(next.project, next.id, current => ({ ...current, raw, result: repairedCapture(raw, current.repair), resultPath }));
+    if (!mocapSourcesOf(next.project).some(item => item.id === next.id)) throw new Error("분석할 원본 영상이 목록에서 제거됐습니다.");
+    patchMocapSource(next.project, next.id, current => ({ ...current, raw, result: repairedCapture(raw, current.repair), resultPath,
+      analyzedAt: new Date().toISOString(), completedOperation: next.operationId ? { id: next.operationId, kind: next.kind } : undefined }));
     // 브라우저 시연은 기존처럼 메모리에서만 분석합니다. 설치본은 목록 파일까지 확인합니다.
     if (isDesktopApp()) await queueMirrorWriteAndConfirm(MOCAP_MIRROR_SECTION, loadSaved());
     if (abort.signal.aborted) throw new DOMException("취소", "AbortError");
@@ -416,26 +470,30 @@ async function pump() {
       resultPath,
       status: "done",
       percent: 100,
-      analyzedAt: new Date().toISOString(),
-      message: next.kind === "hands" ? "손가락 추가 추적을 마쳤습니다. 타임라인에 넣기를 눌러 적용하세요." : raw.persons.length
+      message: next.kind === "hands" ? handTrackingSummary(raw) : raw.persons.length
         ? `사람 ${raw.persons.length}명`
         : "사람을 찾지 못했습니다. 전신이 보이는 영상인지 확인해 주세요.",
     }));
-    if (!document.querySelector("[data-mocap-open]"))
-      toast.success(`«${source.name}» 분석을 마쳤습니다.`, {
-        description: "모션 가져오기 창을 열면 그대로 있습니다",
+    next.resolve?.(mocapSourcesOf(next.project).find(item => item.id === next.id)!);
+    if (!document.querySelector("[data-mocap-open]")) {
+      if (next.kind === "hands" && raw.handTracking?.appliedHands === 0) toast.info(handTrackingSummary(raw));
+      else toast.success(`«${source.name}» 분석을 마쳤습니다.`, {
+        description: next.kind === "hands" ? handTrackingSummary(raw) : "모션 가져오기 창을 열면 그대로 있습니다",
       });
+    }
   } catch (error) {
     const aborted = error instanceof DOMException && error.name === "AbortError";
     patchMocapSource(next.project, next.id, (current) => ({
       ...current,
-      ...(stagedRaw && current.raw === stagedRaw ? { raw: source.raw, result: repairedCapture(source.raw, current.repair), resultPath: source.resultPath } : {}),
+      ...(stagedRaw && current.raw === stagedRaw ? { raw: source.raw, result: repairedCapture(source.raw, current.repair), resultPath: source.resultPath,
+        completedOperation: source.completedOperation, analyzedAt: source.analyzedAt } : {}),
       status: aborted ? "idle" : "error",
       percent: 0,
       message: aborted
         ? "분석을 취소했습니다."
         : `분석하지 못했습니다. ${error instanceof Error ? error.message : String(error)}`,
     }));
+    next.reject?.(error);
     if (!aborted) toast.error(`«${source.name}» 분석에 실패했습니다.`);
   } finally {
     running = null;
@@ -474,7 +532,8 @@ async function analyzeOne(
     let blobUrl = source.blobUrl;
     if (!blobUrl && source.path) {
       report(0, "영상을 읽는 중…");
-      blobUrl = URL.createObjectURL(await (await fetch(assetSrc(source.path))).blob());
+      blobUrl = URL.createObjectURL(await (await fetch(assetSrc(source.path), { signal })).blob());
+      if (signal.aborted) { URL.revokeObjectURL(blobUrl); throw new DOMException("취소", "AbortError"); }
       const made = blobUrl;
       patchMocapSource(project, source.id, (current) => ({ ...current, blobUrl: made }));
     }
@@ -483,19 +542,13 @@ async function analyzeOne(
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";
-    await new Promise<void>((resolve, reject) => {
-      video.addEventListener("loadeddata", () => resolve(), { once: true });
-      video.addEventListener(
-        "error",
-        () => reject(new Error("영상을 열지 못했습니다(코덱을 확인하세요).")),
-        { once: true },
-      );
-      video.src = blobUrl as string;
-    });
-    report(0, "검출기 준비 중…");
-    const { createPoseDetector } = await import("@/lib/poseLandmarker");
-    const detector = await createPoseDetector();
+    let detector: Awaited<ReturnType<typeof import("./poseLandmarker")["createPoseDetector"]>> | undefined;
     try {
+      await waitVideoFrameEvent(video, "loadeddata", () => { video.src = blobUrl!; }, signal);
+      report(0, "검출기 준비 중…");
+      const { createPoseDetector } = await import("@/lib/poseLandmarker");
+      detector = await createPoseDetector();
+      if (signal.aborted) throw new DOMException("취소", "AbortError");
       return await captureVideo(video, detector, {
         fps: source.fps,
         start: source.clipStart,
@@ -505,7 +558,7 @@ async function analyzeOne(
         onProgress: (done, total) => report((done / total) * 100, `${done} / ${total} 장`),
       });
     } finally {
-      detector.close();
+      detector?.close();
       video.removeAttribute("src");
       video.load();
     }

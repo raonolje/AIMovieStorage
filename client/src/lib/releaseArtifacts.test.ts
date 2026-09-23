@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
+import { inflateRawSync } from "node:zlib";
+import { pathToFileURL } from "node:url";
 import {
   cpSync,
   existsSync,
@@ -28,9 +30,9 @@ const put = (file: string, text: string) => {
   writeFileSync(file, text);
 };
 
-function fixture() {
+function fixture(suffix = "") {
   mkdirSync(SCRATCH, { recursive: true });
-  const root = mkdtempSync(join(SCRATCH, "release-fixture-"));
+  const root = mkdtempSync(join(SCRATCH, `release-fixture-${suffix}`));
   fixtures.push(root);
   put(join(root, "edition.json"), JSON.stringify(editionRules));
   put(
@@ -53,6 +55,73 @@ function fixture() {
     );
   return root;
 }
+
+/** 작은 회귀 fixture의 ZIP 중앙 목록과 실제 파일 바이트를 읽습니다. 외부 압축 도구를 요구하지 않습니다. */
+function zipFiles(file: string) {
+  const bytes = readFileSync(file), files = new Map<string, Buffer>();
+  let end = bytes.length - 22;
+  while (end >= 0 && bytes.readUInt32LE(end) !== 0x06054b50) end--;
+  if (end < 0) throw new Error("ZIP 끝이 없습니다.");
+  let cursor = bytes.readUInt32LE(end + 16);
+  for (let count = bytes.readUInt16LE(end + 10); count > 0; count--) {
+    expect(bytes.readUInt32LE(cursor)).toBe(0x02014b50);
+    const method = bytes.readUInt16LE(cursor + 10), length = bytes.readUInt32LE(cursor + 20);
+    const nameSize = bytes.readUInt16LE(cursor + 28), extra = bytes.readUInt16LE(cursor + 30), comment = bytes.readUInt16LE(cursor + 32);
+    const local = bytes.readUInt32LE(cursor + 42);
+    const name = bytes.subarray(cursor + 46, cursor + 46 + nameSize).toString("utf8").replaceAll("\\", "/");
+    const start = local + 30 + bytes.readUInt16LE(local + 26) + bytes.readUInt16LE(local + 28);
+    const packed = bytes.subarray(start, start + length);
+    files.set(name, method === 8 ? inflateRawSync(packed) : packed);
+    cursor += 46 + nameSize + extra + comment;
+  }
+  return files;
+}
+
+describe.skipIf(process.platform !== "win32")("Windows 무설치본 압축 복구", () => {
+  function packagingFixture() {
+    const root = fixture("한글 [경로] '시험'-"), layout = built(root);
+    for (const name of ["tauri.mjs", "release-artifacts.mjs"]) put(join(root, "scripts", name), readFileSync(join(ROOT, "scripts", name), "utf8"));
+    const env = { ...process.env };
+    delete env.CARGO_TARGET_DIR;
+    env.PSModulePath = join(root, "PS7 모듈");
+    put(join(env.PSModulePath, "Microsoft.PowerShell.Archive/Microsoft.PowerShell.Archive.psd1"), "@{ RootModule = 'Microsoft.PowerShell.Archive.psm1'; ModuleVersion = '9.0'; PowerShellVersion = '7.0' }");
+    put(join(env.PSModulePath, "Microsoft.PowerShell.Archive/Microsoft.PowerShell.Archive.psm1"), "throw 'Archive 모듈을 사용하면 안 됩니다.'");
+    return { root, layout, env };
+  }
+
+  it("PS7 모듈 환경에서도 한글·따옴표 경로를 압축하고 공개판 파일만 정확히 담는다", () => {
+    const { root, layout, env } = packagingFixture();
+    const installer = join(layout.releaseDir, "bundle/nsis", layout.installer);
+    const signature = installer + ".sig";
+    put(signature, "실제 키가 아닌 시험 서명");
+    const before = [readFileSync(installer), readFileSync(signature)];
+    const run = spawnSync(process.execPath, [join(root, "scripts/tauri.mjs"), "build", "--edition", "public", "--portable-only"], { env, encoding: "utf8" });
+    expect(run.status, run.stderr).toBe(0);
+    const files = zipFiles(join(layout.releaseDir, "bundle/portable", layout.portable));
+    expect([...files.keys()].sort()).toEqual([layout.executable, "resources/local/engines/seedvr2.py", "읽어보세요.txt"].sort());
+    expect(files.get(layout.executable)?.toString("utf8")).toBe("실행 파일 시험 자료");
+    expect(files.get("resources/local/engines/seedvr2.py")?.toString("utf8")).toBe("허용 파일\n");
+    expect(files.get("읽어보세요.txt")?.toString("utf8")).toContain("무설치본입니다");
+    expect(readBuildManifest(layout).edition).toBe("public");
+    expect(readFileSync(installer)).toEqual(before[0]); expect(readFileSync(signature)).toEqual(before[1]);
+  });
+
+  it("압축 프로그램 시작이 실패해도 기존 ZIP과 빌드 명세를 지우지 않는다", () => {
+    const { root, layout, env } = packagingFixture();
+    const zip = join(layout.releaseDir, "bundle/portable", layout.portable);
+    const before = [readFileSync(zip), readFileSync(layout.manifestPath)];
+    const fault = join(root, "압축 실패 주입.mjs");
+    put(fault, `import cp from 'node:child_process'; import { syncBuiltinESMExports } from 'node:module';
+const original = cp.spawnSync;
+cp.spawnSync = (command, ...args) => String(command).endsWith('powershell.exe') ? { status: 1 } : original(command, ...args);
+syncBuiltinESMExports();`);
+    const run = spawnSync(process.execPath, ["--import", pathToFileURL(fault).href, join(root, "scripts/tauri.mjs"), "build", "--edition", "public", "--portable-only"], {
+      env, encoding: "utf8",
+    });
+    expect(run.status).toBe(1); expect(run.stderr).toContain("압축에 실패");
+    expect(readFileSync(zip)).toEqual(before[0]); expect(readFileSync(layout.manifestPath)).toEqual(before[1]);
+  });
+});
 
 function built(root: string, edition = "public") {
   const layout = buildLayout(root, edition);

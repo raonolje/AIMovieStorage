@@ -69,7 +69,7 @@ export const HOLDS_PLANNER = [
   "layout-object-kinds layout-object-group layout-object-swap layout-object-asset layout-attach-bone layout-light",
   "layout-wall-image layout-pose-from-image layout-joints layout-hands layout-presets layout-mocap-cleanup bone-picker",
   "env-room-add-indoor env-room-list env-room-size env-room-drift env-room-video env-horizon-color env-outdoor-shape env-occlude-faces",
-  "env-room-make-image env-panoramas env-face-sets env-room-props env-room-library env-display",
+  "env-room-make-image env-panoramas env-face-sets env-room-props env-room-library env-display env-shadows",
   "timeline-music timeline-music-pick timeline-music-sections timeline-mocap-open timeline-glb",
   "timeline-blender-prompt timeline-render timeline-render-split timeline-render-run timeline-renders-list",
   "bottom-timeline bottom-play bottom-collapse bottom-duration bottom-fps bottom-shot-presets",

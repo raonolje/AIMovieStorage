@@ -16,6 +16,29 @@ beforeEach(() => {
 });
 
 describe("앱 설정 거울 저장 확인", () => {
+  it("큰 HTML File 저장은 JSON 바이트 대신 제한된 바이너리 경로를 사용한다", async () => {
+    const media = await import("./mediaLibrary"); await media.whenAppSettingsReady();
+    media.saveMediaLibrarySettings({ baseDirectory: "/project-library" });
+    await tick();
+    let received = 0;
+    state.invoke.mockImplementation(async (command, args) => {
+      if (command === "begin_project_asset_upload") {
+        expect(args.request).toMatchObject({ baseDirectory: "/project-library", projectName: "작품", assetType: "mocap-video" });
+        expect(args.request).not.toHaveProperty("bytes"); return "id";
+      }
+      if (command === "append_project_asset_upload") { expect(args).toBeInstanceOf(Uint8Array); received += args.length; return received; }
+      if (command === "finish_project_asset_upload") return "/project-library/작품/mocap/영상_001.mp4";
+      throw new Error(command);
+    });
+    const file = new File([new Uint8Array(4 * 1024 * 1024 + 1)], "source.mp4");
+    vi.spyOn(file, "arrayBuffer").mockRejectedValue(new Error("전체 읽기 금지"));
+    await expect(media.saveProjectMediaAsset(file, { projectName: "작품", assetType: "mocap-video", ownerName: "영상" }))
+      .resolves.toEqual({ path: "/project-library/작품/mocap/영상_001.mp4", name: "영상_001" });
+    expect(received).toBe(file.size);
+    expect(file.arrayBuffer).not.toHaveBeenCalled();
+    expect(state.invoke.mock.calls.some(([command]) => command === "save_project_asset")).toBe(false);
+  });
+
   it("네이티브 쓰기가 끝날 때까지 기다리고 줄을 선 순간의 값을 저장한다", async () => {
     const media = await import("./mediaLibrary"); await media.whenAppSettingsReady();
     const wait = gate();

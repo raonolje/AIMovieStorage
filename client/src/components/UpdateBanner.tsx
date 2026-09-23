@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Download, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { checkForUpdate, installUpdate, updatesUnavailable, type UpdateInfo } from "@/lib/appUpdate";
+import { isDesktopApp } from "@/lib/llm";
+import { useT } from "@/lib/i18n";
 
 /*
   **새 판이 있으면 여기 뜹니다.**
@@ -19,6 +21,7 @@ import { checkForUpdate, installUpdate, updatesUnavailable, type UpdateInfo } fr
   받는 동안에는 단추를 잠가 두 번 눌리지 않게 합니다.
 */
 export default function UpdateBanner() {
+  const t = useT();
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -68,8 +71,15 @@ export default function UpdateBanner() {
     }
   };
 
-  // 브라우저로 열었거나 업데이터가 없는 판이면 단추 자체를 내지 않습니다.
-  if (updatesUnavailable()) return null;
+  // 원본판에 «최신입니다»라고 답하면 실제 설치 버전과 공개 배포 버전을 혼동하게 됩니다.
+  if (updatesUnavailable()) {
+    if (!isDesktopApp()) return null;
+    return (
+      <p className="max-w-xl text-[11px] leading-relaxed" style={{ color: "oklch(0.60 0.01 265)" }}>
+        {t("비공개 원본판은 공개판 자동 업데이트를 사용하지 않습니다. 원본 저장소에서 만든 비공개 설치본으로 업데이트해 주세요.")}
+      </p>
+    );
+  }
 
   const percent = total ? Math.min(100, Math.round((got / total) * 100)) : null;
 

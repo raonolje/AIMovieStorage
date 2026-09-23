@@ -175,11 +175,16 @@ export function buildCutVideoPrompt(
 
   if (input.hasRefVideo) {
     ko.push(
-      `첨부한 레퍼런스 영상의 카메라 움직임과 타이밍을 그대로 따르세요. ${seconds.toFixed(1)}초입니다. 영상 속 인형은 자리와 동작만 알려 주는 것이니, 첨부한 인물 시트의 사람으로 바꿔 그리세요. 인형의 회색 또는 식별 색을 피부·손·의상에 옮기지 말고, 색과 재질은 인물 시트를 따르세요.`,
+      `첨부한 레퍼런스 영상은 3D 구도 안내(블로킹 가이드)입니다. 카메라 길·자리·동작·타이밍을 그대로 따르세요. ${seconds.toFixed(1)}초입니다. 영상 속 인형은 자리와 동작만 알려 주는 것이니, 첨부한 인물 시트의 사람으로 바꿔 그리세요. 인형의 회색 또는 식별 색을 피부·손·의상에 옮기지 말고, 매끈한 플라스틱 표면과 빈 얼굴도 복사하지 마세요. 피부·머리카락·옷의 색과 재질은 인물 시트를 따르세요. 손가락의 자세와 제스처도 레퍼런스와 연기 지시를 유지하세요.`,
     );
     en.push(
-      `Follow the camera motion and timing of the attached reference video exactly. It is ${seconds.toFixed(1)} seconds long. The mannequins only mark position and action; replace them with the people from the attached character sheets. Use the sheets for skin, hands, clothing colors and materials. Do not transfer grey or identification colors from the mannequins to the people.`,
+      `The attached reference video is a 3D blocking guide. Follow its camera path, positions, action and timing exactly. It is ${seconds.toFixed(1)} seconds long. The mannequins only mark position and action; replace them with the people from the attached character sheets. Use the sheets for skin, hair and clothing colors and materials, not the mannequins' smooth plastic surfaces or blank faces. Do not transfer grey or identification colors from the mannequins to the people. Preserve the reference finger poses and gestures together with the acting instructions.`,
     );
+    // 한 방의 형광등을 모든 컷에 강제하거나, 잡아 둔 손짓을 느슨한 손으로 덮어쓰지 않습니다.
+    ko.push("각 인물의 손등·팔뚝은 그 인물의 얼굴과 같은 피부색 기준을 유지하세요. 입술 화장색을 손에 번지게 하지 말고, 인물 시트에 있는 피부 특징과 조명에 따른 자연스러운 색 변화는 유지하세요.");
+    en.push("Keep each person's hands and forearms consistent with that person's facial skin tone. Do not spread lip makeup color onto the hands; preserve the skin features in their character sheet and natural color changes under the scene lighting.");
+    ko.push("조명·접지: 이 컷에서 지정한 조명이 있으면 그것을, 없으면 배경에 보이는 광원의 방향·색온도·부드러움을 따라 인물을 함께 비추세요. 발이나 물체가 바닥에 닿는 곳에는 접점이 가장 짙고 가까운 바닥으로 부드럽게 사라지는 짧은 접지 그림자를 만드세요. 떠 있는 발을 바닥에 붙이지 마세요. 긴 그림자의 유무·방향·길이는 실제 장면의 광원에 맞추고, 블로킹 가이드의 임시 조명과 그림자를 그대로 복제하지 마세요.");
+    en.push("Lighting and grounding: use the lighting specified for this shot; otherwise match the direction, color temperature and softness of the sources visible in the background. Add short contact shadows where feet or objects actually touch the floor, darkest at contact and fading softly nearby. Do not pin raised feet to the floor. Any longer cast shadows must agree with the scene's light sources; do not copy the blocking guide's temporary lighting or shadows.");
   } else if (camera) {
     ko.push(`카메라: ${camera.ko}`);
     en.push(`Camera: ${camera.en}`);

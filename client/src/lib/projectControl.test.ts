@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { newProjectDraft, newCharacter, newScene, newCut, type ProjectDraft } from "@/lib/projectTypes";
+import { normalizeComposition } from "./composition";
 
 const state = vi.hoisted(() => ({ projects: new Map<string, { id: string; draft: ProjectDraft }>(), fail: false, beforeWrite: null as (() => void) | null, persistGate: null as Promise<void> | null, loads: vi.fn() }));
 vi.mock("@/lib/localProjectStore", () => ({
@@ -39,6 +40,34 @@ function gate() { let resolve!: () => void; const promise = new Promise<void>((d
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("프로젝트 대화 조종", () => {
+  it("5인 긴 구도는 요약 조회·수정에서 키를 줄이되 원본 키와 전체 리비전 검사를 유지한다", async () => {
+    const api = await import("./projectControl");
+    const composition = normalizeComposition();
+    composition.motionTracks = Array.from({ length: 5 }, (_, person) => ({ id: `track-${person}`, targetId: `actor-${person}`, channel: "pose" as const,
+      keys: Array.from({ length: 1983 }, (_, frame) => ({ id: `key-${person}-${frame}`, time: frame / 30, value: { x: 0, y: 0, z: 0 } })) }));
+    current().characters = Array.from({ length: 5 }, (_, person) => ({ ...newCharacter(), id: `actor-${person}`, name: `인물 ${person}` }));
+    current().scenes = [{ ...newScene(), id: "s", cuts: [{ ...newCut(1), id: "k", composition, guideImage: `data:image/png;base64,${"A".repeat(100_000)}` }] }];
+    const first = await api.getProjectSnapshot("p", "summary");
+    expect(first.draft.characters.map(actor => actor.id)).toEqual(current().characters.map(actor => actor.id));
+    expect(first.draft.scenes[0]).toMatchObject({ id: "s", cuts: [{ id: "k", guideImage: "" }] });
+    expect(first.draft.scenes[0].cuts[0].composition?.motionTracks).toHaveLength(5);
+    expect(first.draft.scenes[0].cuts[0].composition?.motionTracks?.[0]).toMatchObject({ keys: [], keyCount: 1983, keyTimeRange: [0, 1982 / 30] });
+    expect(first.projection.truncated).toBe(true);
+    expect(JSON.stringify(first).length).toBeLessThan(50_000);
+    const changed = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [{ type: "cut.update", sceneId: "s", id: "k", fields: { promptEn: "new prompt" } }] });
+    expect(changed.projection.detail).toBe("summary");
+    expect(current().scenes[0].cuts[0].composition?.motionTracks?.[0].keys).toHaveLength(1983);
+    current().scenes[0].cuts[0].composition!.motionTracks![4].keys[1982].value.x = 7;
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: changed.revision, commands: [{ type: "project.update", fields: { title: "오래된 요청" } }] })).rejects.toMatchObject({ code: "revision_conflict" });
+    const changes = await api.getProjectChanges({ projectId: "p", sinceRevision: "previous-session" });
+    expect(changes.fullSnapshotRequired).toBe(true);
+    expect(changes.snapshot?.projection.detail).toBe("summary");
+    expect(JSON.stringify(changes).length).toBeLessThan(50_000);
+    const full = await api.getProjectSnapshot("p", "full");
+    expect(full.draft.scenes[0].cuts[0].composition?.motionTracks?.[4].keys[1982].value.x).toBe(7);
+    expect(full.revision).toBe(changes.revision);
+  });
+
   it.each([false, true])("저장 중 수동 수정과 조회 뒤에는 과거 적용판으로 변경 이력을 되감지 않는다 (저장 실패: %s)", async (fail) => {
     const api = await import("@/lib/projectControl");
     const first = await api.getProjectSnapshot("p");

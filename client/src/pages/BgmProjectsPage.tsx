@@ -605,7 +605,7 @@ export default function BgmProjectsPage() {
               >
                 <button
                   data-tour="bgm-track-add"
-                  data-tour-switch="bgm-chips bgm-tempo-length bgm-tool bgm-instrumental bgm-write bgm-style-panels bgm-history bgm-local-generate bgm-tracks-list"
+                  data-tour-open="bgm-chips bgm-tempo-length bgm-tool bgm-instrumental bgm-write bgm-style-panels bgm-history bgm-local-generate bgm-tracks-list"
                   onClick={() => {
                     const created = createBgmTrack();
                     persist(

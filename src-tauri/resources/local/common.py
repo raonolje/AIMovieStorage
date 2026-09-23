@@ -42,6 +42,9 @@ def _fast_attention_mark():
 
 
 def use_engine_cache(root):
+    # 정션을 거친 HF 상대 링크는 Windows에서 파일이 있어도 열리지 않을 수 있습니다.
+    # 가중치를 복사하거나 다시 받지 않고 캐시의 실제 위치를 모든 라이브러리에 줍니다.
+    root = os.path.realpath(os.path.abspath(root))
     _engine_root["path"] = root
     models = os.path.join(root, "models")
     os.makedirs(models, exist_ok=True)
@@ -737,7 +740,7 @@ def quantized_transformers(repo, dtype, bits, extra=()):
     return out
 
 
-def quantized_component(repo, dtype, bits, subfolder="transformer"):
+def quantized_component(repo, dtype, bits, subfolder="transformer", skip_modules=()):
     """저장소의 **트랜스포머만** 줄여서 올립니다.
 
     파이프라인 통째로는 못 줄입니다(diffusers 는 모델 단위로 받습니다). 큰 것은 어차피
@@ -746,14 +749,18 @@ def quantized_component(repo, dtype, bits, subfolder="transformer"):
     """
     from diffusers import AutoModel, BitsAndBytesConfig
 
+    # 입력 차원이 양자화 커널과 맞지 않는 작은 층만 원래 dtype 으로 남길 수 있습니다.
+    # 호출자 목록은 복사합니다. diffusers 가 내부 제외 목록에 항목을 덧붙일 수 있습니다.
+    exclusions = {"llm_int8_skip_modules": list(skip_modules)} if skip_modules else {}
     if bits == 8:
-        config = BitsAndBytesConfig(load_in_8bit=True)
+        config = BitsAndBytesConfig(load_in_8bit=True, **exclusions)
     else:
         # nf4 — 4비트 중 그림에서 가장 덜 상하는 방식입니다. 계산은 bf16 으로 되돌려 합니다.
         config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=dtype,
+            **exclusions,
         )
     log("{} 의 {} 를 {}비트로 올립니다.".format(repo, subfolder, bits))
     return AutoModel.from_pretrained(

@@ -105,6 +105,31 @@ function toEven(value: number) {
   return Math.max(2, Math.round(value / 2) * 2);
 }
 
+/** 숨겨진 WebView에서 rAF가 멈춰도 외부 조종 작업이 영원히 대기하지 않게 합니다. */
+function yieldEncoder() {
+  return new Promise<void>(resolve => {
+    let frame: number | undefined;
+    const done = () => {
+      clearTimeout(timer);
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      resolve();
+    };
+    const timer = setTimeout(done, 16);
+    if (typeof requestAnimationFrame === "function") frame = requestAnimationFrame(done);
+  });
+}
+
+/** flush가 긴 환경에서도 취소가 큐를 붙잡지 않게 하고 finally에서 인코더를 닫습니다. */
+function finishEncoding(pending: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return pending;
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new DOMException("취소했습니다.", "AbortError"));
+    signal.addEventListener("abort", abort, { once: true });
+    pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    if (signal.aborted) abort();
+  });
+}
+
 export async function renderReferenceVideo(options: ReferenceVideoOptions): Promise<ReferenceVideoResult> {
   if (!isReferenceVideoSupported()) {
     throw new Error("이 환경에서는 영상 인코딩(WebCodecs)을 쓸 수 없습니다.");
@@ -147,25 +172,28 @@ export async function renderReferenceVideo(options: ReferenceVideoOptions): Prom
       if (encodeError) throw encodeError;
 
       const canvas = await options.drawFrame(index / fps, index);
+      if (options.signal?.aborted) throw new DOMException("취소했습니다.", "AbortError");
       const frame = new VideoFrame(canvas, {
         timestamp: Math.round(index * microsecondsPerFrame),
         duration: Math.round(microsecondsPerFrame),
       });
-      encoder.encode(frame, { keyFrame: index % keyFrameInterval === 0 });
-      frame.close();
+      try { encoder.encode(frame, { keyFrame: index % keyFrameInterval === 0 }); }
+      finally { frame.close(); }
 
       // 인코더가 밀리면 메모리에 프레임이 쌓입니다. 큐가 길어지면 잠깐 기다립니다.
       while (encoder.encodeQueueSize > 8) {
         await new Promise(resolve => setTimeout(resolve, 4));
+        if (options.signal?.aborted) throw new DOMException("취소했습니다.", "AbortError");
         if (encodeError) throw encodeError;
       }
 
       options.onProgress?.(index + 1, frameCount);
       // 화면이 완전히 얼어붙지 않도록 몇 프레임마다 한 번씩 넘겨줍니다.
-      if (index % 3 === 0) await new Promise(resolve => requestAnimationFrame(() => resolve(null)));
+      if (index % 3 === 0) await yieldEncoder();
     }
 
-    await encoder.flush();
+    await finishEncoding(encoder.flush(), options.signal);
+    if (options.signal?.aborted) throw new DOMException("취소했습니다.", "AbortError");
     if (encodeError) throw encodeError;
     muxer.finalize();
     return { blob: new Blob([target.buffer], { type: "video/mp4" }), frameCount, codec };

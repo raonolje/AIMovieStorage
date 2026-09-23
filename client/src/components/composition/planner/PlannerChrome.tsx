@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useT } from "@/lib/i18n";
+import { useLocale, useT } from "@/lib/i18n";
 import type { Dispatch, SetStateAction } from "react";
 import {
   Box,
@@ -51,7 +51,7 @@ const TAB_OPENS: Record<PanelTabId, string> = {
   // 카메라 탭은 없앴습니다(위 주석) — 목록에 안 뜨니 열어 줄 것도 없습니다.
   camera: "",
   layout: "layout-characters layout-character-fields layout-body-color layout-gizmo-mode layout-path layout-objects layout-object-kinds layout-object-group layout-object-swap layout-object-asset layout-attach-bone layout-light layout-wall-image layout-pose-from-image layout-joints layout-hands layout-presets layout-mocap-cleanup layout-mannequins bone-picker",
-  environment: "env-room-add-indoor env-room-list env-room-size env-horizon-color env-outdoor-shape env-occlude-faces env-room-make-image env-panoramas env-face-sets env-room-props env-room-library env-display",
+  environment: "env-room-add-indoor env-room-list env-room-size env-horizon-color env-outdoor-shape env-occlude-faces env-room-make-image env-panoramas env-face-sets env-room-props env-room-library env-display env-shadows",
   timeline: "timeline-music timeline-music-pick timeline-music-sections timeline-mocap-open timeline-glb timeline-blender-prompt timeline-render timeline-render-split timeline-render-run timeline-renders-list",
 };
 
@@ -111,6 +111,8 @@ export function PlannerHeader({
   onRedo: () => void;
   onClose: () => void;
 }) {
+  const locale = useLocale();
+  const t = useT();
   return (
     <div
       data-tour="planner-header"
@@ -121,14 +123,14 @@ export function PlannerHeader({
         className="h-4 w-4 shrink-0"
         style={{ color: "oklch(0.78 0.18 290)" }}
       />
-      <p className="shrink-0 text-sm font-semibold">구도 잡기</p>
+      <p className="shrink-0 text-sm font-semibold">{t("구도 잡기")}</p>
       <p
         className="min-w-0 flex-1 truncate text-[11px]"
         style={{ color: "oklch(0.52 0.01 265)" }}
       >
         {summary.hasComposition
-          ? summary.ko
-          : "인물을 세우면 샷·앵글·거리가 여기 나옵니다"}
+          ? locale === "ko" ? summary.ko : summary.en
+          : t("인물을 세우면 샷·앵글·거리가 여기 나옵니다")}
       </p>
 
       {/*
@@ -142,7 +144,7 @@ export function PlannerHeader({
         type="button"
         onClick={onUndo}
         data-tour="planner-undo"
-        title="되돌리기 (Ctrl+Z)"
+        title={t("되돌리기 (Ctrl+Z)")}
         className="shrink-0 rounded p-1.5 hover:bg-white/10"
         style={{ color: "oklch(0.62 0.01 265)" }}
       >
@@ -151,7 +153,7 @@ export function PlannerHeader({
       <button
         type="button"
         onClick={onRedo}
-        title="다시 실행 (Ctrl+Shift+Z)"
+        title={t("다시 실행 (Ctrl+Shift+Z)")}
         className="shrink-0 rounded p-1.5 hover:bg-white/10"
         style={{ color: "oklch(0.62 0.01 265)" }}
       >
@@ -161,7 +163,7 @@ export function PlannerHeader({
       <button
         type="button"
         onClick={onClose}
-        aria-label="닫기"
+        aria-label={t("닫기")}
         className="shrink-0 rounded p-1.5 hover:bg-white/10"
       >
         <X className="h-4 w-4" />
@@ -188,6 +190,7 @@ export function PlannerViewBar({
   /** 비율 칩 아래에 쌓이는 것 — 지금은 카메라 손잡이(샷 크기·조작 속도). */
   children?: ReactNode;
 }) {
+  const t = useT();
   const freeView = !captureAspect;
   return (
     // 아주 좁을 때는 비율 칩도 아랫줄로 접힙니다(`flex-wrap`) — 그래야 오른쪽 도구줄과 안 겹칩니다.
@@ -203,14 +206,14 @@ export function PlannerViewBar({
         <button
           type="button"
           onClick={() => setCaptureAspect(0)}
-          title="비율 제한 없는 자유 화면"
+          title={t("비율 제한 없는 자유 화면")}
           className="rounded px-1.5 py-1 text-[9px] font-semibold"
           style={{
             background: freeView ? "oklch(0.62 0.22 290 / 26%)" : "transparent",
             color: freeView ? "oklch(0.85 0.18 290)" : "oklch(0.52 0.01 265)",
           }}
         >
-          3D 배치
+          {t("3D 배치")}
         </button>
         {CAPTURE_FORMATS.map((format) => {
           const on = Math.abs(format.id - captureAspect) < 0.01;
@@ -253,6 +256,7 @@ export function PlannerTabBar({
   /** 배치 탭에 붙는 인물 수 배지 */
   characterCount: number;
 }) {
+  const t = useT();
   return (
     <div
       data-tour="planner-tabs"
@@ -270,7 +274,8 @@ export function PlannerTabBar({
             type="button"
             onClick={() => setPanelTab(tab.id)}
             data-tour-switch={TAB_OPENS[tab.id]}
-            title={tab.label}
+            data-tour-switch-kind="tab"
+            title={t(tab.label)}
             className="flex items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold"
             style={{
               background: on ? "oklch(0.62 0.22 290 / 24%)" : "transparent",
@@ -278,7 +283,7 @@ export function PlannerTabBar({
             }}
           >
             <tab.icon className="h-3 w-3" />
-            {tab.label}
+            {t(tab.label)}
             {tab.id === "layout" && characterCount > 0 && (
               <span
                 className="rounded px-1 text-[8px] font-bold"
@@ -376,8 +381,8 @@ export function PlannerActionBar({
           data-tour="planner-ground-place"
           title={
             groundPlacing
-              ? "지금은 화면을 찍으면 인물이 그 자리로 갑니다. 누르면 끕니다"
-              : "켜고 바닥을 찍으면 고른 인물이 그 자리로 갑니다"
+              ? t("지금은 화면을 찍으면 인물이 그 자리로 갑니다. 누르면 끕니다")
+              : t("켜고 바닥을 찍으면 고른 인물이 그 자리로 갑니다")
           }
           className="pointer-events-auto flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-semibold"
           style={{
@@ -390,7 +395,7 @@ export function PlannerActionBar({
               : "oklch(0.60 0.01 265)",
           }}
         >
-          <Footprints className="h-3 w-3" /> 바닥에 세우기
+          <Footprints className="h-3 w-3" /> {t("바닥에 세우기")}
         </button>
 
         {/*
@@ -405,15 +410,15 @@ export function PlannerActionBar({
             border: "1px solid oklch(1 0 0 / 10%)",
             color: "oklch(0.72 0.15 200)",
           }}
-          title="방 한 변 — 줄이면 인물이 방에서 차지하는 비율이 커져 배경보다 커 보입니다. 크기는 환경 탭에서"
+          title={t("방 한 변 — 줄이면 인물이 방에서 차지하는 비율이 커져 배경보다 커 보입니다. 크기는 환경 탭에서")}
         >
           <Box className="h-3 w-3" />
           {backgroundOn ? (
             <>
-              방 <span className="tabular-nums">{room.size.toFixed(1)}m</span>
+              {t("방")} <span className="tabular-nums">{room.size.toFixed(1)}m</span>
             </>
           ) : (
-            "구도만"
+            t("구도만")
           )}
         </span>
         <button
@@ -427,8 +432,8 @@ export function PlannerActionBar({
           data-tour="planner-floor-toggle"
           title={
             showFloor
-              ? "바닥면과 그림자를 숨깁니다 (캡처에도 반영)"
-              : "바닥면과 그림자를 표시합니다"
+              ? t("바닥 격자를 숨깁니다 — 그림자는 환경 탭에서 따로 설정합니다")
+              : t("바닥 격자를 표시합니다 — 그림자는 환경 탭에서 따로 설정합니다")
           }
           className="pointer-events-auto flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-semibold"
           style={{
@@ -444,7 +449,7 @@ export function PlannerActionBar({
           ) : (
             <EyeOff className="h-3 w-3" />
           )}{" "}
-          바닥면
+          {t("바닥면")}
         </button>
         {/*
           **«다시 찍기» 를 걷어냈습니다.** 맞습니다. «구도 저장» 이 찍으면서
@@ -479,10 +484,7 @@ export function PlannerActionBar({
             color: "oklch(0.68 0.10 200)",
           }}
         >
-          밑면이 바닥(y=0)이라 <b>인물이 뜨지 않습니다.</b> 층고를 줄이면 인물이
-          방에서 차지하는 비율이 커져 배경보다 커 보입니다 —{" "}
-          <b>방 크기가 곧 축척</b>이에요. 층고는 환경 탭에서, 가로·깊이는 여섯
-          면 그림 비율에서 자동입니다.
+          {t("밑면이 바닥(y=0)이라 인물이 뜨지 않습니다. 방 크기가 곧 축척입니다. 층고는 환경 탭에서, 가로·깊이는 여섯 면 그림 비율에서 자동으로 정합니다.")}
         </p>
       )}
     </div>
@@ -500,6 +502,7 @@ export function PreviewBadge({
   playing: boolean;
   playhead: number;
 }) {
+  const t = useT();
   return (
     <div
       /*
@@ -519,9 +522,9 @@ export function PreviewBadge({
           background: playing ? "oklch(0.72 0.20 25)" : "oklch(0.78 0.18 290)",
         }}
       />
-      카메라 무빙 미리보기 {playing ? "재생 중" : `${playhead.toFixed(2)}s`}
+      {t("카메라 무빙 미리보기")} {playing ? t("재생 중") : `${playhead.toFixed(2)}s`}
       <span style={{ color: "oklch(0.58 0.01 265)" }}>
-        · 화면을 돌리면 해제됩니다
+        {t("· 화면을 돌리면 해제됩니다")}
       </span>
     </div>
   );
@@ -529,6 +532,7 @@ export function PreviewBadge({
 
 /** 파일을 끌고 들어왔을 때 덮는 안내. */
 export function DropHint() {
+  const t = useT();
   return (
     <div
       className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-lg"
@@ -544,7 +548,7 @@ export function DropHint() {
           color: "oklch(0.84 0.19 290)",
         }}
       >
-        놓으면 등록합니다 · 이미지는 배경, .hdr/.exr 은 HDRI, .glb 는 애니메이션
+        {t("놓으면 등록합니다 · 이미지는 배경, .hdr/.exr 은 HDRI, .glb 는 애니메이션")}
       </p>
     </div>
   );
@@ -557,6 +561,7 @@ export function DropHint() {
  * 하면 엉뚱한 사람을 옮겨 놓고도 모릅니다.
  */
 export function GroundPlaceHint({ targetName }: { targetName: string | null }) {
+  const t = useT();
   return (
     <div
       className="pointer-events-none absolute bottom-12 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-md px-2.5 py-1 text-[10px] font-semibold"
@@ -569,15 +574,15 @@ export function GroundPlaceHint({ targetName }: { targetName: string | null }) {
       <Footprints className="mr-1 inline h-3 w-3" />
       {targetName ? (
         <>
-          바닥을 찍으면 «{targetName}» 이 그 자리로 갑니다
+          {t("바닥을 찍으면 «{name}»이 그 자리로 갑니다", { name: targetName })}
           {/* 지평선에 가까울수록 d = h/tan θ 가 발산해 격자 밖 수 km 로 날아갑니다 — 그래서 격자 안까지만 받습니다. */}
           <span style={{ color: "oklch(0.58 0.01 265)" }}>
             {" "}
-            · 지평선 위·격자 밖은 안 됩니다 · Ctrl+Z 로 되돌립니다
+            {t("· 지평선 위·격자 밖은 안 됩니다 · Ctrl+Z 로 되돌립니다")}
           </span>
         </>
       ) : (
-        <>배치 탭에서 인물을 먼저 넣어 주세요</>
+        <>{t("배치 탭에서 인물을 먼저 넣어 주세요")}</>
       )}
     </div>
   );
@@ -593,6 +598,7 @@ export function GroundPlaceHint({ targetName }: { targetName: string | null }) {
  * 글이 3D 화면 밖으로 삐져나갑니다.
  */
 export function CameraHelpHint() {
+  const t = useT();
   return (
     <p
       data-tour="planner-camera-hint"
@@ -602,20 +608,7 @@ export function CameraHelpHint() {
         color: "oklch(0.55 0.01 265)",
       }}
     >
-      화면에서 눌러 고르기 · 왼쪽 끌기 회전 · 오른쪽(또는 가운데) 끌기 이동 · 휠
-      줌 · <b style={{ color: "oklch(0.72 0.01 265)" }}>더블클릭</b>이나{" "}
-      <b style={{ color: "oklch(0.72 0.01 265)" }}>F</b> 로 회전 중심 옮기기(
-      <b style={{ color: "oklch(0.72 0.01 265)" }}>Ctrl+F</b> 화면 한가운데로) ·{" "}
-      <b style={{ color: "oklch(0.72 0.01 265)" }}>M</b> 고른 것 앞으로 카메라 ·{" "}
-      <b style={{ color: "oklch(0.72 0.01 265)" }}>K</b> 키 찍기(
-      <b style={{ color: "oklch(0.72 0.01 265)" }}>Shift+K</b> 자세) ·{" "}
-      <b style={{ color: "oklch(0.72 0.01 265)" }}>G</b> 처음 자리로 ·{" "}
-      <b style={{ color: "oklch(0.72 0.01 265)" }}>Tab</b> 관절 고르기 ·{" "}
-      <b style={{ color: "oklch(0.72 0.01 265)" }}>1·2·3</b> 이동·회전·크기(
-      <b style={{ color: "oklch(0.72 0.01 265)" }}>Ctrl</b> 과 함께면
-      자유·바닥·높이) · W/A/S/D·Q/E 로 이동(
-      <b style={{ color: "oklch(0.72 0.01 265)" }}>Shift</b> 정밀,{" "}
-      <b style={{ color: "oklch(0.72 0.01 265)" }}>Alt</b> 성큼)
+      {t("클릭 선택 · 왼쪽 끌기 회전 · 오른쪽/가운데 끌기 이동 · 휠 줌 · 더블클릭/F 회전 중심 · Ctrl+F 화면 중앙 · M 대상 앞으로 · K 키 · Shift+K 자세 · G 처음 자리 · Tab 관절 · 1/2/3 이동/회전/크기 · Ctrl 자유/바닥/높이 · W/A/S/D·Q/E 이동 · Shift 정밀 · Alt 성큼")}
     </p>
   );
 }

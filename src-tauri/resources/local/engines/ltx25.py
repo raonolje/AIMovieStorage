@@ -18,12 +18,39 @@ import time
 
 import common
 
-_state = {"pipe": None, "mode": None, "loras": [], "plan": None, "pose": False}
+_state = {"pipe": None, "mode": None, "loras": [], "plan": None, "pose": False, "repo": None}
 
 """이 모델을 bf16 그대로 올리는 데 필요한 VRAM(GB) — 정밀도를 고르는 잣대."""
 BF16_GB = 48.0
 
 REPO = "Lightricks/LTX-2.5-Diffusers"
+
+
+def _require_image_codec(opts):
+    """첫 장면의 학습 압축을 생략하지 않고, 큰 모델을 올리기 전에 빠진 PyAV를 알립니다."""
+    if not (opts.get("image") or "").strip():
+        return
+    import importlib.util
+
+    if importlib.util.find_spec("av") is None:
+        raise RuntimeError(
+            "LTX 2.5의 첫 장면 처리에 필요한 PyAV가 없습니다. "
+            "설정 → 로컬 모델 → LTX 2.5의 «다시 설치»로 환경을 갱신해 주세요."
+        )
+
+
+def _sampling_options(opts):
+    """기본 저장소의 transformer는 distilled입니다. 일반 30단계/CFG 3을 적용하지 않습니다."""
+    repo = _state.get("repo") or (os.environ.get("LTX25_REPO") or "").strip() or REPO
+    if repo != REPO:
+        # 예전 2.3 개발용 우회 모델까지 distilled라고 가정하지 않습니다.
+        return {"num_inference_steps": int(opts.get("steps") or 30),
+                "guidance_scale": float(opts.get("guidance", 3.0))}
+    from diffusers.pipelines.ltx2.utils import DISTILLED_SIGMA_VALUES
+
+    return {"sigmas": list(DISTILLED_SIGMA_VALUES), "guidance_scale": 1.0,
+            "audio_guidance_scale": 1.0, "stg_scale": 0.0, "audio_stg_scale": 0.0,
+            "modality_scale": 1.0, "audio_modality_scale": 1.0}
 
 
 def info(root):
@@ -41,11 +68,13 @@ def _mode_of(opts):
 
 
 def load(root, opts):
+    _require_image_codec(opts)
     mode = _mode_of(opts)
+    repo = (os.environ.get("LTX25_REPO") or "").strip() or REPO
     # 정밀도를 **먼저** 셈합니다 — 이미 올라가 있어도 사람이 정밀도를 바꿨으면 다시 올려야
     # 합니다(로라만 다시 걸고 정밀도는 안 보던 자리). 판단은 `common.plan_precision` 한 곳.
     plan = common.plan_precision(BF16_GB, opts, loaded=_state["plan"])
-    if _state["pipe"] is not None and _state["mode"] == mode and not plan["reload"]:
+    if _state["pipe"] is not None and _state["mode"] == mode and _state.get("repo") == repo and not plan["reload"]:
         _apply_loras(opts)
         return
     import diffusers
@@ -85,13 +114,14 @@ def load(root, opts):
             mode, "LTX2Pipeline"
         ),
     )
+    if mode == "pose" and _pose_kwarg(pipeline_class) != "reference_conditions":
+        raise RuntimeError("설치된 LTX 파이프라인에 Union 참조 입력 또는 절반 해상도 처리가 없습니다. LTX 2.5 엔진을 다시 설치해 주세요.")
     """
     `LTX25_REPO` 는 **시험용 우회로**입니다. 2.5 저장소는 게이트라 허깅페이스에서 약관에
     동의한 계정만 받을 수 있는데(2026-09-18 실측: 사용자 계정이 아직 동의 전이라 403), 그
     사이에도 같은 코드가 도는지 보려고 게이트 없는 `diffusers/LTX-2.3-Diffusers` 로 돌려
     본 길입니다. 앱은 이 변수를 주지 않으므로 평소에는 REPO 그대로입니다.
     """
-    repo = (os.environ.get("LTX25_REPO") or "").strip() or REPO
     # 이 GPU 에 bf16 이 안 들어가면 **정말로 줄여서** 올립니다.
     common.log_precision(repo, plan)
     """
@@ -128,6 +158,7 @@ def load(root, opts):
     common.use_fast_attention(getattr(pipe, "transformer", None))
     _state["pipe"] = pipe
     _state["mode"] = mode
+    _state["repo"] = repo
     _state["plan"] = plan
     _state["loras"] = []
     _apply_loras(opts)
@@ -139,6 +170,7 @@ def unload():
     _state["loras"] = []
     _state["plan"] = None
     _state["pose"] = False
+    _state["repo"] = None
     common.free_vram()
 
 
@@ -151,6 +183,8 @@ def _apply_loras(opts):
         return
     try:
         pipe.unload_lora_weights()
+        # 화풍 로라를 바꾸면 포즈 로라도 함께 떨어집니다. 참조 조건만 남은 채 추론하지 않게 다음 생성에서 다시 붙입니다.
+        _state["pose"] = False
     except Exception as error:
         common.log("로라를 떼지 못했습니다(무시): {}".format(error))
     rel_name = os.path.basename(wanted[0]["path"]) if wanted else ""
@@ -174,14 +208,15 @@ def _apply_loras(opts):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 동작 그대로 옮기기 — 포즈 IC-LoRA
+# 몸 동작을 조건으로 전달 — Union IC-LoRA
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
 
 
-LTX 2 계열에는 **포즈 IC-LoRA** 가 따로 나와 있습니다(`LTX-2-19b-IC-LoRA-Pose-Control`).
-얹으면 뼈 그림 줄을 «조건» 으로 받아 그 동작을 그대로 따릅니다.
+공식 LTX 2.5 Union 워크플로는 LTX 2.3의 **22B Union IC-LoRA**를 재사용합니다.
+기존 19B Pose 로라는 2.5 호환 근거가 없어 이 경로에서 사용하지 않습니다.
+참조 해상도는 출력의 절반이며, 규약을 맞춰도 실제 안무 추적 정확도는 별도 실측해야 합니다.
 
 # 규약을 **찍지 않습니다**
 
@@ -193,12 +228,13 @@ LTX 2 계열에는 **포즈 IC-LoRA** 가 따로 나와 있습니다(`LTX-2-19b-
 로라 탓인지 그림 탓인지 규약 탓인지 알 길이 없습니다.
 """
 
-POSE_LORA_REPO = "Lightricks/LTX-2-19b-IC-LoRA-Pose-Control"
-POSE_LORA_FILE = "ltx-2-19b-ic-lora-pose-control.safetensors"
+POSE_LORA_REPO = "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control"
+POSE_LORA_FILE = "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors"
+POSE_REFERENCE_DOWNSCALE = 2
 
 
-def _pose_frames(opts, width, height, frames):
-    """뼈 그림들을 파이프라인 크기에 맞춰 읽어 옵니다. 모자라면 마지막 장을 늘립니다."""
+def _pose_frames(opts, width, height, frames, output_fps=None):
+    """원본 모캡의 시각으로 뼈 그림을 고릅니다. 24fps 입력을 16fps로 한 장씩 읽으면 춤이 느려집니다."""
     from PIL import Image
 
     control = opts.get("control") or {}
@@ -208,19 +244,26 @@ def _pose_frames(opts, width, height, frames):
     missing = [p for p in paths if not os.path.isfile(p)]
     if missing:
         raise IOError("뼈 그림을 찾지 못했습니다: {}".format(missing[0]))
-    images = [Image.open(p).convert("RGB").resize((width, height)) for p in paths]
-    # 길이를 맞춥니다 — 모자라면 마지막 자세로 버티고, 넘치면 앞에서 자릅니다.
-    if len(images) < frames:
-        images += [images[-1]] * (frames - len(images))
-    return images[:frames]
+    target_fps = float(output_fps or opts.get("fps") or 24)
+    source_fps = float(control.get("fps") or target_fps)
+    indices = [min(len(paths) - 1, int(index * source_fps / target_fps + 0.5)) for index in range(frames)]
+    images = {}
+    for index in set(indices):
+        with Image.open(paths[index]) as image:
+            images[index] = image.convert("RGB").resize((width, height))
+    return [images[index] for index in indices]
 
 
 def _attach_pose(pipe, opts):
     """포즈 IC-LoRA 를 얹습니다. 이미 얹혀 있으면 아무 일도 하지 않습니다."""
     if _state.get("pose"):
         return
-    common.log("포즈 IC-LoRA 를 받습니다: {}".format(POSE_LORA_REPO))
+    common.log("몸 동작용 Union IC-LoRA 를 받습니다: {}".format(POSE_LORA_REPO))
     pipe.load_lora_weights(POSE_LORA_REPO, weight_name=POSE_LORA_FILE, adapter_name="pose")
+    # 이미 활성화한 화풍 로라가 있어도 pose가 빠지지 않도록 이름과 세기를 함께 지정합니다.
+    styles = _state["loras"]
+    pipe.set_adapters(["lora{}".format(index) for index in range(len(styles))] + ["pose"],
+                      adapter_weights=[weight for _, weight in styles] + [1.0])
     _state["pose"] = True
 
 
@@ -240,10 +283,7 @@ def _pose_kwarg(pipe):
     들어가 동작이 아니라 그림이 고정됐을 것입니다. `LTX2Pipeline`·`LTX2ImageToVideoPipeline`
     은 넷 다 없습니다 — 포즈를 쓰려면 파이프라인 자체가 InContext 여야 합니다.
     """
-    for name in ("reference_conditions", "conditions", "control_frames", "control_video"):
-        if name in names:
-            return name
-    return None
+    return "reference_conditions" if {"reference_conditions", "reference_downscale_factor"} <= names else None
 
 
 def _fit32(value):
@@ -251,7 +291,15 @@ def _fit32(value):
     return max(32, int(round(value / 32.0)) * 32)
 
 
+def _output_size(opts):
+    # Union은 절반 크기도 VAE의 32배수여야 위치 좌표와 그림 크기가 어긋나지 않습니다.
+    factor = POSE_REFERENCE_DOWNSCALE if _mode_of(opts) == "pose" else 1
+    return tuple(_fit32(int(opts.get(key) or fallback) / factor) * factor
+                 for key, fallback in (("width", 1280), ("height", 704)))
+
+
 def generate(output, opts, report):
+    _require_image_codec(opts)
     # 마스크는 **모델을 부르기 전에** 봅니다 — 까닭은 `common.check_motion_mask`.
     common.check_motion_mask(opts)
     started = time.time()
@@ -261,10 +309,14 @@ def generate(output, opts, report):
     frames = int(round(seconds * fps))
     # 8n+1 로 올림이 아니라 내림 — 올리면 요청한 길이를 넘습니다.
     frames = max(9, ((frames - 1) // 8) * 8 + 1)
-    steps = int(opts.get("steps") or 30)
+    sampling = _sampling_options(opts)
+    steps = len(sampling["sigmas"]) if "sigmas" in sampling else sampling["num_inference_steps"]
+    if "sigmas" in sampling:
+        common.log("LTX 2.5 distilled 규약: 고정 {}단계 · CFG 1을 적용합니다.".format(steps))
     seed = common.resolve_seed(opts)
-    width = _fit32(int(opts.get("width") or 1280))
-    height = _fit32(int(opts.get("height") or 704))
+    width, height = _output_size(opts)
+    if _mode_of(opts) == "pose":
+        common.log("Union 참조 정렬을 위해 생성 크기를 64의 배수 {}×{}로 맞춥니다.".format(width, height))
 
     kwargs = {
         "prompt": opts.get("prompt") or "",
@@ -272,8 +324,7 @@ def generate(output, opts, report):
         # 설치된 0.40 의 `__call__` 을 직접 읽어 보니(2026-09-18) 세 파이프라인 모두 `frame_rate` 를
         # 받고 기본이 24 입니다. 안 넘기면 30fps 로 뽑아도 시간 좌표·소리 길이는 24 기준이 됩니다.
         "frame_rate": float(fps),
-        "num_inference_steps": steps,
-        "guidance_scale": float(opts.get("guidance") or 3.0),
+        **sampling,
         "generator": common.generator(seed),
         "callback_on_step_end": common.step_reporter(report, steps),
     }
@@ -290,10 +341,11 @@ def generate(output, opts, report):
 
         if not os.path.isfile(image_path):
             raise IOError("첫 장면 그림을 찾지 못했습니다: {}".format(image_path))
-        first_frame = Image.open(image_path).convert("RGB").resize((width, height))
+        with Image.open(image_path) as image:
+            first_frame = image.convert("RGB").resize((width, height))
 
     # ── 동작 기준(모캡에서 구운 뼈 그림) ──────────────────────────────
-    control = _pose_frames(opts, width, height, frames)
+    control = _pose_frames(opts, width, height, frames, fps)
     if control:
         slot = _pose_kwarg(pipe)
         if slot != "reference_conditions":
@@ -310,7 +362,7 @@ def generate(output, opts, report):
         from diffusers.pipelines.ltx2 import LTX2ReferenceCondition
 
         _attach_pose(pipe, opts)
-        weight = float((opts.get("control") or {}).get("weight") or 1.0)
+        weight = float((opts.get("control") or {}).get("weight", 1.0))
         """
         뼈 그림은 **참조 조건**으로, 첫 장면은 **프레임 조건**으로 — 둘의 뜻이 다릅니다.
         `reference_conditions` 는 IC-LoRA 가 «따라 할 영상» 이고, `conditions` 는 «이
@@ -318,6 +370,7 @@ def generate(output, opts, report):
         세기(`strength`)가 조건 자체에 있어 로라 세기와 따로 겁니다.
         """
         kwargs["reference_conditions"] = [LTX2ReferenceCondition(frames=control, strength=weight)]
+        kwargs["reference_downscale_factor"] = POSE_REFERENCE_DOWNSCALE
         if first_frame is not None:
             from diffusers.pipelines.ltx2 import LTX2VideoCondition
 
@@ -340,6 +393,8 @@ def generate(output, opts, report):
         "seconds_video": round(frames / float(fps), 2),
         "seed": seed,
         "generate_seconds": round(time.time() - started, 2),
+        "inference_steps": steps,
+        "guidance_scale": sampling["guidance_scale"],
     }
     # 요청한 정밀도와 실제로 올라간 정밀도 — 한 곳에서 만듭니다.
     out.update(common.precision_fields(_state["plan"]))

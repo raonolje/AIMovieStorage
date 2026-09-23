@@ -1,110 +1,107 @@
 import { safeFileName, saveProjectMediaAsset } from "@/lib/mediaLibrary";
-import { CAPTURE_CONNECTIONS, type CapturedPerson, type CaptureResult } from "@/lib/motionCapture";
+import type { CapturedPerson, CaptureResult } from "@/lib/motionCapture";
+import { t } from "@/lib/i18n";
 
 /**
- * **모캡 → 포즈 프레임** — 컨트롤넷이 읽는 뼈 그림을 굽습니다.
- *
- *
- *
- * 맞습니다. 다만 컨트롤넷에 넘길 것은 **원본 영상이 아니라 뼈 그림**입니다. 원본을 그대로
- * 주면 모델이 그 사람의 얼굴·옷까지 따라 그려서, 「캐릭터만 바꾼 댄스 커버」 가 아니라
- * 「원본을 조금 흐린 것」 이 나옵니다.
- *
- * # 왜 검은 바탕에 색 선인가
- *
- * OpenPose 계열 컨트롤넷은 **선의 색으로 어느 뼈인지**를 읽습니다. 모두 흰 선으로 그리면
- * 팔과 다리를 구분하지 못해 사지가 뒤엉킵니다. 그래서 OpenPose 의 색 차례를 그대로 씁니다.
- *
- * 바탕은 **완전한 검정**입니다 — 컨트롤넷은 밝은 획만 신호로 봅니다. 회색 바탕을 주면
- * 그 회색도 「무언가 있다」 로 읽힙니다.
- *
- * # 사람 하나만 굽습니다
- *
- * 여럿을 한 장에 그리면 모델이 누가 누구인지 몰라 팔다리를 섞습니다. 댄스 커버처럼
- * 「이 사람의 동작」 을 옮길 때는 **그 사람만** 굽는 것이 맞습니다.
+ * 저장된 모캡 33점을 DWPose/OpenPose 몸 18점 그림으로 변환합니다.
+ * 손 21점·얼굴 세부점은 몸 관절에서 복원할 수 없어 이 그림에 추가하지 않습니다.
+ * 형식을 맞추는 것과 특정 모델/포즈 로라의 호환성·동작 추적 품질은 별도 검증입니다.
+ * 근거: docs/pose-body18-validation.md — 원본 관절 순서·목 중점·색 규약을 함께 기록합니다.
  */
-
-/** 그림 하나를 만들 때 쓸 크기. 컨트롤넷은 생성 크기와 같아야 제일 잘 맞습니다. */
 export interface PoseFrameSize {
   width: number;
   height: number;
 }
 
-/**
- * OpenPose 의 뼈 색 — **차례가 뜻입니다.**
- *
- * `CAPTURE_CONNECTIONS` 의 줄 차례와 짝을 맞춥니다. 원래 OpenPose 는 18점(COCO)인데
- * 미디어파이프는 33점이라 점 번호가 다릅니다. 색은 «몸통·오른팔·왼팔·오른다리·왼다리»
- * 라는 **덩어리**만 맞으면 컨트롤넷이 알아봅니다 — 한 뼈씩 정확히 맞출 필요는 없습니다.
- */
-const BONE_COLORS: string[] = [
-  "#ff0000", // 어깨 (11-12) — 몸통
-  "#ff5500", // 오른 위팔
-  "#ffaa00", // 오른 아래팔
-  "#aaff00", // 왼 위팔
-  "#55ff00", // 왼 아래팔
-  "#00ff00", // 오른 옆구리
-  "#00ff55", // 왼 옆구리
-  "#00ffaa", // 골반
-  "#00aaff", // 오른 허벅지
-  "#0055ff", // 오른 정강이
-  "#0000ff", // 오른 발
-  "#5500ff", // 왼 허벅지
-  "#aa00ff", // 왼 정강이
-  "#ff00aa", // 왼 발
-  "#ff0055", // 오른손
-  "#ff00ff", // 왼손
-  "#aa5500", // 오른 귀
-  "#55aa00", // 왼 귀
-];
+export interface PoseLandmark {
+  x: number;
+  y: number;
+  /** 앱의 저장 형식은 v입니다. visibility만 읽으면 가려진 관절까지 연결됩니다. */
+  v?: number;
+  visibility?: number;
+}
 
-/** 점 색 — 관절은 뼈보다 밝게. 컨트롤넷이 이음매를 또렷이 읽습니다. */
-const JOINT_COLOR = "#ffffff";
+export interface Body18Point {
+  x: number;
+  y: number;
+  confidence: number;
+}
 
-/** 안 보이는 점은 안 그립니다. 가려진 팔을 이으면 없는 자세가 만들어집니다. */
+/** DWPose draw_bodypose의 18가지 RGB 색. 관절 번호와 선 번호에 각각 적용합니다. */
+export const BODY18_COLORS = [
+  "#ff0000", "#ff5500", "#ffaa00", "#ffff00", "#aaff00", "#55ff00",
+  "#00ff00", "#00ff55", "#00ffaa", "#00ffff", "#00aaff", "#0055ff",
+  "#0000ff", "#5500ff", "#aa00ff", "#ff00ff", "#ff00aa", "#ff0055",
+] as const;
+
+/** 원본 limbSeq의 첫 17개만 그립니다. 마지막 두 어깨–귀 선은 원본도 그리지 않습니다. */
+export const BODY18_CONNECTIONS = [
+  [1, 2], [1, 5], [2, 3], [3, 4], [5, 6], [6, 7], [1, 8], [8, 9],
+  [9, 10], [1, 11], [11, 12], [12, 13], [1, 0], [0, 14], [14, 16],
+  [0, 15], [15, 17],
+] as const;
+
 const VISIBLE_ENOUGH = 0.3;
 
-/**
- * 한 사람의 한 순간을 뼈 그림으로.
- *
- * @param mirror 분석할 때 좌우를 뒤집었으면 되돌려 그립니다 — 그림은 **원본 화면 자리**여야
- * 나중에 배경과 겹칠 때 어긋나지 않습니다.
- */
+/** 몸 18점 순서: 코·목·오른팔·왼팔·오른다리·왼다리·양 눈·양 귀. */
+export function captureToBody18(points: ReadonlyArray<PoseLandmark | null | undefined>): Array<Body18Point | null> {
+  const read = (index: number): Body18Point | null => {
+    const point = points[index];
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+    const confidence = point.v ?? point.visibility ?? 1;
+    if (!Number.isFinite(confidence) || confidence <= VISIBLE_ENOUGH) return null;
+    return { x: point.x, y: point.y, confidence };
+  };
+  const leftShoulder = read(11);
+  const rightShoulder = read(12);
+  // 원본 DWPose처럼 양 어깨가 모두 보일 때만 목 중점을 만듭니다. 한쪽을 추측하지 않습니다.
+  const neck = leftShoulder && rightShoulder ? {
+    x: (leftShoulder.x + rightShoulder.x) / 2,
+    y: (leftShoulder.y + rightShoulder.y) / 2,
+    confidence: Math.min(leftShoulder.confidence, rightShoulder.confidence),
+  } : null;
+  return [read(0), neck, rightShoulder, read(14), read(16), leftShoulder, read(13), read(15),
+    read(24), read(26), read(28), read(23), read(25), read(27), read(5), read(2), read(8), read(7)];
+}
+
+/** 원본은 선을 그린 뒤 0.6배로 어둡게 합니다. 관절은 원색이라 관절과 선을 구분할 수 있습니다. */
+function limbColor(color: string): string {
+  return `#${[1, 3, 5].map((start) => Math.floor(parseInt(color.slice(start, start + 2), 16) * 0.6).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** mirror는 화면 좌표만 뒤집습니다. 좌우 신체 부위의 번호·색은 바꾸지 않습니다. */
 export function drawPoseFrame(
   ctx: CanvasRenderingContext2D,
   size: PoseFrameSize,
-  points: { x: number; y: number; visibility?: number }[],
+  points: ReadonlyArray<PoseLandmark | null | undefined>,
   mirror = false,
 ) {
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, size.width, size.height);
-
+  const body = captureToBody18(points);
   const toX = (x: number) => (mirror ? 1 - x : x) * size.width;
   const toY = (y: number) => y * size.height;
-  const seen = (index: number) => (points[index]?.visibility ?? 1) >= VISIBLE_ENOUGH;
 
-  // 선이 먼저, 점이 나중 — 점이 이음매를 덮어야 관절이 또렷합니다.
-  ctx.lineCap = "round";
-  ctx.lineWidth = Math.max(3, Math.round(size.height / 90));
-  CAPTURE_CONNECTIONS.forEach(([a, b], index) => {
-    if (!seen(a) || !seen(b)) return;
-    ctx.strokeStyle = BONE_COLORS[index % BONE_COLORS.length];
+  // DWPose는 반두께 4px인 타원형 선 다음에 반지름 4px 관절을 그립니다.
+  // Canvas와 OpenCV의 가장자리 래스터화는 다르지만 순서·연결·RGB 규약은 같습니다.
+  BODY18_CONNECTIONS.forEach(([a, b], index) => {
+    const from = body[a];
+    const to = body[b];
+    if (!from || !to) return;
+    const x1 = toX(from.x), y1 = toY(from.y), x2 = toX(to.x), y2 = toY(to.y);
+    ctx.fillStyle = limbColor(BODY18_COLORS[index]);
     ctx.beginPath();
-    ctx.moveTo(toX(points[a].x), toY(points[a].y));
-    ctx.lineTo(toX(points[b].x), toY(points[b].y));
-    ctx.stroke();
+    ctx.ellipse((x1 + x2) / 2, (y1 + y2) / 2, Math.hypot(x2 - x1, y2 - y1) / 2, 4, Math.atan2(y2 - y1, x2 - x1), 0, Math.PI * 2);
+    ctx.fill();
   });
-
-  ctx.fillStyle = JOINT_COLOR;
-  const dot = Math.max(2, Math.round(size.height / 160));
-  points.forEach((point, index) => {
-    if (!seen(index)) return;
+  body.forEach((point, index) => {
+    if (!point) return;
+    ctx.fillStyle = BODY18_COLORS[index];
     ctx.beginPath();
-    ctx.arc(toX(point.x), toY(point.y), dot, 0, Math.PI * 2);
+    ctx.arc(toX(point.x), toY(point.y), 4, 0, Math.PI * 2);
     ctx.fill();
   });
 }
-
 /** 이 사람이 그 시각에 어디 있었나. 가장 가까운 장을 씁니다. */
 function sampleAt(person: CapturedPerson, time: number) {
   return person.samples.reduce(
@@ -121,6 +118,9 @@ export interface PoseFrameSet {
   seconds: number;
   width: number;
   height: number;
+  /** 원본 영상의 반열린 구간 [시작, 끝). 출력 첫 장은 이 시작 시각입니다. */
+  sourceStartSeconds: number;
+  sourceEndSeconds: number;
 }
 
 /**
@@ -132,7 +132,7 @@ export interface PoseFrameSet {
  * 다시 압축됩니다. 압축이 선을 뭉개면 컨트롤넷이 읽는 신호가 흐려집니다. 그림은 **그린
  * 그대로** 남고, 파이썬 쪽에서 읽어 이어 붙이면 됩니다.
  *
- * @param mirror 분석할 때 좌우를 뒤집었는가.
+ * 분석 좌표에는 이미 반전과 좌우 관절 교환이 적용되어 있습니다. 여기서 다시 뒤집지 않습니다.
  */
 export async function bakePoseFrames(input: {
   projectName: string;
@@ -141,7 +141,10 @@ export async function bakePoseFrames(input: {
   result: CaptureResult;
   /** 몇 번 사람인가. `CapturedPerson.number`. */
   personNumber: number;
-  mirror?: boolean;
+  /** 생략하면 분석 시작. 생성 영상의 seconds 옵션과는 별개의 원본 시각입니다. */
+  sourceStartSeconds?: number;
+  /** 생략하면 선택 시작부터 분석 끝까지. 범위를 벗어나면 줄이지 않고 거절합니다. */
+  durationSeconds?: number;
   /** 뽑을 크기. 생성할 크기와 같게 주는 것이 가장 잘 맞습니다. */
   size?: PoseFrameSize;
   /** 초당 몇 장. 안 주면 분석할 때의 간격 그대로. */
@@ -150,6 +153,28 @@ export async function bakePoseFrames(input: {
 }): Promise<PoseFrameSet> {
   const person = input.result.persons.find((item) => item.number === input.personNumber);
   if (!person?.samples.length) throw new Error("그 사람의 분석 결과가 없습니다.");
+
+  const { start, end } = input.result;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start)
+    throw new Error(t("모캡 분석의 시간 범위가 올바르지 않습니다."));
+  const sourceStartSeconds = input.sourceStartSeconds ?? start;
+  if (!Number.isFinite(sourceStartSeconds) || sourceStartSeconds < start || sourceStartSeconds >= end)
+    throw new Error(t("포즈 시작 시각은 모캡 분석 구간 안에 있어야 합니다."));
+  if (input.durationSeconds !== undefined && (!Number.isFinite(input.durationSeconds) || input.durationSeconds <= 0))
+    throw new Error(t("포즈 구간 길이는 0보다 큰 유한한 초여야 합니다."));
+  const sourceEndSeconds = input.durationSeconds === undefined ? end : sourceStartSeconds + input.durationSeconds;
+  if (!Number.isFinite(sourceEndSeconds) || sourceEndSeconds > end || sourceEndSeconds <= sourceStartSeconds)
+    throw new Error(t("포즈 구간이 모캡 분석 범위를 벗어났습니다."));
+  const fps = input.fps ?? input.result.fps;
+  if (!Number.isFinite(fps) || fps <= 0) throw new Error(t("포즈 출력 FPS는 0보다 큰 유한한 수여야 합니다."));
+  const seconds = sourceEndSeconds - sourceStartSeconds;
+  const count = Math.max(1, Math.round(seconds * fps));
+  if (!Number.isSafeInteger(count)) throw new Error(t("포즈 프레임 수가 올바르지 않습니다."));
+  // 검출 공백의 가장 가까운 점을 고르더라도 선택한 구간 밖의 동작은 가져오지 않습니다.
+  const selectedPerson = { ...person, samples: person.samples.filter(sample =>
+    Number.isFinite(sample.time) && sample.time >= sourceStartSeconds && sample.time < sourceEndSeconds,
+  ) };
+  if (!selectedPerson.samples.length) throw new Error(t("선택한 구간에 그 사람의 모캡 표본이 없습니다."));
 
   /*
     크기는 **32의 배수**로 맞춥니다. 영상 모델은 대개 그렇게 요구하고, 컨트롤넷 그림이
@@ -161,10 +186,6 @@ export async function bakePoseFrames(input: {
     height: round32(input.result.height),
   };
 
-  const fps = input.fps ?? input.result.fps;
-  const seconds = Math.max(0, input.result.end - input.result.start);
-  const count = Math.max(1, Math.round(seconds * fps));
-
   const canvas = document.createElement("canvas");
   canvas.width = size.width;
   canvas.height = size.height;
@@ -173,8 +194,8 @@ export async function bakePoseFrames(input: {
 
   const frames: string[] = [];
   for (let index = 0; index < count; index += 1) {
-    const time = input.result.start + index / fps;
-    drawPoseFrame(ctx, size, sampleAt(person, time).image, input.mirror);
+    const time = sourceStartSeconds + index / fps;
+    drawPoseFrame(ctx, size, sampleAt(selectedPerson, time).image);
     const blob = await new Promise<Blob | null>((done) => canvas.toBlob(done, "image/png"));
     if (!blob) throw new Error("뼈 그림을 굽지 못했습니다.");
     /*
@@ -193,5 +214,5 @@ export async function bakePoseFrames(input: {
     input.onProgress?.(index + 1, count);
   }
 
-  return { frames, fps, seconds, width: size.width, height: size.height };
+  return { frames, fps, seconds, width: size.width, height: size.height, sourceStartSeconds, sourceEndSeconds };
 }

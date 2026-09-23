@@ -19,6 +19,8 @@ numpy==2.2.6
 pillow==11.3.0
 imageio==2.37.0
 imageio-ffmpeg==0.6.0
+# I2V는 첫 장면을 학습 규약의 H.264 CRF로 재압축합니다. imageio만 있으면 이 단계가 실패합니다.
+av==15.1.0
 ftfy==6.3.1
 
 # GPU 가 작을 때 **정말로 줄여서** 올리려고. int8·nf4 둘 다 이 패키지가 합니다.

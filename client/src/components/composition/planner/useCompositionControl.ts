@@ -10,6 +10,7 @@ import {
   type CompositionIdentity,
 } from "@/lib/compositionControl";
 import type { CompositionCommandContext } from "@/lib/compositionControlCommands";
+import type { CompositionVideoOptions, CompositionVideoControls, SavedReferenceVideo } from "@/lib/referenceVideoExport";
 
 export type ControlledCapture = (options?: {
   backgroundOnly?: boolean;
@@ -30,6 +31,7 @@ export function useCompositionControl(options: {
   context: CompositionCommandContext;
   capture: () => ControlledCapture | null;
   stopPlayback: () => void;
+  exportVideo?: (options: CompositionVideoOptions, controls: CompositionVideoControls) => Promise<SavedReferenceVideo>;
   commit?: (
     state: CompositionState,
     captures: CompositionCapture,
@@ -89,6 +91,13 @@ export function useCompositionControl(options: {
       // 자동 키·방 규칙도 기존 effect 한 벌이 적용합니다. 적용된 판을 읽기 전에 React와 viewport가 따라올 틈을 줍니다.
       settle: settleCompositionEditor,
       capture: captureCurrent,
+      exportVideo: async (options, controls) => {
+        if (!current.current.open || !current.current.exportVideo)
+          throw new CompositionControlError("export_unavailable", "구도 창의 영상 내보내기가 준비되지 않았습니다.");
+        await captureCurrent();
+        controls.assertCurrent?.();
+        return current.current.exportVideo(options, controls);
+      },
       commit: async (state, captures) => {
         const commit = current.current.commit;
         if (!commit)

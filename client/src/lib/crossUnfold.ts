@@ -1,4 +1,37 @@
 import type { CompositionCubeFace } from "@/lib/composition";
+import type { FaceSetSize } from "@/lib/projectTypes";
+
+/** 실외는 아래쪽을 UV로 덜어 내므로, 덜기 전 원본 칸의 비율과 비교해야 합니다. */
+export function crossFaceTargetRatio(face: CompositionCubeFace, size?: FaceSetSize | null): number | null {
+  if (!size || ![size.width, size.depth, size.height].every((n) => Number.isFinite(n) && n > 0)) return null;
+  if (face === "top" || face === "bottom") return size.width / size.depth;
+  const retained = 1 - Math.min(0.95, Math.max(0, size.cropBottom ?? 0));
+  return (face === "front" || face === "back" ? size.width : size.depth) / size.height * retained;
+}
+
+interface TrimInsets { left: number; right: number; top: number; bottom: number }
+
+/** 테두리·이음매·혼합 픽셀 제거가 각자 한도를 더 쓰거나 방 비율을 더 망가뜨리지 않게 합니다. */
+export function constrainCrossTrim(width: number, height: number, requested: TrimInsets, maxRatio = 0.15, targetRatio?: number | null): TrimInsets {
+  const limit = Number.isFinite(maxRatio) ? Math.min(0.15, Math.max(0, maxRatio)) : 0.15;
+  const cap = (n: number, size: number) => Math.max(0, Math.min(Math.floor(size * limit), Math.floor(n)));
+  const out = { left: cap(requested.left, width), right: cap(requested.right, width), top: cap(requested.top, height), bottom: cap(requested.bottom, height) };
+  if (!targetRatio || !Number.isFinite(targetRatio) || targetRatio <= 0) return out;
+  const distortion = (ratio: number) => Math.max(ratio / targetRatio, targetRatio / ratio);
+  // 픽셀 반올림 여유만 허용합니다. 이미 잘못 잡힌 칸을 테두리 제거로 더 좁혀서는 안 됩니다.
+  const allowed = Math.max(1.01, distortion(width / height));
+  const w = width - out.left - out.right;
+  const h = height - out.top - out.bottom;
+  const restore = (a: "left" | "top", b: "right" | "bottom", total: number) => {
+    const before = out[a] + out[b];
+    if (!before) return;
+    out[a] = Math.floor(out[a] * Math.max(0, total) / before);
+    out[b] = Math.max(0, total) - out[a];
+  };
+  if (w / h > targetRatio * allowed) restore("top", "bottom", height - Math.min(height, Math.ceil(w / (targetRatio * allowed))));
+  else if (w / h < targetRatio / allowed) restore("left", "right", width - Math.min(width, Math.ceil(h * targetRatio / allowed)));
+  return out;
+}
 
 /**
  * 십자 전개도 — 한 장에 여섯 면을 펼쳐 그린 그림에서 자르는 자리.
@@ -85,12 +118,13 @@ export const FLIPPED_FACES: readonly CompositionCubeFace[] = ["top", "bottom"];
  *
  * 한도를 8% → 15% 로 올린 까닭(2026-09-15 MCP 실측): 틀 칸을 바탕과 거의 같은 회색(#929292)으로 바꾼 뒤로, 생성기가 벽을
  * 칸보다 좁게 그리면 남는 칸 색 띠가 한쪽에서 8.3% 였습니다(8×6×2.8 m 외벽 — 왼쪽 벽 588 px 중 49 px). 8% 에서 멈춰 방 모서리에
- * 회색 기둥이 섰습니다. 사진의 한 줄이 85% 넘게 무채색 바탕 회색 ±30 안에 드는 일은 드물어 15% 로도 그림을 깎지 않습니다.
+ * 회색 기둥이 섰습니다. 다만 회색 벽도 같은 조건에 걸릴 수 있어 총 제거량과 방 비율을 함께 제한합니다.
  */
 export function trimBackgroundEdges(
   canvas: HTMLCanvasElement,
   background: readonly [number, number, number],
   maxRatio = 0.15,
+  targetRatio?: number | null,
 ): HTMLCanvasElement {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context || canvas.width < 8 || canvas.height < 8) return canvas;
@@ -124,8 +158,9 @@ export function trimBackgroundEdges(
     return hit >= height * 0.85;
   };
 
-  const maxX = Math.max(1, Math.floor(width * maxRatio));
-  const maxY = Math.max(1, Math.floor(height * maxRatio));
+  const boundedRatio = Number.isFinite(maxRatio) ? Math.min(0.15, Math.max(0, maxRatio)) : 0.15;
+  const maxX = Math.floor(width * boundedRatio);
+  const maxY = Math.floor(height * boundedRatio);
   /*
     가장자리에서 안으로 바탕 줄을 셉니다. **맨 바깥 세 줄까지는 바탕이 아니어도 건너뜁니다** — 칸 색 띠 바깥 끝에 옆 칸과의
     이음매(밝은 줄 한두 개)가 붙어 있으면 첫 줄에서 멈춰 띠 전체가 남았습니다(2026-09-15 외벽 실측: 맨 끝 줄 76%, 그 안쪽 45 px 는
@@ -201,8 +236,11 @@ export function trimBackgroundEdges(
   for (let n = 0; n < 2 && right - left > 8 && blended(statCol(right), statCol(right - 2)); n += 1) right -= 1;
   for (let n = 0; n < 2 && bottom - top > 8 && blended(statRow(top), statRow(top + 2)); n += 1) top += 1;
   for (let n = 0; n < 2 && bottom - top > 8 && blended(statRow(bottom), statRow(bottom - 2)); n += 1) bottom -= 1;
-  const cutWidth = right - left + 1;
-  const cutHeight = bottom - top + 1;
+  const bounded = constrainCrossTrim(width, height, { left, right: width - 1 - right, top, bottom: height - 1 - bottom }, maxRatio, targetRatio);
+  left = bounded.left;
+  top = bounded.top;
+  const cutWidth = width - bounded.left - bounded.right;
+  const cutHeight = height - bounded.top - bounded.bottom;
   if (cutWidth === width && cutHeight === height) return canvas;
   if (cutWidth < 8 || cutHeight < 8) return canvas;
 
@@ -557,6 +595,67 @@ export interface CutFace {
   canvas: HTMLCanvasElement;
 }
 
+export interface CrossFaceMeasure {
+  face: CompositionCubeFace;
+  width: number;
+  height: number;
+  /** 회색 바탕과 다른 픽셀의 추정 비율. 회색 벽 자체도 낮게 나올 수 있어 실제 채움률은 아닙니다. */
+  coverage: number | null;
+}
+
+export type CrossFaceIssue =
+  | { kind: "ratio"; face: CompositionCubeFace; factor: number }
+  | { kind: "coverage"; face: CompositionCubeFace; coverage: number }
+  | { kind: "opposite"; face: CompositionCubeFace; other: CompositionCubeFace; factor: number };
+
+/** 픽셀 크기만으로도 서로 마주 보는 벽이 4배 다른 잘못된 경계 추정을 걸러 냅니다. */
+export function assessCrossFaces(faces: CrossFaceMeasure[], targetSize?: FaceSetSize | null) {
+  const issues: CrossFaceIssue[] = [];
+  for (const face of faces) {
+    const target = crossFaceTargetRatio(face.face, targetSize);
+    if (target && face.width > 0 && face.height > 0) {
+      const ratio = face.width / face.height;
+      const factor = Math.max(ratio / target, target / ratio);
+      if (factor >= 1.5) issues.push({ kind: "ratio", face: face.face, factor });
+    }
+    if (face.coverage !== null && face.coverage < 0.7) issues.push({ kind: "coverage", face: face.face, coverage: face.coverage });
+  }
+  for (const [a, b] of [["front", "back"], ["left", "right"], ["top", "bottom"]] as const) {
+    const first = faces.find((item) => item.face === a);
+    const second = faces.find((item) => item.face === b);
+    if (!first || !second || Math.min(first.width, first.height, second.width, second.height) <= 0) continue;
+    const ratio = (first.width / first.height) / (second.width / second.height);
+    const factor = Math.max(ratio, 1 / ratio);
+    if (factor >= 1.5) issues.push({ kind: "opposite", face: a, other: b, factor });
+  }
+  const complete = new Set(faces.filter((f) => f.width > 0 && f.height > 0).map((f) => f.face)).size === 6;
+  return { faces, issues, safe: complete && issues.length === 0 };
+}
+
+/** 파일을 쓰기 전에 자동·수동 경로가 같은 결과를 재도록 합니다. */
+export function measureCrossFaces(faces: CutFace[], background?: readonly [number, number, number] | null): CrossFaceMeasure[] {
+  return faces.map(({ face, canvas }) => {
+    const pixels = background ? samplePixels(canvas, 96) : null;
+    let coverage: number | null = null;
+    if (pixels && background) {
+      let content = 0;
+      const { data, width, height } = pixels;
+      for (let i = 0; i < data.length; i += 4) {
+        const distance = Math.max(Math.abs(data[i] - background[0]), Math.abs(data[i + 1] - background[1]), Math.abs(data[i + 2] - background[2]));
+        const chroma = Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2]);
+        if (data[i + 3] > 0 && distance > (chroma <= 8 ? 30 : 20)) content += 1;
+      }
+      coverage = content / (width * height);
+    }
+    return { face, width: canvas.width, height: canvas.height, coverage };
+  });
+}
+
+export function analyzeCrossFaces(source: HTMLImageElement | HTMLCanvasElement, lines: CrossLines, options?: Parameters<typeof cutCrossFaces>[2]) {
+  const faces = cutCrossFaces(source, lines, options);
+  return assessCrossFaces(measureCrossFaces(faces, options?.background), options?.targetSize);
+}
+
 /**
  * 칸 하나를 **원본 해상도로** 잘라 캔버스에 담습니다.
  *
@@ -572,6 +671,7 @@ export function cutCrossCell(
   options?: {
     flip?: boolean;
     background?: readonly [number, number, number] | null;
+    targetSize?: FaceSetSize | null;
   },
 ): HTMLCanvasElement | null {
   const width =
@@ -607,7 +707,7 @@ export function cutCrossCell(
   }
   context.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
   return options?.background
-    ? trimBackgroundEdges(canvas, options.background)
+    ? trimBackgroundEdges(canvas, options.background, 0.15, crossFaceTargetRatio(cell.face, options.targetSize))
     : canvas;
 }
 
@@ -618,6 +718,7 @@ export function cutCrossFaces(
   options?: {
     flip?: boolean;
     background?: readonly [number, number, number] | null;
+    targetSize?: FaceSetSize | null;
   },
 ): CutFace[] {
   const out: CutFace[] = [];

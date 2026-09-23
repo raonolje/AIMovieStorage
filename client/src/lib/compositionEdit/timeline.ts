@@ -238,6 +238,18 @@ export function cameraPoseOf(current: CompositionState) {
   };
 }
 
+/** 무빙의 출발 자세. 화면 탐색 카메라보다 활성 저장 구도(없으면 첫 구도)가 먼저입니다. */
+export function cameraMoveBasePoseOf(current: CompositionState) {
+  const shots = cameraShotsOf(current);
+  const shot = shots.find((item) => item.id === current.activeShotId) ?? shots[0];
+  if (!shot) return cameraPoseOf(current);
+  return {
+    position: { ...shot.position },
+    target: { ...shot.target },
+    fovScale: current.camera.fovDegrees > 0 ? shot.fovDegrees / current.camera.fovDegrees : 1,
+  };
+}
+
 /**
  * **그 시각에 카메라가 어디 있는가.** 앞선 클립들을 그 자리까지 다 돌려 본 결과입니다.
  *

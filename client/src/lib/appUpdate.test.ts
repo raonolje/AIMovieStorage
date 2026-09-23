@@ -79,7 +79,8 @@ describe("판 가르기", () => {
   it("업데이터는 공개판에서만 등록됩니다", () => {
     /*
       끝점은 공개판 릴리스를 가리킵니다. 비공개판(내 PC용, 모션캡처·업스케일 엔진이 든 판)이
-      그것을 받아 깔면 그 엔진들이 사라지거나, 이름이 달라 **엉뚱한 앱이 하나 더 생깁니다.*    */
+      그것을 받아 깔면 그 엔진들이 사라지거나, 이름이 달라 **엉뚱한 앱이 하나 더 생깁니다.**
+    */
     const setup = LIB.slice(LIB.indexOf(".setup(|app|"));
     const body = setup.slice(0, setup.indexOf("\n        })"));
     expect(body).toContain("edition::is_public()");

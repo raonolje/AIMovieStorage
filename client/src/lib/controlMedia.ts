@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { validateLocalControlOptions } from "./localControlCapabilities";
+import { mocapSourcesOf, loadMocapResult } from "./mocapStore";
+import { bakePoseFrames } from "./poseFrames";
 import {
   LOCAL_ENGINE_IDS,
   LOCAL_ENGINE_CATALOG,
@@ -16,6 +19,7 @@ import { readProject, writeProjectAndConfirm } from "./projectWrite";
 import { projectFolderName } from "./localProjectStore";
 import {
   assetSrc,
+  isVideoFile,
   loadImageForCanvas,
   type ProjectAssetType,
 } from "./mediaLibrary";
@@ -47,6 +51,7 @@ const optionsSchema = z
     guidance: z.number().min(0).max(30).optional(),
     seconds: z.number().min(1).max(60).optional(),
     fps: z.number().int().min(1).max(60).optional(),
+    reference_video_range: z.enum(["first5s", "full"]).optional().describe("Required for H3 video reference assets: first5s decodes at most the first 5 seconds; full preserves the whole source input. H3 still limits conditioning to the generated duration. Completion meta.reference_videos records actual decoded and conditioning lengths."),
     precision: z.enum(["auto", "bf16", "int8", "int4"]).optional(),
   })
   .strict();
@@ -64,6 +69,13 @@ export const generateMediaSchema = z
     imageAssetId: id.optional(),
     motionMaskAssetId: id.optional(),
     referenceAssetIds: z.array(id).max(12).optional(),
+    poseSource: z.object({
+      sourceId: id,
+      personNumber: z.number().int().positive(),
+      weight: z.number().min(0).max(1.5).default(1),
+      sourceStartSeconds: z.number().nonnegative().optional().describe("Absolute time in the original video. Defaults to the saved analysis start; must remain within its range."),
+      durationSeconds: z.number().positive().optional().describe("Source interval duration. Defaults to the remaining analysis range, NOT options.seconds. For a 5-second output matching source 6–11 seconds, set sourceStartSeconds=6 and durationSeconds=5. Out-of-range intervals are rejected, never clamped."),
+    }).strict().optional().describe("Uses the stored person's already-transformed coordinates without mirroring again. Omitting both time fields preserves the full saved analysis range."),
   })
   .strict();
 export const upscaleMediaSchema = z
@@ -92,7 +104,7 @@ export interface ControlAsset {
 }
 function mediaKind(path: string): ControlAsset["kind"] {
   if (/\.(png|jpg|jpeg|webp|bmp)$/i.test(path)) return "image";
-  if (/\.(mp4|webm|mov)$/i.test(path)) return "video";
+  if (isVideoFile(path)) return "video";
   if (/\.(wav|mp3|ogg|flac)$/i.test(path)) return "audio";
   return "other";
 }
@@ -268,10 +280,21 @@ function validateGeneration(raw: unknown) {
   if (input.imageAssetId) assetOf(input.projectId, input.imageAssetId, "image");
   if (input.motionMaskAssetId)
     assetOf(input.projectId, input.motionMaskAssetId, "image");
-  input.referenceAssetIds?.forEach((assetId) => {
-    if (assetOf(input.projectId, assetId).kind === "other")
+  const referenceAssets = input.referenceAssetIds?.map((assetId) => assetOf(input.projectId, assetId));
+  referenceAssets?.forEach((asset) => {
+    if (asset.kind === "other")
       throw new Error("이 에셋은 생성 레퍼런스로 쓸 수 없습니다.");
   });
+  const controlCheck = validateLocalControlOptions(input.engine, {
+    ...(input.poseSource ? { control: { kind: "pose", frames: ["형식 확인"], fps: input.options.fps ?? 24 } } : {}),
+    references: referenceAssets,
+    reference_video_range: input.options.reference_video_range,
+  });
+  if (!controlCheck.ok) throw new Error(controlCheck.message);
+  if (input.poseSource) {
+    const source = mocapSourcesOf(projectFolderName(input.projectId, draft.title)).find(item => item.id === input.poseSource!.sourceId);
+    if (!source?.resultPath) throw new Error("현재 프로젝트에 저장된 모캡 분석 결과가 없습니다.");
+  }
   return { input, draft };
 }
 export async function enqueueControlGeneration(raw: unknown) {
@@ -318,6 +341,27 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
         throw new Error("이 에셋은 생성 레퍼런스로 쓸 수 없습니다.");
       return { kind: asset.kind, path: asset.path };
     });
+  let control;
+  let poseSource: Record<string, unknown> | undefined;
+  if (input.poseSource) {
+    const folder = projectFolderName(input.projectId, draft.title);
+    const source = mocapSourcesOf(folder).find(item => item.id === input.poseSource!.sourceId)!;
+    const result = await loadMocapResult(folder, source);
+    if (!result) throw new Error("모캡 분석 결과를 읽지 못했습니다.");
+    const frames = await bakePoseFrames({ projectName: folder, ownerName: source.name, result,
+      personNumber: input.poseSource.personNumber, fps: input.options.fps ?? 24,
+      sourceStartSeconds: input.poseSource.sourceStartSeconds, durationSeconds: input.poseSource.durationSeconds,
+      size: { width: input.options.width ?? 1280, height: input.options.height ?? 704 },
+      onProgress: (done, total) => report({ step: `동작 기준 굽기 ${done}/${total}` }),
+    });
+    if (isStopping(task.id)) return { data: { attached: false, cancelled: true } };
+    control = { kind: "pose" as const, frames: frames.frames, fps: frames.fps, weight: input.poseSource.weight };
+    poseSource = { sourceId: source.id, personNumber: input.poseSource.personNumber,
+      sourceStartSeconds: frames.sourceStartSeconds, sourceEndSeconds: frames.sourceEndSeconds,
+      durationSeconds: frames.seconds, fps: frames.fps, frameCount: frames.frames.length,
+      mirrored: result.mirrored, sampling: "nearest-in-range" };
+    setTaskResult(task.id, { data: { poseSource } });
+  }
   const made = await runLocalToProject({
     engine: input.engine,
     kind,
@@ -327,6 +371,7 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
     assetType: kind === "video" ? "scene-video" : target.assetType,
     opts: {
       ...input.options,
+      control,
       references,
       image: input.imageAssetId
         ? assetOf(input.projectId, input.imageAssetId, "image").path
@@ -338,9 +383,9 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
     onProgress: (step) => report({ step }),
   });
   // 붙이기가 실패하거나 취소되어도 만들어진 파일의 위치를 잃지 않습니다.
-  setTaskResult(task.id, { paths: [made.path] });
+  setTaskResult(task.id, { paths: [made.path], data: poseSource ? { poseSource } : undefined });
   if (isStopping(task.id))
-    return { paths: [made.path], data: { attached: false, cancelled: true } };
+    return { paths: [made.path], data: { attached: false, cancelled: true, ...(poseSource ? { poseSource } : {}) } };
   const assetId = await attach(
     input.projectId,
     input.target,
@@ -348,7 +393,7 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
     made.name,
     kind === "video",
   );
-  return { paths: [made.path], assetIds: [assetId], data: { attached: true } };
+  return { paths: [made.path], assetIds: [assetId], data: { attached: true, seconds: made.seconds, meta: made.meta, ...(poseSource ? { poseSource } : {}) } };
 });
 registerTaskRunner("control.upscale", async (raw, report, task) => {
   if (isStopping(task.id)) return;

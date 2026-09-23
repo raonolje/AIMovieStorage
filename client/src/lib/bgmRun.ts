@@ -109,7 +109,7 @@ registerTaskRunner(BGM_TASK, async (raw, report, task) => {
       seconds: payload.seconds,
       // 연주곡이면 가사를 비웁니다 — 비면 엔진이 `[inst]` 로 받습니다.
       lyrics: payload.lyrics,
-      precision: loadPrecision(),
+      precision: loadPrecision(payload.engine),
     },
     timeoutSecs: 3600,
     onProgress: (message) => report({ step: message || "뽑는 중" }),

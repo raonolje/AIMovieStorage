@@ -8,6 +8,7 @@ import { lorasToRun, withLoraTriggers } from "@/lib/localLoras";
 import { runLocalToProject } from "@/lib/localOutput";
 import { generateWithMagnific, uploadToMagnific } from "@/lib/magnificMcp";
 import { fitDuration, loadMagnificModels } from "@/lib/magnificModels";
+import { assertMagnificVideoInputs, findMagnificVideoModel, mediaTypeOfPath } from "@/lib/magnificVideoInputs";
 import { localSize, tuneForLocal } from "@/lib/localPrompt";
 import { projectFolderName } from "@/lib/localProjectStore";
 import { sceneFolderName } from "@/lib/projectNames";
@@ -21,7 +22,7 @@ import {
 } from "@/lib/storyboardSheet";
 import { fileStemOf } from "@/components/ReferenceTagBar";
 import { readProject, writeProject } from "@/lib/projectWrite";
-import { enqueueTasks, isStopping, registerTaskRunner, type NewTask } from "@/lib/taskQueue";
+import { enqueueTasks, isStopping, registerTaskRunner, setTaskResult, type NewTask } from "@/lib/taskQueue";
 import type { Cut, ProjectDraft, Scene } from "@/lib/projectTypes";
 
 /**
@@ -435,7 +436,7 @@ async function localImage(
       negative: tuned.negative,
       ...localSize(engine, aspect),
       loras: chosen,
-      precision: loadPrecision(),
+      precision: loadPrecision(engine),
     },
     timeoutSecs: 1800,
     onProgress: (message) => report({ step: message || "이 컴퓨터가 뽑는 중" }),
@@ -467,8 +468,17 @@ async function magnificMake(
   },
   report: (change: { step?: string }) => void,
   stopped: () => boolean,
+  taskId: string,
 ) {
   const ids: string[] = [];
+  if (input.kind === "video") {
+    const model = findMagnificVideoModel(await loadMagnificModels("video"), input.model);
+    assertMagnificVideoInputs(model, {
+      references: input.references.map(path => ({ type: mediaTypeOfPath(path), url: path })),
+      ...(input.firstFrame ? { keyframes: { start: { type: "image", url: input.firstFrame } } } : {}),
+      resolution: input.resolution,
+    });
+  }
   for (const [index, path] of input.references.entries()) {
     if (stopped()) throw new Error("멈췄습니다.");
     report({ step: `레퍼런스 올리는 중 ${index + 1}/${input.references.length}` });
@@ -495,7 +505,7 @@ async function magnificMake(
             작업 줄에 남습니다 — 말없이 인물을 잃는 것보다 낫습니다.
           */
           ...(ids.length
-            ? { references: ids.map((identifier) => ({ type: "image", url: identifier })) }
+            ? { references: ids.map((identifier, index) => ({ type: mediaTypeOfPath(input.references[index]), url: identifier })) }
             : {}),
         }
       : {
@@ -520,6 +530,8 @@ async function magnificMake(
     extension: input.kind === "video" ? "mp4" : "png",
     onBeat: (message) => report({ step: message }),
     stopped,
+    // 접수부터 기록합니다. 기다리다 실패해도 서버의 작업 id·모델 변경 안내를 잃지 않습니다.
+    onMetadata: (metadata, path) => setTaskResult(taskId, { ...(path ? { paths: [path] } : {}), data: { magnific: metadata } }),
   });
 }
 
@@ -567,6 +579,7 @@ registerTaskRunner(CHARACTER_SHEET_TASK, async (raw, report, task) => {
           { kind: "image", prompt, references: refs, assetType: "character-generated", ...(await sizeOf(draft, "image")) },
           report,
           () => isStopping(task.id),
+          task.id,
         )
       : await localImage(payload, prompt, "character-generated", report, draft?.localLoras?.[payload.engine], aspectOf(draft, "image"));
   report({ step: "카드에 붙이는 중" });
@@ -649,6 +662,7 @@ registerTaskRunner(CUT_IMAGE_TASK, async (raw, report, task) => {
           { kind: "image", prompt: base, references, assetType: "scene-cut", ...(await sizeOf(draft, "image")) },
           report,
           () => isStopping(task.id),
+          task.id,
         )
       : await localImage(payload, base, "scene-cut", report, draft.localLoras?.[payload.engine], aspectOf(draft, "image"));
   report({ step: "카드에 붙이는 중" });
@@ -856,6 +870,7 @@ registerTaskRunner(SCENE_VIDEO_TASK, async (raw, report, task) => {
       },
       report,
       () => isStopping(task.id),
+      task.id,
     );
     report({ step: "장면에 붙이는 중" });
     const wrote = await attachVideo(payload.projectId, payload.sceneId, made.path, made.name);
@@ -886,7 +901,7 @@ registerTaskRunner(SCENE_VIDEO_TASK, async (raw, report, task) => {
       image: firstFrameOf(scene),
       ...localSize(engine, aspectOf(draft, "video")),
       loras: videoLoras,
-      precision: loadPrecision(),
+      precision: loadPrecision(engine),
     },
     timeoutSecs: 7200,
     onProgress: (message) => report({ step: message || `이 컴퓨터가 ${seconds}초를 뽑는 중` }),
