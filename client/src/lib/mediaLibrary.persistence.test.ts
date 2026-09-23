@@ -16,6 +16,44 @@ beforeEach(() => {
 });
 
 describe("앱 설정 거울 저장 확인", () => {
+  it.each([1, 4 * 1024 * 1024 + 1])("구도 영상 %i바이트 저장은 작은 파일·청크 경로 모두 명시한 stem을 유지한다", async size => {
+    const media = await import("./mediaLibrary"); await media.whenAppSettingsReady();
+    media.saveMediaLibrarySettings({ baseDirectory: "/project-library" });
+    await tick();
+    const savedPath = "/project-library/작품/composition/군무/군무_구도영상_001.mp4";
+    let received = 0;
+    state.invoke.mockImplementation(async (command, args) => {
+      if (command === "save_project_asset" || command === "begin_project_asset_upload") {
+        expect(args.request).toMatchObject({ assetType: "composition-video", ownerName: "군무", stem: "군무_구도영상" });
+        return command === "save_project_asset" ? savedPath : "upload-id";
+      }
+      if (command === "append_project_asset_upload") { received += args.length; return received; }
+      if (command === "finish_project_asset_upload") return savedPath;
+      throw new Error(command);
+    });
+    const file = new File([new Uint8Array(size)], "군무_cut01_reference.mp4", { type: "video/mp4" });
+    await expect(media.saveProjectMediaAsset(file, { projectName: "작품", assetType: "composition-video", ownerName: "군무", stem: "군무_구도영상" }))
+      .resolves.toEqual({ path: savedPath, name: "군무_구도영상_001" });
+    expect(state.invoke.mock.calls.some(([command]) => command === (size > 4 * 1024 * 1024 ? "begin_project_asset_upload" : "save_project_asset"))).toBe(true);
+  });
+
+  it("Magnific 구성에서 고른 720p를 네이티브 명령에 그대로 넘긴다", async () => {
+    const media = await import("./mediaLibrary"); await media.whenAppSettingsReady();
+    media.saveMediaLibrarySettings({ baseDirectory: "/project-library" });
+    await tick();
+    state.invoke.mockImplementation(async command => {
+      if (command === "magnific_compose_busy") return false;
+      if (command === "magnific_compose_auto") return { message: "완료", fingerprints: [] };
+      throw new Error(command);
+    });
+    await expect(media.composeMagnificAuto({ paths: ["camera.mp4", "group.png"], prompt: "군무 유지", kind: "video",
+      model: "seedance-2-5-pro", aspectRatio: "16:9", count: 1, durationSeconds: 15, resolution: "720p" }))
+      .resolves.toBe("완료");
+    expect(state.invoke).toHaveBeenCalledWith("magnific_compose_auto", expect.objectContaining({
+      resolution: "720p", durationSeconds: 15, paths: ["camera.mp4", "group.png"], kind: "video",
+    }));
+  });
+
   it("큰 HTML File 저장은 JSON 바이트 대신 제한된 바이너리 경로를 사용한다", async () => {
     const media = await import("./mediaLibrary"); await media.whenAppSettingsReady();
     media.saveMediaLibrarySettings({ baseDirectory: "/project-library" });

@@ -186,7 +186,7 @@ describe("cutVideoRequestPayload — 컷 영상", () => {
 
   it("뼈대(draftKo/draftEn)와 사실(초·화면비·모델)이 실린다", () => {
     expect(Object.keys(data)).toEqual([
-      "project", "scene", "cut", "acting", "actingEn", "vfx", "vfxEn", "seconds", "aspect", "modelId", "hasRefVideo",
+      "project", "scene", "cut", "acting", "actingEn", "vfx", "vfxEn", "seconds", "aspect", "modelId", "hasRefVideo", "hasRepresentativeImage",
       "style", "lookEn", "composition", "people", "background", "draftKo", "draftEn",
     ]);
     expect(data.draftEn).toBe(skeleton.en);

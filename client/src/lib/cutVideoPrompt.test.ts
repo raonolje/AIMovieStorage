@@ -1,7 +1,87 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_COMPOSITION } from "@/lib/composition";
 import { addRoomIn } from "@/lib/compositionEdit/rooms";
-import { buildCutVideoPrompt, dedupePhrases } from "@/lib/cutVideoPrompt";
+import { placeCharacterIn } from "@/lib/compositionEdit/characters";
+import { describePeople } from "@/lib/objectSwapPrompt";
+import { buildCutVideoPrompt, cutVideoSeconds, cutVideoSecondsOf, dedupePhrases } from "@/lib/cutVideoPrompt";
+import { createCameraMove } from "./cameraMoves";
+import { newCut } from "./projectTypes";
+import { cutVideoSkeletonInput } from "./promptPayloads";
+
+describe("영상 참조와 카메라·인물 지시의 일치", () => {
+  const composition = { ...placeCharacterIn(DEFAULT_COMPOSITION, "performer"),
+    cameraMoves: [{ ...createCameraMove(), duration: 7 }, { ...createCameraMove(), startTime: 7, duration: 8 }] };
+  const input = { composition, characterNames: { performer: "Seoah" }, refVideoSeconds: 15 };
+
+  it.each(["seedance-2.5", "wan2.2"])("%s: 영상이 있으면 좌표를 고정하거나 원테이크로 바꾸지 않는다", modelId => {
+    const prompt = buildCutVideoPrompt({ ...input, modelId, hasRefVideo: true });
+    expect(prompt.en).not.toMatch(/Screen placement|Keep these positions|One continuous shot|single unbroken scene/);
+    expect(prompt.ko).not.toMatch(/화면에서의 자리|이 자리를 지키세요|한 번에 이어지는 한 컷/);
+    expect(prompt.en).toContain("shot changes and their timing");
+    expect(prompt.en).toContain("screen positions change with the choreography and camera");
+    expect(prompt.seconds).toBe(15);
+  });
+
+  it("레퍼런스 없는 단일 샷과 그림용 배치 설명은 기존 규칙을 유지한다", () => {
+    const prompt = buildCutVideoPrompt({ ...input, hasRefVideo: false, modelId: "seedance-2.5" });
+    expect(prompt.en).toContain("One continuous shot");
+    expect(prompt.en).toContain("Screen placement");
+    expect(prompt.en).toContain("Keep these positions.");
+    expect(describePeople(composition, input.characterNames).some(line => line.en.includes("Keep these positions."))).toBe(true);
+  });
+
+  it("대표 그림이 있으면 개별 시트를 있는 것으로 가정하지 않고 영상 뼈대에 외형 기준을 남긴다", () => {
+    const cut = { ...newCut(1), composition, images: [{ id: "hero", name: "그룹", filePath: "group.png", isPrimary: true }],
+      refVideoPath: "motion.mp4", refVideoSeconds: 15 };
+    const skeleton = cutVideoSkeletonInput({ cut, characters: [], cutCharacters: [], context: null, useComposition: true, useRefVideo: true });
+    expect(skeleton.hasRepresentativeImage).toBe(true);
+    const prompt = buildCutVideoPrompt({ ...skeleton, characterNames: input.characterNames });
+    expect(prompt.en).toContain("Individual character sheets are optional");
+    expect(prompt.en).toContain("only where attached");
+    expect(prompt.en).not.toContain("draw them exactly as in the attached character sheets");
+    expect(prompt.en).not.toContain("people from the attached character sheets");
+    const noFile = cutVideoSkeletonInput({ cut: { ...cut, images: [{ id: "none", name: "미저장 그림" }] },
+      characters: [], cutCharacters: [], context: null, useComposition: true, useRefVideo: true });
+    expect(noFile.hasRepresentativeImage).toBe(false);
+  });
+});
+
+describe("컷 영상의 실제 길이", () => {
+  const composition = { ...DEFAULT_COMPOSITION, timeline: { duration: 15, fps: 24 },
+    cameraMoves: [{ ...createCameraMove(), duration: 7 }, { ...createCameraMove(), startTime: 7, duration: 8 }] };
+
+  it("15초 카메라 무빙을 화면·한영 프롬프트에서 10초로 줄이지 않는다", () => {
+    const before = JSON.stringify(composition);
+    expect(cutVideoSeconds(composition, 5)).toBe(15);
+    const made = buildCutVideoPrompt({ composition, modelId: "seedance-2.5", hasRefVideo: true });
+    expect(made.seconds).toBe(15);
+    expect(made.ko).toContain("15.0초입니다");
+    expect(made.en).toContain("exactly 15.0 seconds");
+    expect(JSON.stringify(composition)).toBe(before);
+  });
+
+  it("69.134초 전체 영상과 계획 길이를 모델 한도와 별개로 보존한다", () => {
+    const long = { ...composition, cameraMoves: [], timeline: { duration: 69.134, fps: 24 } };
+    expect(cutVideoSeconds(long)).toBe(69.134);
+    expect(cutVideoSeconds(undefined, 69.134)).toBe(69.134);
+    const made = buildCutVideoPrompt({ composition: long, modelId: "seedance-2.5" });
+    expect(made.seconds).toBe(69.134);
+    expect(made.en).toContain("exactly 69.134 seconds");
+  });
+
+  it("선택된 프레임 길이 레퍼런스는 반올림하지 않고, 끄면 현재 구도 길이를 쓴다", () => {
+    const cut = { ...newCut(1), composition, refVideoPath: "ref.mp4", refVideoSeconds: 113 / 24, useRefVideo: true };
+    const seconds = 113 / 24;
+    expect(cutVideoSecondsOf(cut)).toBe(seconds);
+    const input = cutVideoSkeletonInput({ cut, characters: [], cutCharacters: [], context: null,
+      useComposition: true, useRefVideo: true });
+    const made = buildCutVideoPrompt(input);
+    expect(made.seconds).toBe(seconds);
+    expect(made.en).toContain("exactly 4.708333 seconds");
+    expect(cutVideoSecondsOf({ ...cut, useRefVideo: false })).toBe(15);
+    expect(cutVideoSecondsOf({ ...cut, refVideoPath: undefined })).toBe(15);
+  });
+});
 
 /*
   사용자 2026-09-22 스크린샷 — 영상 프롬프트에 「natural visible pores, …, fine film grain」 이 두 번 박혀

@@ -1064,6 +1064,8 @@ export async function composeMagnificAuto(input: {
   kind?: "image" | "video";
   /** 영상일 때 러닝타임(초) — 구도잡기 타임라인이 정한 값. */
   durationSeconds?: number;
+  /** Magnific 영상 구성 전용. 로컬 생성과 이미지 구성의 해상도는 바꾸지 않습니다. */
+  resolution?: "720p" | "1080p";
   /** 앞 구성이 끝나기를 기다리게 됐을 때 */
   onQueued?: () => void;
 }): Promise<string> {
@@ -1082,6 +1084,7 @@ export async function composeMagnificAuto(input: {
     model: input.model,
     kind: input.kind ?? "image",
     durationSeconds: input.durationSeconds,
+    resolution: input.resolution,
     aspectRatio: input.aspectRatio,
     count: input.count,
   });

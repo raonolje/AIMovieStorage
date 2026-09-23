@@ -1,4 +1,4 @@
-import { composeInMagnific } from "@/lib/magnificCompose";
+import { composeInMagnific, type MagnificVideoResolution } from "@/lib/magnificCompose";
 import { HOLDS_PLANNER } from "@/lib/useTutorialPanel";
 import { aspectNumberOf } from "@/components/composition/planner/PlannerChrome";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -59,10 +59,12 @@ import { buildCutPrompt } from "@/lib/cutPrompt";
 import {
   backgroundMotionHint,
   buildCutVideoPrompt,
-  cutVideoSeconds,
+  cutVideoSecondsOf,
+  formatVideoSeconds,
   heroImageOf,
 } from "@/lib/cutVideoPrompt";
 import { findMotionMask } from "@/lib/motionMask";
+import { cutVideoLinkInput, magnificCutVideoReferences } from "@/lib/cutVideoReferences";
 import { useT } from "@/lib/i18n";
 import { cutToggleLabel, cutTogglesEnglish } from "@/lib/cutStyle";
 /*
@@ -133,7 +135,6 @@ const PICK_ACCENT = {
 
 /**
  * 인물·장소를 «그림으로» 고르는 타일 한 장.
- *
  *
  * 배경만 드롭다운(«고르지 않음»)이었는데, 이름만으로는 «어느 골목» 인지 알 수 없어
  * 결국 2단계로 돌아가 확인해야 했습니다.
@@ -265,8 +266,6 @@ export default function CutCard({
   /**
    * 컷 키 이미지 프롬프트를 받을 때 LLM 에 넘기는 **재료 한 벌**.
    *
-   *
-   *
    * 여태 여기로 간 것은 «씬 요약 · 컷 설명 · 연출 토글 · VFX» 뿐이었습니다. 구도는 그림만
    * 올라가고 **글로는 한 마디도 안 갔고**, 고른 시트도, 대사·연기 지시도 안 갔습니다.
    * 그래서 프롬프트가 「그 컷이 무엇인지」 를 반쯤만 알고 쓰였습니다.
@@ -343,8 +342,6 @@ export default function CutCard({
 
   /**
    * 구도를 레퍼런스 삼아 마그니픽에서 뽑기.
-   *
-   *
    *
    * 이 길이 축척 문제를 통째로 비켜 갑니다. 3D 는 **카메라 각도·인물 자리·누가 어디에**
    * 만 말하면 되고, 잔디와 인물의 크기를 픽셀 단위로 맞추는 일은 생성기가 합니다.
@@ -763,8 +760,9 @@ export default function CutCard({
         { promptKo: cut.promptKo, promptEn: cut.promptEn },
         input,
       );
-      const videoPromptKo = relinkPromptText(cut.videoPromptKo ?? "", input, "ko");
-      const videoPromptEn = relinkPromptText(cut.videoPromptEn ?? "", input, "en");
+      const videoInput = cutVideoLinkInput(cut, input);
+      const videoPromptKo = relinkPromptText(cut.videoPromptKo ?? "", videoInput, "ko");
+      const videoPromptEn = relinkPromptText(cut.videoPromptEn ?? "", videoInput, "en");
       const videoChanged =
         videoPromptKo !== (cut.videoPromptKo ?? "") ||
         videoPromptEn !== (cut.videoPromptEn ?? "");
@@ -793,8 +791,6 @@ export default function CutCard({
 
   /**
    * 받은 프롬프트를 **칸에 넣고 기록에도 남깁니다.**
-   *
-   *
    *
    * 「무엇이 체크되었나」 는 컷에서 **연출 토글·기법·구도를 쓰는지**입니다. 그 조건이
    * 적혀 있어야 「아까 판이 더 나았다」 를 되짚을 수 있습니다.
@@ -888,8 +884,9 @@ export default function CutCard({
      그림 프롬프트와 **칸을 따로 둡니다**. 한 칸에 섞으면 그림을 뽑을 때 「0~2초에
      고개를 든다」 같은 시간 이야기가 끼어들어 자세가 흐려집니다. */
   const [sendingVideo, setSendingVideo] = useState(false);
+  const [magnificVideoResolution, setMagnificVideoResolution] = useState<MagnificVideoResolution>("1080p");
   // 인물 id → 이름, 이름 → 연기 기준은 영상 뼈대 재료(`cutVideoSkeletonInput`) 안에서 짓습니다 — 일괄 생성과 같은 규칙.
-  const videoSeconds = cutVideoSeconds(cut.composition, cut.plannedSeconds);
+  const videoSeconds = cutVideoSecondsOf(cut);
   const heroImage = heroImageOf(cut);
   /*
     ── 「여기만 움직인다」 흑백 마스크 ──────────────────────────────────
@@ -974,7 +971,7 @@ export default function CutCard({
    * 재료를 못 모아도 지은 글은 넣습니다. 값이 아니라 함수로 — 기다리는 사이 도착한 답을 지우면 안 됩니다.
    */
   const keepVideoPrompt = async (made: { ko: string; en: string }) => {
-    const input = await gatherLinkInput().catch(() => undefined);
+    const input = await gatherLinkInput().then(link => cutVideoLinkInput(cut, link)).catch(() => undefined);
     patchCut(() => ({
       videoPromptKo: input ? relinkPromptText(made.ko, input, "ko") : made.ko,
       videoPromptEn: input ? relinkPromptText(made.en, input, "en") : made.en,
@@ -1044,7 +1041,7 @@ export default function CutCard({
   };
 
   /**
-   * 영상 생성기로 보냅니다 — 그림 «구성» 과 **같은 재료**에 레퍼런스 영상만 더합니다.
+   * 영상 생성기로 보냅니다 — 그림 «구성» 재료에 컷의 대표 그림과 레퍼런스 영상을 더합니다.
    *
    * 러닝타임은 사람이 적지 않습니다. 구도잡기 타임라인이 정한 길이를 그대로 넣습니다
    * (그러지 않으면 구도는 4초인데 생성기는 5초인 어긋남이 반드시 생깁니다).
@@ -1059,28 +1056,33 @@ export default function CutCard({
     }
     setSendingVideo(true);
     try {
-      const { guideTag, references, swaps, tagPeople, props, tagOf } = await gatherCutRefs();
+      const { guidePath, backgroundPath, guideTag, references, swaps, props, tagOf } = await gatherCutRefs();
       /*
         레퍼런스 **영상이 맨 앞**입니다. 생성기는 앞쪽 레퍼런스를 더 무겁게 읽는데,
         영상이 카메라 움직임과 타이밍을 통째로 들고 있어 가장 강해야 합니다.
         영상이 없으면 구도 그림이 그 자리를 대신합니다(움직임은 글로만 갑니다).
       */
-      const paths = [useRefVideo ? cut.refVideoPath : undefined, ...references].filter(
-        (path): path is string => Boolean(path),
-      );
+      const paths = magnificCutVideoReferences(cut, references, useRefVideo);
       const ko = lang === "ko";
       const lines: string[] = [];
       if (useRefVideo && cut.refVideoPath)
         lines.push(
           ko
-            ? `${tagOf(cut.refVideoPath)} 는 이 컷의 카메라 움직임과 타이밍을 그대로 담은 레퍼런스 영상입니다(${videoSeconds.toFixed(1)}초). 그 움직임·길이·프레이밍을 그대로 따르세요.`
-            : `${tagOf(cut.refVideoPath)} is the reference video holding this shot's exact camera motion and timing (${videoSeconds.toFixed(1)}s). Follow its movement, length and framing exactly.`,
+            ? `${tagOf(cut.refVideoPath)} 는 이 컷의 카메라 움직임과 타이밍을 그대로 담은 레퍼런스 영상입니다(${formatVideoSeconds(videoSeconds)}초). 그 움직임·길이·프레이밍을 그대로 따르세요.`
+            : `${tagOf(cut.refVideoPath)} is the reference video holding this shot's exact camera motion and timing (${formatVideoSeconds(videoSeconds)}s). Follow its movement, length and framing exactly.`,
         );
       else if (guideTag)
         lines.push(
           ko
             ? `${guideTag} 는 이 컷의 3D 배치도입니다. 카메라 각도·화각·인물이 선 자리를 그대로 맞추세요.`
             : `${guideTag} is a 3D block-out of this shot. Match its camera angle, lens and figure placement exactly.`,
+        );
+      const heroPath = heroImageOf(cut)?.filePath;
+      if (heroPath)
+        lines.push(
+          ko
+            ? `${tagOf(heroPath)} 는 이 컷의 대표 그림입니다. 여기에 보이는 인물 구성·외형·의상을 기준으로 유지하세요.${useRefVideo && cut.refVideoPath ? " 움직임과 카메라 타이밍은 레퍼런스 영상을 따르세요." : ""}`
+            : `${tagOf(heroPath)} is this shot's representative image. Preserve its cast, appearance and clothing.${useRefVideo && cut.refVideoPath ? " Use the reference video for motion and camera timing." : ""}`,
         );
       if (swaps.some((person) => person.sheetPath))
         lines.push(
@@ -1095,17 +1097,17 @@ export default function CutCard({
             ? `${prop.tag} 은 이 컷의 소품 «${prop.label}» 입니다(배치도의 ${prop.color.ko} 덩어리 자리). 모양·재질·색을 그 시트 그대로 그리세요.`
             : `${prop.tag} is the prop "${prop.label}" of this shot (the ${prop.color.en} block in the layout). Draw it exactly as that sheet - shape, material, colour.`,
         );
-      // 그림 «구성» 과 같은 까닭 — 꼬리 줄은 두고 본문만 태그합니다. 사람 목록도 같은 것(`tagPeople`).
-      const split = splitLinkTail(prompt.trim());
-      const body = [tagCharacterNames(split.body, tagPeople), split.tail]
-        .filter(Boolean)
-        .join("\n\n");
+      // 새 대표 그림이 생기면 옛 «아직 없음» 꼬리도 갱신합니다. 사용자 본문은 유지합니다.
+      const body = relinkPromptText(prompt.trim(), cutVideoLinkInput(cut, cutLinkInput({
+        cut, characters, background, summary, useComposition, guidePath, backgroundPath,
+      })), lang);
       await composeInMagnific({
         kind: "video",
         // 앞에서 고른 영상 모델. 슬러그를 아는 것만 넘어갑니다(까닭은 그림 «구성» 주석).
         model: targetModelOf(videoModel)?.magnific,
         requestedVideoModel: videoModel,
         seconds: videoSeconds,
+        videoResolution: magnificVideoResolution,
         prompt: [lines.join("\n"), body].filter(Boolean).join("\n\n"),
         referencePaths: paths,
         owner: { kind: "cut", name: `컷 ${cut.order}`, cutId: cut.id },
@@ -1113,7 +1115,7 @@ export default function CutCard({
       });
       toast.success(`컷 ${cut.order} 을 영상 생성기로 올렸습니다.`, {
         id: `video:${cut.id}`,
-        description: `러닝타임 ${videoSeconds.toFixed(1)}초 · 레퍼런스 ${paths.length}개`,
+        description: `러닝타임 ${formatVideoSeconds(videoSeconds)}초 · 레퍼런스 ${paths.length}개`,
       });
     } catch (error) {
       toast.error(String(error), { id: `video:${cut.id}` });
@@ -1184,7 +1186,6 @@ export default function CutCard({
   }, [tabImages]);
   /**
    * ── 인물마다 «이 그림을 레퍼런스로» ────────────────────────────────
-   *
    *
    * 묶음 머리줄이 곧 인물 이름이라 이름으로 인물을 찾습니다(`collectEntityPickerImages` 의 `ownerName`). 변형·시트·보유 에셋도
    * 그 인물 이름으로 묶여 들어와, 한 인물의 어떤 그림이든 고를 수 있습니다. 공용 에셋 묶음은 인물이 없어 고르기가 안 뜹니다.
@@ -1465,7 +1466,7 @@ export default function CutCard({
                   text={cut.description}
                   kind="scene"
                   isVideo={false}
-                  seconds={cutVideoSeconds(cut.composition, cut.plannedSeconds)}
+                  seconds={cutVideoSecondsOf(cut)}
                   people={cutCharacters.map((item) => item.name)}
                   context={context}
                   onApply={(ko) => patchCut({ description: ko })}
@@ -1906,7 +1907,7 @@ export default function CutCard({
                   text={cut.acting || ""}
                   kind="acting"
                   isVideo
-                  seconds={cutVideoSeconds(cut.composition, cut.plannedSeconds)}
+                  seconds={cutVideoSecondsOf(cut)}
                   shot={(buildFacts().facts.subjects as { shot?: string }[] | undefined)?.[0]?.shot}
                   people={cutCharacters.map((item) => item.name)}
                   context={context}
@@ -1944,7 +1945,7 @@ export default function CutCard({
                 text={cut.backgroundMotion || ""}
                 kind="background"
                 isVideo
-                seconds={cutVideoSeconds(cut.composition, cut.plannedSeconds)}
+                seconds={cutVideoSecondsOf(cut)}
                 people={cutCharacters.map((item) => item.name)}
                 context={context}
                 onApply={(ko, en) =>
@@ -1978,7 +1979,7 @@ export default function CutCard({
                 text={cut.vfx || ""}
                 kind="vfx"
                 isVideo
-                seconds={cutVideoSeconds(cut.composition, cut.plannedSeconds)}
+                seconds={cutVideoSecondsOf(cut)}
                 people={cutCharacters.map((item) => item.name)}
                 context={context}
                 onApply={(ko, en) => patchCut({ vfx: ko, vfxEn: en || undefined })}
@@ -2018,6 +2019,9 @@ export default function CutCard({
           <CutVideoSection
             cut={cut}
             videoModel={videoModel}
+            magnificVideoResolution={magnificVideoResolution}
+            onMagnificVideoResolutionChange={setMagnificVideoResolution}
+            magnificBusy={sendingVideo}
             patchCut={patchCut}
             applyVideoPrompt={applyVideoPrompt}
             runVideoPrompt={runVideoPrompt}

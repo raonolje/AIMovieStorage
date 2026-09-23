@@ -405,7 +405,7 @@ export const MODEL_RULES: ModelRule[] = [
     audio: "optional",
     dialogue: { syntax: "braced", korean: "spoken", maxSpeakers: 2 },
     negative: "inline",
-    maxSeconds: 12,
+    maxSeconds: 15,
     camera: "either",
     quirks: ["2.5 와 같은 기호를 쓰되 **초 구간 표기가 없습니다.**"],
   },

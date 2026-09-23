@@ -6,6 +6,8 @@ import { assetSrc } from "@/lib/mediaLibrary";
 import { cutStem, sceneFolderName } from "@/lib/projectNames";
 import { uid } from "@/lib/projectTypes";
 import type { Cut, GeneratedImageAsset } from "@/lib/projectTypes";
+import type { MagnificVideoResolution } from "@/lib/magnificCompose";
+import { useT } from "@/lib/i18n";
 
 /**
  * **컷을 영상으로 뽑는 칸.**
@@ -18,6 +20,9 @@ import type { Cut, GeneratedImageAsset } from "@/lib/projectTypes";
 export default function CutVideoSection({
   cut,
   videoModel,
+  magnificVideoResolution,
+  onMagnificVideoResolutionChange,
+  magnificBusy,
   patchCut,
   applyVideoPrompt,
   runVideoPrompt,
@@ -35,6 +40,9 @@ export default function CutVideoSection({
 }: {
   cut: Cut;
   videoModel?: string;
+  magnificVideoResolution: MagnificVideoResolution;
+  onMagnificVideoResolutionChange: (value: MagnificVideoResolution) => void;
+  magnificBusy: boolean;
   patchCut: (patch: Partial<Cut> | ((cut: Cut) => Partial<Cut>)) => void;
   /** 규칙으로만 짓는 「영상 프롬프트」. */
   applyVideoPrompt: () => void;
@@ -59,6 +67,7 @@ export default function CutVideoSection({
   index: number;
   sendCutVideoToMagnific: (text: string, lang: "ko" | "en") => Promise<void>;
 }) {
+  const t = useT();
   return (
       <section
         className="space-y-2 rounded-md p-3"
@@ -247,6 +256,16 @@ ${new Date(render.at).toLocaleString()}`}
           </div>
         )}
 
+        <label className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground"
+          title={t("«영상으로»에서 Magnific 캔버스에 구성할 해상도입니다. 로컬 영상의 해상도는 바꾸지 않습니다.")}>
+          <span>{t("Magnific 구성 해상도")}</span>
+          <select aria-label={t("Magnific 구성 해상도")} value={magnificVideoResolution} disabled={magnificBusy}
+            onChange={event => onMagnificVideoResolutionChange(event.target.value as MagnificVideoResolution)}
+            className="rounded-md border border-white/10 bg-black/20 px-2 py-1 text-white disabled:opacity-40">
+            <option value="720p">720p</option>
+            <option value="1080p">1080p</option>
+          </select>
+        </label>
         <MagnificVideoCapability modelId={videoModel} hasRefVideo={cut.useRefVideo !== false && Boolean(cut.refVideoPath)} />
         <PromptResultPanels
           compact

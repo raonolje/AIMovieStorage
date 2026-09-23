@@ -142,6 +142,7 @@ export function describePeople(
    * 데도 안 가는 칸이었던 셈입니다.
    */
   acting: Record<string, string> = {},
+  options: { screenPlacement?: boolean; hasRepresentativeImage?: boolean } = {},
 ): SwapLine[] {
   const known: string[] = [];
   let extras = 0;
@@ -154,8 +155,12 @@ export function describePeople(
   const lines: SwapLine[] = [];
   if (known.length)
     lines.push({
-      ko: `사람: ${known.join(" · ")} — 첨부한 인물 시트 그대로 그리세요.`,
-      en: `People: ${known.join(", ")} — draw them exactly as in the attached character sheets.`,
+      ko: options.hasRepresentativeImage
+        ? `사람: ${known.join(" · ")} — 첨부한 대표 그림의 인물 외형을 유지하세요. 개별 인물 시트는 실제로 첨부된 것만 추가 기준으로 씁니다.`
+        : `사람: ${known.join(" · ")} — 첨부한 인물 시트 그대로 그리세요.`,
+      en: options.hasRepresentativeImage
+        ? `People: ${known.join(", ")} — preserve the cast appearance in the attached representative image. Use individual character sheets as additional references only where attached.`
+        : `People: ${known.join(", ")} — draw them exactly as in the attached character sheets.`,
     });
 
   /*
@@ -171,7 +176,8 @@ export function describePeople(
     인물(0~100 밖)은 **적지 않습니다** — 「x 135%」 는 사실이지만 생성기에는 뜻이 없고,
     오히려 그 수를 맞추려다 화면을 비웁니다.
   */
-  const spots = state.characters
+  // 움직이는 레퍼런스 영상에는 정적인 화면 좌표를 잠그지 않습니다. 그림 프롬프트는 기존 고정을 유지합니다.
+  const spots = options.screenPlacement === false ? [] : state.characters
     .filter((person) => !person.hidden && names[person.characterId])
     .map((person) => {
       const heightM = (person.heightCm ?? 170) / 100;

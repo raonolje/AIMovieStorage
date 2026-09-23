@@ -1,6 +1,6 @@
 [package]
 name = "aimoviestorage"
-version = "0.3.0"
+version = "0.3.1"
 description = "AIMovieStorage local AI preproduction workspace"
 authors = ["AIMovieStorage"]
 license = ""

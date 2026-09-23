@@ -41,6 +41,7 @@ import {
   withUnfoldFrame,
 } from "@/lib/promptPayloads";
 import type { Background, Character, Cut, ProjectDraft, Scene } from "@/lib/projectTypes";
+import { cutVideoLinkInput } from "@/lib/cutVideoReferences";
 
 /**
  * **AI 일괄 생성 4단계 — 카드마다 프롬프트를 자세히 쓰기.**
@@ -456,7 +457,7 @@ async function writeCut(
   });
   const wrote = await writeProject(project(), (current) =>
     patchCutIn(current, target.sceneId, target.cutId, (now) => {
-      const link = linkInputOf(current, now);
+      const link = cutVideoLinkInput(now, linkInputOf(current, now));
       return {
         videoPromptKo: relinkPromptText(result.ko, link, "ko"),
         videoPromptEn: relinkPromptText(result.en, link, "en"),

@@ -10,7 +10,7 @@ import type { CompositionCameraSummary } from "@/lib/composition";
 import { cutToggleLabel, cutTogglesEnglish } from "@/lib/cutStyle";
 import { autoRealism, isCloseUp } from "@/lib/autoRealism";
 import { buildCutPrompt } from "@/lib/cutPrompt";
-import { cutVideoSeconds, dedupePhrases, type CutVideoPrompt, type CutVideoPromptInput } from "@/lib/cutVideoPrompt";
+import { cutVideoSecondsOf, dedupePhrases, heroImageOf, type CutVideoPrompt, type CutVideoPromptInput } from "@/lib/cutVideoPrompt";
 import { videoRuleIdOf } from "@/lib/modelRules";
 import { appendPromptHistory, describeRunConditions } from "@/lib/promptHistory";
 import type { PromptLinkInput } from "@/lib/promptLinks";
@@ -911,6 +911,8 @@ export function cutVideoSkeletonInput(input: CutVideoSkeletonInput): CutVideoPro
     acting: cut.acting,
     actingEn: cut.actingEn,
     hasRefVideo: input.useRefVideo,
+    hasRepresentativeImage: Boolean(heroImageOf(cut)?.filePath),
+    refVideoSeconds: input.useRefVideo ? cut.refVideoSeconds : undefined,
     plannedSeconds: cut.plannedSeconds,
     // 화면비와 «바꾸지 마세요» 에 박을 이름 — 둘 다 없으면 생성기가 제멋대로 정합니다.
     aspect: input.aspect,
@@ -972,6 +974,7 @@ export function cutVideoRequestPayload(input: {
     aspect: skeletonInput.aspect ?? null,
     modelId: skeletonInput.modelId ?? null,
     hasRefVideo: skeletonInput.hasRefVideo ? "yes" : "no",
+    hasRepresentativeImage: skeletonInput.hasRepresentativeImage ? "yes" : "no",
     style: tags.map(cutToggleLabel),
     lookEn: skeletonInput.lookEn || null,
     composition: composition && summary.hasComposition
@@ -1008,4 +1011,4 @@ export function cutVideoRequestPayload(input: {
 }
 
 /** 이 컷의 러닝타임 — 카드와 일괄 생성이 같은 계산(`cutVideoSeconds`). */
-export const cutSecondsOf = (cut: Cut) => cutVideoSeconds(cut.composition, cut.plannedSeconds);
+export const cutSecondsOf = (cut: Cut) => cutVideoSecondsOf(cut);

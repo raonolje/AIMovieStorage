@@ -23,7 +23,7 @@ import { LlmRequestButton } from "@/components/LlmRequestButton";
 import { requestPromptFromLlm } from "@/lib/promptRequest";
 import { useApiReady } from "@/lib/useApiReady";
 
-import { cutVideoSeconds } from "@/lib/cutVideoPrompt";
+import { cutVideoSecondsOf } from "@/lib/cutVideoPrompt";
 import { cameraMovesOf } from "@/lib/compositionEdit";
 import { describeCameraMoves } from "@/lib/cameraMoves";
 import { characterLegend, objectLegend } from "@/lib/compositionLegend";
@@ -218,7 +218,7 @@ export default function SceneStoryboard({
           order: cell.cut.order,
           title: cell.cut.title || null,
           seconds: Number(
-            cutVideoSeconds(cell.cut.composition, cell.cut.plannedSeconds).toFixed(1),
+            cutVideoSecondsOf(cell.cut).toFixed(1),
           ),
           /*
             **영문 카메라 문장도 함께 보냅니다.**

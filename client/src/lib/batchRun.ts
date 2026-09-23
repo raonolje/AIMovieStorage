@@ -12,7 +12,7 @@ import { assertMagnificVideoInputs, findMagnificVideoModel, mediaTypeOfPath } fr
 import { localSize, tuneForLocal } from "@/lib/localPrompt";
 import { projectFolderName } from "@/lib/localProjectStore";
 import { sceneFolderName } from "@/lib/projectNames";
-import { cutVideoSeconds, heroImageOf } from "@/lib/cutVideoPrompt";
+import { cutVideoSecondsOf, heroImageOf } from "@/lib/cutVideoPrompt";
 import {
   buildStoryboardVideoPrompt,
   composeStoryboard,
@@ -27,8 +27,6 @@ import type { Cut, ProjectDraft, Scene } from "@/lib/projectTypes";
 
 /**
  * **한 번에 뽑기** — 작품 하나를 **순서대로** 끝까지 뽑습니다.
- *
- *
  *
  * # 순서가 곧 품질입니다
  *
@@ -826,7 +824,7 @@ registerTaskRunner(SCENE_VIDEO_TASK, async (raw, report, task) => {
     1,
     Math.round(
       scene.cuts.reduce(
-        (total, cut) => total + cutVideoSeconds(cut.composition, cut.plannedSeconds),
+        (total, cut) => total + cutVideoSecondsOf(cut),
         0,
       ) * 2,
     ) / 2,

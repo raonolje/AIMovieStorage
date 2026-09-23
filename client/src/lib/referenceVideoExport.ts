@@ -73,6 +73,8 @@ export async function exportReferenceVideoFiles(options: CompositionVideoOptions
       const file = new File([encoded.blob], fileName, { type: "video/mp4" });
       const asset = options.projectName?.trim() ? await saveProjectMediaAsset(file, {
         projectName: options.projectName, assetType: "composition-video", ownerName: options.sceneTitle || "Reference",
+        // File.name은 저장 시 확장자만 쓰므로 stem도 명시합니다. 그림과 이름이 같으면 Magnific @태그가 모호해집니다.
+        stem: `${options.sceneTitle || "Reference"}_구도영상`,
       }) : null;
       if (asset?.path) {
         const video: SavedReferenceVideo = { path: asset.path, seconds: encoded.frameCount / fps,

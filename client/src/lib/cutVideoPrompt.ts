@@ -11,8 +11,6 @@ import type { Cut, GeneratedImageAsset } from "@/lib/projectTypes";
 /**
  * 컷 하나를 **영상으로** 뽑는 프롬프트.
  *
- *
- *
  * # 그림 프롬프트와 무엇이 다른가
  *
  * 그림은 **한순간**을 적습니다 — 「누가 어디에 어떤 표정으로 서 있다」. 영상은 **무엇이
@@ -69,6 +67,10 @@ export interface CutVideoPromptInput {
   vfxEn?: string;
   /** 구도잡기 레퍼런스 영상을 함께 올리는가. 올리면 카메라 설명을 줄입니다. */
   hasRefVideo?: boolean;
+  /** 실제로 선택한 레퍼런스 파일의 길이. 타임라인을 나중에 고쳐도 이미 뽑은 영상은 바뀌지 않습니다. */
+  refVideoSeconds?: number;
+  /** 실제 파일이 있는 컷 대표 그림. 개별 시트가 없는 인물에게 가짜 시트를 요구하지 않습니다. */
+  hasRepresentativeImage?: boolean;
   /** 기획 단계에서 적어 둔 컷 길이(초). 구도잡기가 없을 때만 씁니다. */
   plannedSeconds?: number;
   /** 프로젝트 화면비(`"16:9"`·`"9:16"` …). 안 적으면 생성기가 제 기본값으로 갑니다. */
@@ -115,15 +117,27 @@ export function cutVideoSeconds(
    * 계속 옛 숫자가 들어갑니다.
    */
   planned?: number,
+  referenceSeconds?: number,
 ): number {
-  const clamp = (value: number) =>
-    Math.min(10, Math.max(1, Math.round(value * 2) / 2));
-  if (!composition) return planned ? clamp(planned) : 5;
+  const positive = (value: number | undefined): value is number => typeof value === "number" && Number.isFinite(value) && value > 0;
+  // 15초 군무가 모든 모델에서 10초라고 표시됐습니다. 원본 길이는 보존하고 모델 한도는 전송 직전에 검사합니다.
+  if (positive(referenceSeconds)) return referenceSeconds;
+  if (!composition) return positive(planned) ? planned : 5;
   const moves = cameraMovesOf(composition);
   const end = moves.length ? cameraMovesEnd(moves) : 0;
   const span = end > 0.1 ? end : timelineOf(composition).duration;
-  // 생성기는 대개 1~10초를 받습니다. 0.5초 눈금으로 맞춰 둡니다.
-  return clamp(span);
+  return positive(span) ? span : positive(planned) ? planned : 5;
+}
+
+/** 선택을 끈 옛 레퍼런스 길이가 현재 컷을 덮지 않게 모든 컷 호출이 같은 조건을 씁니다. */
+export function cutVideoSecondsOf(cut: Pick<Cut, "composition" | "plannedSeconds" | "refVideoPath" | "refVideoSeconds" | "useRefVideo">): number {
+  return cutVideoSeconds(cut.composition, cut.plannedSeconds,
+    cut.useRefVideo !== false && cut.refVideoPath ? cut.refVideoSeconds : undefined);
+}
+
+/** 프레임 단위 길이를 0.5초나 0.1초로 바꾸지 않습니다. 표시는 부동소수점 계산의 꼬리만 줄입니다. */
+export function formatVideoSeconds(seconds: number): string {
+  return Number.isInteger(seconds) ? seconds.toFixed(1) : String(Number(seconds.toFixed(6)));
 }
 
 /**
@@ -152,11 +166,13 @@ export function dedupePhrases(text: string): string {
 export function buildCutVideoPrompt(
   input: CutVideoPromptInput,
 ): CutVideoPrompt {
-  const seconds = cutVideoSeconds(input.composition, input.plannedSeconds);
+  const seconds = cutVideoSeconds(input.composition, input.plannedSeconds, input.hasRefVideo ? input.refVideoSeconds : undefined);
   const moves = input.composition ? cameraMovesOf(input.composition) : [];
   const camera = describeCameraMoves(moves);
   const people = input.composition
-    ? describePeople(input.composition, input.characterNames ?? {}, input.characterActing ?? {})
+    ? describePeople(input.composition, input.characterNames ?? {}, input.characterActing ?? {}, {
+      screenPlacement: !input.hasRefVideo, hasRepresentativeImage: input.hasRepresentativeImage,
+    })
     : [];
   const swaps = input.composition ? describeObjectSwaps(input.composition) : [];
 
@@ -173,16 +189,23 @@ export function buildCutVideoPrompt(
     en.push(what);
   }
 
+  const appearanceKo = input.hasRepresentativeImage ? "대표 그림과 실제로 첨부된 개별 인물 시트" : "인물 시트";
+  const appearanceEn = input.hasRepresentativeImage ? "representative image and any individual character sheets actually attached" : "character sheets";
+  if (input.hasRepresentativeImage) {
+    ko.push("첨부한 대표 그림에 보이는 인물 구성·외형·의상을 유지하세요. 개별 인물 시트는 선택 사항이며, 첨부되지 않은 시트가 있다고 가정하지 마세요.");
+    en.push("Preserve the visible cast, appearance and clothing in the attached representative image. Individual character sheets are optional; do not assume an unattached sheet exists.");
+  }
+
   if (input.hasRefVideo) {
     ko.push(
-      `첨부한 레퍼런스 영상은 3D 구도 안내(블로킹 가이드)입니다. 카메라 길·자리·동작·타이밍을 그대로 따르세요. ${seconds.toFixed(1)}초입니다. 영상 속 인형은 자리와 동작만 알려 주는 것이니, 첨부한 인물 시트의 사람으로 바꿔 그리세요. 인형의 회색 또는 식별 색을 피부·손·의상에 옮기지 말고, 매끈한 플라스틱 표면과 빈 얼굴도 복사하지 마세요. 피부·머리카락·옷의 색과 재질은 인물 시트를 따르세요. 손가락의 자세와 제스처도 레퍼런스와 연기 지시를 유지하세요.`,
+      `첨부한 레퍼런스 영상은 3D 구도 안내(블로킹 가이드)입니다. 카메라 길·자리·동작·타이밍을 그대로 따르세요. ${formatVideoSeconds(seconds)}초입니다. 영상 속 인형은 자리와 동작만 알려 주는 것이니, 첨부한 ${appearanceKo}의 사람으로 바꿔 그리세요. 인형의 회색 또는 식별 색을 피부·손·의상에 옮기지 말고, 매끈한 플라스틱 표면과 빈 얼굴도 복사하지 마세요. 피부·머리카락·옷의 색과 재질은 ${appearanceKo}를 따르세요. 손가락의 자세와 제스처도 레퍼런스와 연기 지시를 유지하세요.`,
     );
     en.push(
-      `The attached reference video is a 3D blocking guide. Follow its camera path, positions, action and timing exactly. It is ${seconds.toFixed(1)} seconds long. The mannequins only mark position and action; replace them with the people from the attached character sheets. Use the sheets for skin, hair and clothing colors and materials, not the mannequins' smooth plastic surfaces or blank faces. Do not transfer grey or identification colors from the mannequins to the people. Preserve the reference finger poses and gestures together with the acting instructions.`,
+      `The attached reference video is a 3D blocking guide. Follow its camera path, positions, action and timing exactly. It is ${formatVideoSeconds(seconds)} seconds long. The mannequins only mark position and action; replace them with the people from the attached ${appearanceEn}. Use these appearance references for skin, hair and clothing colors and materials, not the mannequins' smooth plastic surfaces or blank faces. Do not transfer grey or identification colors from the mannequins to the people. Preserve the reference finger poses and gestures together with the acting instructions.`,
     );
     // 한 방의 형광등을 모든 컷에 강제하거나, 잡아 둔 손짓을 느슨한 손으로 덮어쓰지 않습니다.
-    ko.push("각 인물의 손등·팔뚝은 그 인물의 얼굴과 같은 피부색 기준을 유지하세요. 입술 화장색을 손에 번지게 하지 말고, 인물 시트에 있는 피부 특징과 조명에 따른 자연스러운 색 변화는 유지하세요.");
-    en.push("Keep each person's hands and forearms consistent with that person's facial skin tone. Do not spread lip makeup color onto the hands; preserve the skin features in their character sheet and natural color changes under the scene lighting.");
+    ko.push(`각 인물의 손등·팔뚝은 그 인물의 얼굴과 같은 피부색 기준을 유지하세요. 입술 화장색을 손에 번지게 하지 말고, ${appearanceKo}에 있는 피부 특징과 조명에 따른 자연스러운 색 변화는 유지하세요.`);
+    en.push(`Keep each person's hands and forearms consistent with that person's facial skin tone. Do not spread lip makeup color onto the hands; preserve the skin features in the attached ${appearanceEn} and natural color changes under the scene lighting.`);
     ko.push("조명·접지: 이 컷에서 지정한 조명이 있으면 그것을, 없으면 배경에 보이는 광원의 방향·색온도·부드러움을 따라 인물을 함께 비추세요. 발이나 물체가 바닥에 닿는 곳에는 접점이 가장 짙고 가까운 바닥으로 부드럽게 사라지는 짧은 접지 그림자를 만드세요. 떠 있는 발을 바닥에 붙이지 마세요. 긴 그림자의 유무·방향·길이는 실제 장면의 광원에 맞추고, 블로킹 가이드의 임시 조명과 그림자를 그대로 복제하지 마세요.");
     en.push("Lighting and grounding: use the lighting specified for this shot; otherwise match the direction, color temperature and softness of the sources visible in the background. Add short contact shadows where feet or objects actually touch the floor, darkest at contact and fading softly nearby. Do not pin raised feet to the floor. Any longer cast shadows must agree with the scene's light sources; do not copy the blocking guide's temporary lighting or shadows.");
   } else if (camera) {
@@ -323,7 +346,11 @@ export function buildCutVideoPrompt(
     디퓨전 모델은 그 낱말을 **그리라는 말로** 읽는 일이 흔합니다 — 부정은 전용 칸에서만 제 구실을 합니다.
     칸이 없는 모델(`inline`·`unsupported`)에는 같은 뜻을 긍정으로 뒤집어 적습니다.
   */
-  if (negativeStyleOf(rule).where !== "field") {
+  if (input.hasRefVideo) {
+    // 레퍼런스 자체에 카메라 컷이 있을 수 있습니다. 원테이크를 강제하면 타임라인과 모순됩니다.
+    ko.push("레퍼런스 영상의 카메라 이동·프레이밍·컷 전환과 그 시각을 따르세요. 화면 속 인물의 위치는 안무와 카메라에 따라 변합니다. 첫 화면의 좌표에 고정하지 마세요. 같은 인물과 장소의 연속성을 유지하고, 영상에 없는 카메라 컷이나 속도 변화는 추가하지 마세요. 화면은 장면의 영상으로만 채우세요.");
+    en.push("Follow the reference video's camera movement, framing, shot changes and their timing. The cast's screen positions change with the choreography and camera; do not lock them to the initial frame's coordinates. Preserve cast and location continuity, without adding camera cuts or speed changes absent from the reference. Fill the frame with the scene imagery alone.");
+  } else if (negativeStyleOf(rule).where !== "field") {
     ko.push(
       "한 번에 이어지는 한 컷입니다. 화면은 처음부터 끝까지 한 장면이고, 가장자리까지 **찍힌 그림만으로** 채워집니다.",
     );
@@ -350,12 +377,12 @@ export function buildCutVideoPrompt(
       잠그면(15%가 그렇습니다) 「얼굴은 같은데 옷이 바뀐다」 가 됩니다. 얼굴·의상·장소를
       함께 잠급니다(우리 규칙 6 «정체성은 하나» 를 문장으로도 한 번 더 박는 것).
   */
-  const format = [`${seconds.toFixed(1)}초`, input.aspect && `화면비 ${input.aspect}`]
+  const format = [`${formatVideoSeconds(seconds)}초`, input.aspect && `화면비 ${input.aspect}`]
     .filter(Boolean)
     .join(" · ");
   ko.push(`형식: ${format}. 마지막 프레임까지 끊지 말고 채우세요.`);
   en.push(
-    `Format: exactly ${seconds.toFixed(1)} seconds${input.aspect ? `, ${input.aspect} aspect ratio` : ""}. Run to the last frame.`,
+    `Format: exactly ${formatVideoSeconds(seconds)} seconds${input.aspect ? `, ${input.aspect} aspect ratio` : ""}. Run to the last frame.`,
   );
 
   const who = (input.lockNames ?? []).filter(Boolean);
@@ -411,8 +438,6 @@ export function backgroundMotionHint(composition?: CompositionState | null): str
 /**
  * 이 컷의 **대표 그림** — 스토리보드에 실릴 한 장.
  *
- *
- *
  * 대표 표시는 **그림 선반의 별(`isPrimary`)** 하나만 씁니다. 컷에만 따로 «대표 id» 를
  * 두려다 말았습니다 — 캐릭터·배경·에셋이 이미 별로 대표를 정하는데 컷만 다른 길을 쓰면,
  * 별을 눌러도 스토리보드가 안 바뀌는 «두 개의 대표» 가 생깁니다(공통 규칙 1).
@@ -444,4 +469,3 @@ export function heroImageOf(cut: Cut): GeneratedImageAsset | null {
   const pool = usable.length ? usable : pictures;
   return pool.find((image) => image.isPrimary) ?? pool[0];
 }
-

@@ -3,6 +3,7 @@ import { composeMagnificAuto } from "@/lib/mediaLibrary";
 import { loadMagnificModels } from "@/lib/magnificModels";
 import { assertMagnificVideoInputs, findMagnificVideoModel, mediaTypeOfPath } from "@/lib/magnificVideoInputs";
 import { t } from "@/lib/i18n";
+import { assertVideoDuration } from "./videoDuration";
 
 /**
  * 마그니픽 캔버스에 «레퍼런스 그림 → 이미지 생성기(프롬프트 + @칩)» 를 «구성» 한 번으로 만듭니다.
@@ -27,6 +28,7 @@ export const MAGNIFIC_IMAGE_MODEL = "imagen-nano-banana-2";
  * 마그니픽에서 바꿔도 됩니다 — 여기 값은 노드를 놓을 때의 첫 자리일 뿐입니다.
  */
 export const MAGNIFIC_VIDEO_MODEL = "seedance-2-5-pro";
+export type MagnificVideoResolution = "720p" | "1080p";
 
 export async function composeInMagnific(input: {
   prompt: string;
@@ -42,21 +44,26 @@ export async function composeInMagnific(input: {
   kind?: "image" | "video";
   /** 영상일 때 러닝타임(초). 구도잡기 타임라인이 정한 값을 그대로 넘깁니다. */
   seconds?: number;
+  /** 로컬 생성 옵션과 분리합니다. 생략한 기존 호출은 1080p로 구성합니다. */
+  videoResolution?: MagnificVideoResolution;
   onStatus?: (message: string) => void;
 }): Promise<string> {
   const say = input.onStatus ?? (() => undefined);
   const prompt = input.prompt.trim();
   if (!prompt) throw new Error("보낼 프롬프트가 없습니다.");
   const paths = [...new Set(input.referencePaths.filter((path) => path && path.trim()))];
+  const resolution = input.videoResolution ?? "1080p";
   if (input.kind === "video" && input.requestedVideoModel && !input.model) {
     throw new Error(t("선택한 영상 모델의 Magnific 데스크톱 연결값을 확인하지 못했습니다. 기본 모델로 바꾸지 않았습니다. Magnific에서 모델을 직접 고르거나 MCP 생성 목록을 사용하세요."));
   }
+  if (input.kind === "video") assertVideoDuration(input.seconds ?? 5, input.requestedVideoModel ?? input.model ?? MAGNIFIC_VIDEO_MODEL);
   if (input.kind === "video" && paths.some(path => mediaTypeOfPath(path) === "video")) {
     const model = findMagnificVideoModel(await loadMagnificModels("video"), input.model ?? MAGNIFIC_VIDEO_MODEL);
+    assertVideoDuration(input.seconds ?? 5, input.requestedVideoModel ?? input.model ?? MAGNIFIC_VIDEO_MODEL, model);
     assertMagnificVideoInputs(model, {
       references: paths.map(path => ({ type: mediaTypeOfPath(path), url: path })),
-      // 데스크톱 구성 경로가 쓰는 고정값도 같은 제약으로 확인합니다.
-      resolution: "1080p",
+      // 검사한 해상도와 실제 캔버스 생성기에 넣는 값이 달라지면 안 됩니다.
+      resolution,
     });
     say(t("영상 입력 지원을 확인했습니다. Magnific에서 영상 노드가 레퍼런스로 연결됐는지 확인한 뒤 생성하세요."));
   }
@@ -73,6 +80,7 @@ export async function composeInMagnific(input: {
     prompt,
     kind: input.kind ?? "image",
     durationSeconds: input.seconds,
+    resolution: input.kind === "video" ? resolution : undefined,
     model:
       input.model ??
       (input.kind === "video" ? MAGNIFIC_VIDEO_MODEL : MAGNIFIC_IMAGE_MODEL),

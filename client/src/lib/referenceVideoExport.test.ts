@@ -42,9 +42,26 @@ describe("UI와 MCP가 공유하는 레퍼런스 영상 저장", () => {
     expect(sequence).toEqual(["준비:0", "그림:0", "준비:0.5", "그림:0.5", "저장확인", "준비:1", "그림:1", "준비:1.5", "그림:1.5", "저장확인"]);
     expect(videos.map(video => [video.frameCount, video.seconds, video.part])).toEqual([[2, 1, "1/2"], [2, 1, "2/2"]]);
     expect(mocks.save.mock.calls.map(args => args[0].name)).toEqual(["장면_cut02_reference_part01_0s-1s.mp4", "장면_cut02_reference_part02_1s-2s.mp4"]);
+    expect(mocks.save.mock.calls.map(args => args[1])).toEqual([
+      { projectName: "작품", assetType: "composition-video", ownerName: "장면", stem: "장면_구도영상" },
+      { projectName: "작품", assetType: "composition-video", ownerName: "장면", stem: "장면_구도영상" },
+    ]);
     expect(progress).toHaveBeenLastCalledWith(4, 4);
     expect(f.renderer.begin).toHaveBeenCalledWith(1920, 1080);
     expect(f.renderer.end).toHaveBeenCalledOnce();
+  });
+
+  it("새 영상은 대표 그림과 다른 stem으로 저장하고 실제 반환 경로를 UI·MCP 기록에 쓴다", async () => {
+    const path = "작품/composition/군무/군무_구도영상_001.mp4";
+    mocks.save.mockResolvedValue({ path, name: "군무_구도영상_001" });
+    const onSaved = vi.fn();
+    const onFileSaved = vi.fn();
+    const videos = await exportReferenceVideoFiles({ ...fixture(), sceneTitle: "군무", onSaved, onFileSaved });
+    expect(mocks.save).toHaveBeenCalledWith(expect.any(File), expect.objectContaining({ ownerName: "군무", stem: "군무_구도영상" }));
+    expect(videos[0].path).toBe(path);
+    expect(videos[0].path.split("/").at(-1)).not.toBe("군무_001.mp4");
+    expect(onSaved).toHaveBeenCalledWith(videos[0]);
+    expect(onFileSaved).toHaveBeenCalledWith(videos[0]);
   });
 
   it("배경 영상 seek 대기 도중 렌더러가 교체되면 한 장도 그리거나 저장하지 않는다", async () => {

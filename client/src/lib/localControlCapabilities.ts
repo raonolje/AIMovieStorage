@@ -12,11 +12,15 @@ export function localControlCapabilities(engineId: string) {
   };
 }
 
-type ControlValidation = { ok: true } | { ok: false; code: "unsupported_control" | "invalid_control" | "unsupported_reference" | "invalid_reference_range"; message: string };
+type ControlValidation = { ok: true } | { ok: false; code: "unsupported_control" | "invalid_control" | "unsupported_reference" | "invalid_reference_range" | "invalid_duration"; message: string };
 
 /** 모델 전환 뒤 남은 모캡 선택을 조용히 버리지 않고 시작 전에 알립니다. */
 export function validateLocalControlOptions(engineId: string, options: { control?: unknown; structure_control?: unknown; seconds?: number; references?: unknown; reference_video_range?: unknown }): ControlValidation {
   const capability = localControlCapabilities(engineId);
+  // 공통 컷의 10초 제한을 없애도 H3 워커의 345프레임/24fps 상한에서 원본을 조용히 자르면 안 됩니다.
+  if (engineId === "minimaxh3" && options.seconds !== undefined && options.seconds > 345 / 24 + 1e-6) {
+    return { ok: false, code: "invalid_duration", message: t("로컬 H3는 최대 14.375초를 출력합니다. 타임라인에서 구간을 나눠 레퍼런스를 다시 내보내세요. 길이를 자동으로 줄이지 않았습니다.") };
+  }
   if (options.structure_control !== undefined && options.structure_control !== null) {
     if (!capability.structureVideo) return { ok: false, code: "unsupported_control", message: t("윤곽 구조 제어는 LTX 2.5에서만 지원합니다.") };
     if (options.control != null) return { ok: false, code: "unsupported_control", message: t("포즈와 윤곽 구조 제어는 함께 사용할 수 없습니다. 하나를 해제하세요.") };

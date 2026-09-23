@@ -24,6 +24,9 @@ label: 컷 영상 프롬프트
   modelId      보낼 영상 모델의 규칙 id(`modelRules.ts`). 없으면 null — 어느 모델에나 통하는 모양으로.
   hasRefVideo  "yes" | "no" — 구도잡기 레퍼런스 영상을 함께 올리는가. yes 면 카메라 무빙은 영상이 말하니
                글은 «그 움직임을 따르되 사람과 재질은 이렇게» 쪽으로 비켜섭니다.
+  hasRepresentativeImage "yes" | "no" — 실제 파일이 있는 컷 대표 그림을 외형 참조로 함께 보내는가.
+               yes 면 대표 그림에 보이는 인물을 유지하고 개별 시트는 실제 첨부된 것만 추가로 씁니다.
+               시트 배열이 빈 인물에게 없는 시트를 보라고 요구하지 마세요.
   style        사용자가 고른 연출 토글의 **한국어 라벨** 목록.
   lookEn       연출·질감 토글의 영어 한 줄(뼈대에 이미 실려 있음). 없으면 null.
   composition  저장한 구도. null 이면 구도를 쓰지 않는 컷 — 구도 이야기를 하지 마세요.
@@ -36,9 +39,11 @@ label: 컷 영상 프롬프트
   draftKo / draftEn
                규칙이 지은 **뼈대**(`buildCutVideoPrompt`). 뼈대에는 @태그가 **없습니다** — 「참고 그림:」·
                「아직 그림 없음:」 꼬리 줄은 앱이 답을 받은 **뒤에** 붙입니다(`promptLinks.relinkPromptText`).
-               아래 줄들은 **고정**입니다 — 글자 그대로 제자리에 남기고 그 사이를 채웁니다.
+               아래 줄들은 **뼈대에 있을 때만 고정**입니다 — 글자 그대로 제자리에 남기고 그 사이를 채웁니다.
+               예시에만 있는 줄을 추가하지 마세요. hasRefVideo=yes이면 정적인 화면 좌표 고정이나 원테이크 강제를
+               추가하지 않고, 참조 영상의 카메라 이동·프레이밍·컷 전환·타이밍을 따릅니다.
                영문 뼈대의 고정 줄은 이렇게 시작합니다(한글 뼈대에는 같은 뜻의 한국어 줄이 같은 자리에).
-                 · "People: … — draw them exactly as in the attached character sheets."   (사람: … — 첨부한 인물 시트 그대로)
+                 · "People: …" — 인물 시트 또는 대표 그림을 사용하는 실제 뼈대의 문구
                  · "Screen placement (left 0% to right 100%, top 0% to bottom 100%) — …"   (화면에서의 자리(…) — …)
                  · "How 이름 performs — …"  ·  "N extras — anonymous passers-by …"          (… 의 연기 기준 — … · 엑스트라 N명 — …)
                  · "Follow the camera motion and timing of the attached reference video …"  (hasRefVideo=yes 일 때만)
@@ -94,6 +99,9 @@ label: 컷 영상 프롬프트
   「Format: exactly N.N seconds, … aspect ratio. Run to the last frame.」, 맨 뒤의 「Keep …'s face, hair and
   outfit, and the location and lighting, identical to the attached references throughout the entire shot.」
   — 한글의 「한 번에 이어지는 한 컷입니다 …」 「형식: …」 「… 얼굴·머리·의상, 그리고 장소와 빛을 …」 도 같습니다.
+  단, 연속 원테이크 줄은 hasRefVideo=no이고 뼈대에 있을 때만 유지합니다. hasRefVideo=yes이면
+  「Follow the reference video's camera movement, framing, shot changes and their timing. …」와 같은 뜻의
+  한국어 줄을 유지합니다. 「Screen placement … Keep these positions.」를 새로 추가하지 마세요.
 - `composition.카메라`·`무빙`·`인물자리`·`seconds`·`aspect` — 사용자가 3D 화면에서 잰 값입니다. 새 카메라
   동작을 발명하지 마세요.
 

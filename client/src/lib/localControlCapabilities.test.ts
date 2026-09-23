@@ -3,6 +3,12 @@ import { localControlCapabilities, validateLocalControlOptions } from "@/lib/loc
 
 const pose = { kind: "pose", frames: ["pose1.png", "pose2.png"], fps: 24, weight: 0 };
 describe("로컬 동작 제어 입력", () => {
+  it("긴 컷을 H3 내부 상한에서 조용히 잘라 보내지 않으며 Wan/LTX에는 같은 상한을 강제하지 않는다", () => {
+    expect(validateLocalControlOptions("minimaxh3", { seconds: 15 })).toMatchObject({ ok: false, code: "invalid_duration" });
+    expect(validateLocalControlOptions("minimaxh3", { seconds: 5 })).toEqual({ ok: true });
+    expect(validateLocalControlOptions("minimaxh3", { seconds: 345 / 24 })).toEqual({ ok: true });
+    for (const engine of ["wanvideo", "ltx25"]) expect(validateLocalControlOptions(engine, { seconds: 15 })).toEqual({ ok: true });
+  });
   it("H3 영상 참조와 LTX 포즈 제어를 구분한다", () => {
     expect(localControlCapabilities("minimaxh3")).toMatchObject({ poseFrames: false, referenceVideo: true });
     expect(localControlCapabilities("ltx25")).toMatchObject({ poseFrames: true, referenceVideo: false, poseMethod: "ic-lora" });

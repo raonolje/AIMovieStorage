@@ -388,6 +388,10 @@ pub mod magnific_window {
     ///
     /// 마그니픽은 노드를 복사할 때 text/html 의 `data-pikaso="PKS_…"` 속성에
     /// 요소·연결 JSON 을 인코딩해 넣습니다. 그걸 읽어야 보드 구조를 알 수 있습니다.
+    pub fn clipboard_sequence() -> u32 {
+        unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() }
+    }
+
     pub fn read_clipboard_html() -> Option<String> {
         let _clipboard = super::clipboard_guard();
         use windows::core::PCWSTR;
@@ -568,6 +572,28 @@ pub mod magnific_cdp {
     /// 응답이 몇 초 늦을 수 있어 짧게 잡으면 헛발질합니다 — 30초.
     pub const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+    pub(super) fn is_spaces_url(url: &str) -> bool {
+        reqwest::Url::parse(url).map(|url| {
+            matches!(url.host_str(), Some("magnific.com" | "www.magnific.com"))
+                && url.path().starts_with("/app/spaces/")
+        }).unwrap_or(false)
+    }
+
+    pub(super) fn unique_visible_space(visible: &[Option<bool>]) -> Result<usize, String> {
+        // WebView 탭은 숨겨져 있어도 visible/focus 를 모두 true 로 돌려줄 수 있습니다.
+        // 확인되지 않은 탭이나 복수 후보를 첫 항목으로 대체하면 다른 보드를 고칩니다.
+        if visible.iter().any(Option::is_none) {
+            return Err("마그니픽 보드의 표시 상태를 확인하지 못했습니다. 사용할 스페이스 보드 탭만 하나 남긴 뒤 다시 누르세요.".into());
+        }
+        let candidates: Vec<usize> = visible.iter().enumerate()
+            .filter_map(|(index, value)| (*value == Some(true)).then_some(index)).collect();
+        match candidates.as_slice() {
+            [index] => Ok(*index),
+            [] => Err("화면에 표시된 마그니픽 스페이스 보드를 찾지 못했습니다. 사용할 보드를 연 뒤 다시 누르세요.".into()),
+            _ => Err("마그니픽 스페이스 보드가 여러 개라 구성할 대상을 정할 수 없습니다. 사용할 보드 탭만 하나 남긴 뒤 다시 누르세요.".into()),
+        }
+    }
+
     /// 디버그 포트에서 마그니픽 앱 페이지를 찾습니다. (ws 주소, 페이지 url)
     pub async fn find_app_page() -> Result<(String, String), String> {
         let client = reqwest::Client::builder()
@@ -583,20 +609,30 @@ pub mod magnific_cdp {
             .await
             .map_err(|e| format!("디버그 대상 목록을 읽지 못했습니다: {e}"))?;
         let list = targets.as_array().cloned().unwrap_or_default();
-        let page = list
+        let pages: Vec<(String, String)> = list
             .iter()
-            .find(|t| {
+            .filter(|t| {
                 t.get("type").and_then(|v| v.as_str()) == Some("page")
-                    && t.get("url").and_then(|v| v.as_str()).map(|u| u.contains("magnific.com/app")).unwrap_or(false)
+                    && t.get("url").and_then(|v| v.as_str()).map(is_spaces_url).unwrap_or(false)
             })
-            .ok_or("마그니픽 앱 페이지를 찾지 못했습니다. 마그니픽에 로그인해 스페이스를 여세요.")?;
-        let url = page.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let ws = page
-            .get("webSocketDebuggerUrl")
-            .and_then(|v| v.as_str())
-            .ok_or("디버그 주소가 없습니다.")?
-            .to_string();
-        Ok((ws, url))
+            .map(|page| {
+                let ws = page.get("webSocketDebuggerUrl").and_then(|v| v.as_str())
+                    .ok_or_else(|| "마그니픽 보드의 디버그 주소가 없습니다.".to_string())?;
+                Ok((ws.to_string(), page.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string()))
+            }).collect::<Result<_, String>>()?;
+        if pages.is_empty() {
+            return Err("마그니픽 스페이스 보드를 찾지 못했습니다. 로그인해 사용할 보드를 여세요.".into());
+        }
+        // 서비스 내부 저장소에는 접근하지 않습니다. 실제 그려진 보드 DOM 만 읽고,
+        // 응답하지 않는 후보도 모호성으로 남겨 잘못된 보드에 붙여넣지 않습니다.
+        let visible = futures_util::future::join_all(pages.iter().map(|(ws, _)| async move {
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                let mut cdp = Cdp::connect(ws).await?;
+                cdp.eval(r#"(()=>{const board=document.querySelector('.vue-flow');if(document.visibilityState!=='visible'||!board)return false;const r=board.getBoundingClientRect(),s=getComputedStyle(board);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'})()"#).await
+            }).await.ok().and_then(Result::ok).and_then(|v| v.as_bool())
+        })).await;
+        let index = unique_visible_space(&visible)?;
+        Ok(pages[index].clone())
     }
 
     pub struct Cdp {
@@ -802,6 +838,15 @@ pub mod pikaso {
     }
 }
 
+#[derive(Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum ReferenceMediaType { Image, Video }
+
+struct UploadReference {
+    name: String,
+    media_type: ReferenceMediaType,
+}
+
 /// 마그니픽에서 복사한(Ctrl+C) 그림 요소(creation)에서 뽑은 것.
 #[derive(Serialize, serde::Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -817,6 +862,9 @@ pub struct CopiedCreation {
     height: f64,
     page: String,
     source_board_uuid: Option<String>,
+    /// 복사된 노드 이름에는 확장자가 없습니다. 검증한 원본 파일과 매칭한 뒤 종류를 채웁니다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    media_type: Option<ReferenceMediaType>,
 }
 
 pub fn copied_creations(value: &serde_json::Value) -> Vec<CopiedCreation> {
@@ -843,6 +891,7 @@ pub fn copied_creations(value: &serde_json::Value) -> Vec<CopiedCreation> {
                         height: if num("height") > 0.0 { num("height") } else { 278.0 },
                         page: el.get("page").and_then(|v| v.as_str()).unwrap_or("1").to_string(),
                         source_board_uuid: board.clone(),
+                        media_type: None,
                     }
                 })
                 // 아직 올라가는 중이면 id 가 placeholder 라 다시 놓을 수 없습니다 — 빼고, 없으면 다시 누르게 합니다.
@@ -851,6 +900,108 @@ pub fn copied_creations(value: &serde_json::Value) -> Vec<CopiedCreation> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn reference_name_base(name: &str) -> &str {
+    match name.rfind(" #") {
+        Some(index) if index + 2 < name.len() && name[index + 2..].chars().all(|c| c.is_ascii_digit()) => &name[..index],
+        _ => name,
+    }
+}
+
+fn unique_reference_names(files: &[PathBuf]) -> Res<Vec<String>> {
+    let mut seen = std::collections::BTreeSet::new();
+    files.iter().map(|file| {
+        let name = file.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        // 이름으로 원본과 업로드를 잇습니다. 다른 폴더/확장자의 같은 이름을
+        // 임의로 하나에 연결하지 않고 클립보드를 바꾸기 전에 멈춥니다.
+        if name.is_empty() || !seen.insert(reference_name_base(&name).to_lowercase()) {
+            return Err(format!("레퍼런스 파일 이름이 겹쳐 업로드를 구분할 수 없습니다({name}). 확장자를 뺀 이름과 끝의 « #숫자»가 겹치지 않게 바꾼 뒤 다시 누르세요."));
+        }
+        Ok(name)
+    }).collect()
+}
+
+fn upload_references(files: &[PathBuf]) -> Res<Vec<UploadReference>> {
+    let names = unique_reference_names(files)?;
+    names.into_iter().zip(files).map(|(name, file)| {
+        let extension = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+        let media_type = if is_video_path(file) {
+            ReferenceMediaType::Video
+        } else if matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff") {
+            ReferenceMediaType::Image
+        } else {
+            return Err(format!("자동 구성에서 이미지·영상으로 확인할 수 없는 파일입니다({name}). 이미지나 영상 레퍼런스를 선택하세요."));
+        };
+        Ok(UploadReference { name, media_type })
+    }).collect()
+}
+
+fn match_uploaded_creations(wanted: &[UploadReference], all: &[CopiedCreation]) -> Res<Vec<CopiedCreation>> {
+    let mut picked = Vec::new();
+    for reference in wanted {
+        let name = &reference.name;
+        let matches: Vec<_> = all.iter().filter(|creation| {
+            creation.name == *name || reference_name_base(&creation.name) == name
+        }).collect();
+        match matches.as_slice() {
+            [] => {},
+            [creation] => picked.push(CopiedCreation { media_type: Some(reference.media_type), ..(*creation).clone() }),
+            _ => return Err(format!("새로 올사용자 레퍼런스 이름이 여러 개와 일치합니다({name}). 보드의 중복 업로드를 확인한 뒤 다시 누르세요.")),
+        }
+    }
+    Ok(picked)
+}
+
+fn exact_upload_selection(new_ids: &[String], selected: &[String]) -> bool {
+    !new_ids.is_empty()
+        && new_ids.iter().collect::<std::collections::BTreeSet<_>>() == selected.iter().collect::<std::collections::BTreeSet<_>>()
+}
+
+fn clipboard_copy_is_fresh(before: u32, after: u32) -> bool { after != 0 && before != after }
+
+fn reference_output(creation: &CopiedCreation) -> &'static str {
+    if creation.media_type == Some(ReferenceMediaType::Video) { "video-output" } else { "output" }
+}
+
+fn reference_input(creation: &CopiedCreation, kind: Option<&str>) -> Res<(&'static str, &'static str)> {
+    if kind != Some("video") { return Ok(("reference", "image")); }
+    // 실제 영상 생성기 DOM에서 확인한 입력 포트입니다(2026-09-24).
+    // 영상도 image/reference 로 보내면 선이 사라져 조건 없이 생성될 수 있었습니다.
+    match creation.media_type {
+        Some(ReferenceMediaType::Image) => Ok(("references", "image")),
+        Some(ReferenceMediaType::Video) => Ok(("video-reference", "video")),
+        None => Err(format!("레퍼런스 종류를 확인하지 못해 영상 생성기에 연결하지 않았습니다({}). 원본 파일에서 다시 구성하세요.", creation.name)),
+    }
+}
+
+fn video_generator_data(model: &str, aspect_ratio: &str, duration_seconds: Option<f64>, resolution: Option<&str>, prompt: &str) -> Res<serde_json::Value> {
+    // 2026-09-24 실제 Seedance 2.5 생성기를 복사해 확인한 데스크톱 스키마입니다.
+    // MCP의 모델 slug를 mode 한 칸에 넣거나 durationSeconds를 쓰면 화면 설정과 달라집니다.
+    if !matches!(model, "seedance-2-5-pro" | "bytedance-seedance-pro-2.5") {
+        return Err(format!("이 영상 모델의 Magnific 데스크톱 생성기 설정을 확인하지 못했습니다({model}). 확인된 Seedance 2.5를 선택하거나 Magnific에서 직접 구성하세요."));
+    }
+    let resolution = resolution.unwrap_or("1080p");
+    if !matches!(resolution, "720p" | "1080p") {
+        return Err("Magnific 영상 구성 해상도는 720p 또는 1080p여야 합니다.".into());
+    }
+    let duration = duration_seconds.unwrap_or(5.0);
+    if !duration.is_finite() || !(4.0..=30.0).contains(&duration) {
+        return Err("Seedance 2.5 영상 구성 길이는 4초부터 30초까지여야 합니다.".into());
+    }
+    Ok(serde_json::json!({
+        "currentCreationIdentifier": null, "currentGeneration": null, "historyGenerations": [],
+        "numberOfGenerations": 1, "prompt": prompt, "aspectRatio": aspect_ratio,
+        "resolution": resolution, "duration": duration,
+        "model": "bytedance-seedance-pro-2.5", "api": "bytedance", "mode": "pro-2.5", "modeModel": "seedance",
+        "autoModeDuration": "short", "withSoundEffects": true,
+        "extraParameters": { "style": "default" }, "videoPreset": "custom",
+    }))
+}
+
+fn require_complete_paste(actual: usize, expected: usize) -> Res<()> {
+    if actual == expected { return Ok(()); }
+    Err(format!("마그니픽 구성이 일부만 배치되어 완료하지 못했습니다. 예상 노드 {expected}개, 확인 {actual}개, 부족 {}개, 초과 {}개입니다. 보드의 레퍼런스와 생성기를 확인하세요.", expected.saturating_sub(actual), actual.saturating_sub(expected)))
 }
 
 /// 프롬프트의 `@이름` 을 마그니픽 칩 표기 `@[요소id:이름:output]` 으로 바꿉니다.
@@ -864,12 +1015,9 @@ pub fn with_mention_chips(prompt: &str, creations: &[CopiedCreation]) -> String 
     for creation in sorted {
         // 마그니픽은 붙여넣기 때 같은 이름에 « #2» 를 붙입니다. 프롬프트의 태그는 파일 이름
         // 그대로(`@냥이_001`)이니 꼬리를 떼고 맞추고, 칩 라벨은 실제 노드 이름으로 둡니다.
-        let base = match creation.name.rfind(" #") {
-            Some(i) if creation.name[i + 2..].chars().all(|c| c.is_ascii_digit()) && i + 2 < creation.name.len() => &creation.name[..i],
-            _ => creation.name.as_str(),
-        };
+        let base = reference_name_base(&creation.name);
         let tag = format!("@{}", base);
-        let chip = format!("@[{}:{}:output]", creation.id, creation.name);
+        let chip = format!("@[{}:{}:{}]", creation.id, creation.name, reference_output(creation));
         let mut out = String::new();
         let mut rest = text.as_str();
         while let Some(pos) = rest.find(&tag) {
@@ -918,6 +1066,7 @@ pub fn build_flow_payload(
     kind: Option<&str>,
     // 영상일 때 러닝타임(초). 구도잡기 타임라인이 정한 값이 그대로 옵니다.
     duration_seconds: Option<f64>,
+    resolution: Option<&str>,
 ) -> Result<(serde_json::Value, usize), String> {
     if prompt.trim().is_empty() {
         return Err("프롬프트가 비었습니다.".into());
@@ -933,6 +1082,10 @@ pub fn build_flow_payload(
             "targetElementId": target,
             "targetPort": target_port,
         })
+    };
+    let reference_connection = |creation: &CopiedCreation, target: &str| -> Res<serde_json::Value> {
+        let (port, data_type) = reference_input(creation, kind)?;
+        Ok(connection(&creation.id, reference_output(creation), target, port, data_type))
     };
     // 자리: 그림 사본은 원본 자리 그대로, 그 오른쪽에 생성기.
     let page = creations.first().map(|c| c.page.clone()).unwrap_or_else(|| "1".into());
@@ -950,7 +1103,7 @@ pub fn build_flow_payload(
     let mut elements: Vec<serde_json::Value> = Vec::new();
     for copy in &copies {
         let outgoing: Vec<serde_json::Value> =
-            gen_ids.iter().map(|g| connection(&copy.id, "output", g, "reference", "image")).collect();
+            gen_ids.iter().map(|g| reference_connection(copy, g)).collect::<Res<_>>()?;
         elements.push(serde_json::json!({
             "id": copy.id,
             "type": "creation",
@@ -969,7 +1122,7 @@ pub fn build_flow_payload(
     let prompt_with_chips = with_mention_chips(prompt.trim(), &copies);
     for (i, gen_id) in gen_ids.iter().enumerate() {
         let incoming: Vec<serde_json::Value> =
-            copies.iter().map(|c| connection(&c.id, "output", gen_id, "reference", "image")).collect();
+            copies.iter().map(|c| reference_connection(c, gen_id)).collect::<Res<_>>()?;
         /*
             ── 이미지 생성기 / 영상 생성기 ──────────────────────────────
             
@@ -977,36 +1130,21 @@ pub fn build_flow_payload(
             노드 종류와 data 만 갈립니다 — 붙여넣는 방법(그림 먼저, 새 노드 감지, 사본 +
             생성기 JSON)은 완전히 같습니다. 영상에는 `durationSeconds` 가 더 붙습니다.
 
-            **이어 붙이는 선은 영상일 때도 `reference`/`image` 그대로 둡니다.** 레퍼런스
-            mp4 의 포트 이름을 확인할 길이 없어서(마그니픽 데스크톱이 있어야 읽힙니다)
-            아는 모양을 씁니다. 선이 안 걸리면 노드는 프롬프트·러닝타임까지 갖춘 채로
-            놓이니 캔버스에서 손으로 한 번 이어 주면 됩니다 — 틀린 포트 이름을 적어
-            노드가 아예 안 생기는 것보다 낫습니다.
+            영상 생성기의 이미지·영상 입력은 서로 다릅니다. 확인된 파일 종류와
+            `reference_connection` 한 벌로 양쪽 연결을 만들어 다른 포트가 섞이지 않게 합니다.
         */
         let is_video = kind == Some("video");
-        let mut gen_data = serde_json::json!({
+        let gen_data = if is_video {
+            video_generator_data(model, aspect_ratio, duration_seconds, resolution, &prompt_with_chips)?
+        } else { serde_json::json!({
             "aspectRatio": aspect_ratio,
             "mode": model,
             "numberOfGenerations": 1,
             "prompt": prompt_with_chips.clone(),
             "version": "v2",
-        });
-        if is_video {
-            if let Some(object) = gen_data.as_object_mut() {
-                object.insert(
-                    "durationSeconds".into(),
-                    serde_json::json!(duration_seconds.unwrap_or(5.0)),
-                );
-                object.insert("resolution".into(), serde_json::json!("1080p"));
-            }
-        } else if let Some(object) = gen_data.as_object_mut() {
-            object.insert("quality".into(), serde_json::json!(""));
-            object.insert("resolution".into(), serde_json::json!("2k"));
-            object.insert("smartPrompt".into(), serde_json::json!(true));
-            object.insert("thinkingLevel".into(), serde_json::json!(""));
-            object.insert("transparentBackground".into(), serde_json::json!(false));
-            object.insert("useGoogleSearchTool".into(), serde_json::json!(false));
-        }
+            "quality": "", "resolution": "2k", "smartPrompt": true, "thinkingLevel": "",
+            "transparentBackground": false, "useGoogleSearchTool": false,
+        }) };
         elements.push(serde_json::json!({
             "id": gen_id,
             "type": if is_video { "video-generator" } else { "image-generator" },
@@ -1215,9 +1353,14 @@ pub async fn magnific_compose_auto(
     kind: Option<String>,
     // 영상일 때 러닝타임(초). 구도잡기 타임라인이 정한 값이 그대로 옵니다.
     duration_seconds: Option<f64>,
+    resolution: Option<String>,
 ) -> Res<ComposeResult> {
     if prompt.trim().is_empty() {
         return Err("보낼 프롬프트가 없습니다.".into());
+    }
+    // 업로드나 원본 노드 정리 전에 미지원 설정을 거절합니다.
+    if kind.as_deref() == Some("video") {
+        video_generator_data(&model, &aspect_ratio, duration_seconds, resolution.as_deref(), &prompt)?;
     }
     // 레퍼런스에 영상이 섞이면 2단계가 변환을 기다리느라(150회 ≈ 4분) 길어지므로 마감도 길게.
     // `kind == "video"` 로 가르면 안 됩니다 — 씬 스토리보드는 kind=video 인데 레퍼런스는 시트 한 장입니다.
@@ -1236,7 +1379,7 @@ pub async fn magnific_compose_auto(
       시간만큼 깎여 죽습니다. 마감이 터지면 본체 future 가 drop 되어 CDP 웹소켓도 같이 닫히고,
       잠금 guard 는 이 함수가 쥐고 있으니 돌아갈 때 풀립니다.
     */
-    let body = compose_body(base_directory, paths, prompt, model, aspect_ratio, count, kind, duration_seconds, has_video);
+    let body = compose_body(base_directory, paths, prompt, model, aspect_ratio, count, kind, duration_seconds, resolution, has_video);
     match tokio::time::timeout(budget, body).await {
         Ok(result) => result,
         Err(_) => Err(format!(
@@ -1256,7 +1399,7 @@ const COMPOSE_BUDGET_VIDEO: std::time::Duration = std::time::Duration::from_secs
 fn is_video_path(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(),
-        Some("mp4" | "mov" | "webm" | "m4v")
+        Some("mp4" | "mov" | "webm" | "m4v" | "avi" | "mkv")
     )
 }
 
@@ -1272,6 +1415,7 @@ async fn compose_body(
     count: u32,
     kind: Option<String>,
     duration_seconds: Option<f64>,
+    resolution: Option<String>,
     has_video: bool,
 ) -> Res<ComposeResult> {
     // 페이지 찾기. 포트가 없으면: 마그니픽이 안 떠 있으면 우리가 켜고, 떠 있으면 다시 켜 달라고 합니다.
@@ -1319,10 +1463,7 @@ async fn compose_body(
         // ── 1. 그림 올리기 ──────────────────────────────────────────────────────
         cdp.set_stage("1단계 그림 올리기");
         let (files, fingerprints) = resolve_image_files(&base_directory, &paths)?;
-        let wanted_names: Vec<String> = files
-            .iter()
-            .map(|f| f.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default())
-            .collect();
+        let wanted_references = upload_references(&files)?;
         let before = set_of(&cdp.node_ids(false).await?);
         cdp.key("Escape", 27, false, false).await?;
         magnific_window::set_clipboard_files(&files)?;
@@ -1383,20 +1524,29 @@ async fn compose_body(
                     sleep(80).await;
                 }
             }
+            // 복사 payload는 DOM과 다른 새 ID를 매깁니다. 복사 뒤 ID를 비교하면
+            // 정상 업로드도 전부 탈락하므로, 복사 직전의 실제 선택을 검증합니다.
+            if !exact_upload_selection(&new_ids, &cdp.node_ids(true).await?) {
+                last_seen = "새 업로드 노드만 선택하지 못했습니다".into();
+                sleep(1000).await;
+                continue;
+            }
+            let clipboard_before = magnific_window::clipboard_sequence();
             cdp.key("KeyC", 67, true, false).await?;
             sleep(700).await;
+            // Ctrl+C가 실패했는데 이전 HTML을 새 업로드로 잘못 받지 않습니다.
+            if !clipboard_copy_is_fresh(clipboard_before, magnific_window::clipboard_sequence()) {
+                last_seen = "복사 결과가 아직 클립보드에 도착하지 않았습니다".into();
+                sleep(1000).await;
+                continue;
+            }
             if let Some(html) = magnific_window::read_clipboard_html() {
                 if let Some(encoded) = pikaso::extract(&html) {
                     if let Ok(value) = pikaso::decode(&encoded) {
                         let all = copied_creations(&value);
-                        let mut picked: Vec<CopiedCreation> = Vec::new();
-                        for c in &all {
-                            if wanted_names.iter().any(|n| n == &c.name) && !picked.iter().any(|p| p.name == c.name) {
-                                picked.push(c.clone());
-                            }
-                        }
+                        let picked = match_uploaded_creations(&wanted_references, &all)?;
                         last_seen = format!("복사된 그림: [{}]", all.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", "));
-                        if picked.len() >= wanted_names.len() {
+                        if picked.len() >= wanted_references.len() {
                             creations = picked;
                             break;
                         }
@@ -1448,6 +1598,7 @@ async fn compose_body(
         origin,
         kind.as_deref(),
         duration_seconds,
+        resolution.as_deref(),
     )?;
     put_flow_on_clipboard(&payload)?;
     let before = set_of(&cdp.node_ids(false).await?);
@@ -1469,14 +1620,13 @@ async fn compose_body(
         let now = cdp.node_ids(false).await?;
         pasted = now.iter().filter(|id| !before.contains(*id)).count();
     }
-    if pasted == 0 {
-        return Err("그림 사본과 생성기를 붙여넣었는데 캔버스에 안 생겼습니다.".into());
-    }
+    require_complete_paste(pasted, expected)?;
+    let what = if kind.as_deref() == Some("video") { "영상" } else { "이미지" };
     let mut message = if creations.is_empty() {
-        format!("마그니픽 캔버스에 이미지 생성기 {gen_count}개(프롬프트만)를 놓았습니다.")
+        format!("마그니픽 캔버스에 {what} 생성기 {gen_count}개(프롬프트만)를 놓았습니다.")
     } else {
         format!(
-            "마그니픽 캔버스에 그림 {}장 + 이미지 생성기 {gen_count}개(프롬프트·칩 포함)를 이어 놓았습니다.",
+            "마그니픽 캔버스에 그림 {}장 + {what} 생성기 {gen_count}개(프롬프트·칩 포함)를 이어 놓았습니다.",
             creations.len()
         )
     };
@@ -1504,7 +1654,7 @@ pub fn resolve_image_files(base_directory: &str, paths: &[String]) -> Res<(Vec<P
     let mut files = vec![];
     for path in paths {
         let target = Path::new(path);
-        if !extension_allowed(target) {
+        if !extension_allowed(target) && !is_video_path(target) {
             continue;
         }
         let real = ensure_inside(&base, target)?;
@@ -1641,5 +1791,173 @@ pub async fn send_prompt_to_magnific(text: String) -> Res<String> {
     {
         let _ = text;
         Ok("복사했습니다. 이 OS 에서는 창 제어가 없어 마그니픽에서 직접 Ctrl+V 하세요.".into())
+    }
+}
+
+#[cfg(test)]
+mod compose_regression_tests {
+    use super::*;
+
+    fn creation(id: &str, name: &str) -> CopiedCreation {
+        CopiedCreation { id: id.into(), name: name.into(), creation_identifier: format!("uploaded-{id}"),
+            x: 0.0, y: 0.0, width: 100.0, height: 100.0, page: "1".into(), source_board_uuid: None, media_type: None }
+    }
+
+    #[test]
+    fn uploaded_suffix_matches_remapped_clipboard_ids() {
+        let wanted = upload_references(&[PathBuf::from("actor.png"), PathBuf::from("dance.mp4")]).unwrap();
+        let copied = vec![creation("copied-a", "actor #2"), creation("copied-v", "dance #4")];
+        let found = match_uploaded_creations(&wanted, &copied).unwrap();
+        assert_eq!(found.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["copied-a", "copied-v"]);
+        assert_eq!(with_mention_chips("@actor and @dance", &found), "@[copied-a:actor #2:output] and @[copied-v:dance #4:video-output]");
+    }
+
+    #[test]
+    fn ambiguous_source_stems_are_rejected_before_upload() {
+        for files in [vec!["a/actor.png", "b/actor.jpg"], vec!["actor.png", "actor #2.png"], vec!["Actor.png", "actor.jpg"]] {
+            assert!(unique_reference_names(&files.into_iter().map(PathBuf::from).collect::<Vec<_>>()).is_err());
+        }
+        assert!(unique_reference_names(&[PathBuf::from("actor.png"), PathBuf::from("actor #final.png")]).is_ok());
+    }
+
+    #[test]
+    fn same_upload_name_twice_is_not_arbitrarily_matched() {
+        let copies = vec![creation("a", "actor #2"), creation("b", "actor #3")];
+        let wanted = upload_references(&[PathBuf::from("actor.png")]).unwrap();
+        assert!(match_uploaded_creations(&wanted, &copies).is_err());
+    }
+
+    #[test]
+    fn late_video_must_be_present_before_all_references_match() {
+        let wanted = upload_references(&[PathBuf::from("actor.png"), PathBuf::from("dance.mp4")]).unwrap();
+        let mut copies = vec![creation("a", "actor")];
+        assert_eq!(match_uploaded_creations(&wanted, &copies).unwrap().len(), 1);
+        copies.push(creation("v", "dance #2"));
+        assert_eq!(match_uploaded_creations(&wanted, &copies).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn source_literal_suffix_can_match_its_next_service_suffix() {
+        let wanted = upload_references(&[PathBuf::from("actor #2.png")]).unwrap();
+        let copies = vec![creation("a", "actor #2 #3")];
+        assert_eq!(match_uploaded_creations(&wanted, &copies).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn spaces_selection_requires_one_known_rendered_board() {
+        use magnific_cdp::unique_visible_space;
+        assert_eq!(unique_visible_space(&[Some(false), Some(true)]).unwrap(), 1);
+        assert!(unique_visible_space(&[Some(true), Some(true)]).is_err());
+        assert!(unique_visible_space(&[Some(true), None]).is_err());
+        assert!(unique_visible_space(&[Some(false)]).is_err());
+        assert!(unique_visible_space(&[]).is_err());
+    }
+
+    #[test]
+    fn page_selection_ignores_non_spaces_and_lookalike_hosts() {
+        use magnific_cdp::is_spaces_url;
+        assert!(is_spaces_url("https://www.magnific.com/app/spaces/board?page=1"));
+        assert!(!is_spaces_url("https://www.magnific.com/app/create"));
+        assert!(!is_spaces_url("https://example.test/magnific.com/app/spaces/board"));
+        assert!(!is_spaces_url("http://tauri.localhost/"));
+    }
+
+    #[test]
+    fn partial_or_extra_paste_is_not_success() {
+        assert!(require_complete_paste(5, 5).is_ok());
+        assert!(require_complete_paste(1, 1).is_ok());
+        assert!(require_complete_paste(4, 5).unwrap_err().contains("부족 1개"));
+        assert!(require_complete_paste(0, 5).unwrap_err().contains("부족 5개"));
+        assert!(require_complete_paste(6, 5).unwrap_err().contains("초과 1개"));
+    }
+
+    #[test]
+    fn mixed_video_references_keep_media_type_and_both_connection_directions() {
+        let wanted = upload_references(&[PathBuf::from("actor.PNG"), PathBuf::from("dance.MP4")]).unwrap();
+        let copies = vec![creation("a", "actor #2"), creation("v", "dance #2")];
+        let matched = match_uploaded_creations(&wanted, &copies).unwrap();
+        assert_eq!(matched[0].media_type, Some(ReferenceMediaType::Image));
+        assert_eq!(matched[1].media_type, Some(ReferenceMediaType::Video));
+        let (payload, count) = build_flow_payload("@actor @dance", &matched, "seedance-2-5-pro", "16:9", 2, None, Some("video"), Some(5.0), Some("720p")).unwrap();
+        assert_eq!(count, 2);
+        let elements = payload["elements"].as_array().unwrap();
+        for (index, (port, data_type)) in [("references", "image"), ("video-reference", "video")].into_iter().enumerate() {
+            let outgoing = elements[index]["workflowConnections"]["outgoing"].as_array().unwrap();
+            assert_eq!(outgoing.len(), 2);
+            for (generator_index, edge) in outgoing.iter().enumerate() {
+                assert_eq!(edge["targetPort"], port);
+                assert_eq!(edge["dataType"], data_type);
+                assert_eq!(edge["sourcePort"], if data_type == "video" { "video-output" } else { "output" });
+                assert_eq!(*edge, elements[generator_index + 2]["workflowConnections"]["incoming"][index]);
+            }
+        }
+        assert_eq!(elements[2]["type"], "video-generator");
+        assert_eq!(elements[2]["data"]["duration"], 5.0);
+        assert_eq!(elements[2]["data"]["resolution"], "720p");
+    }
+
+    #[test]
+    fn image_generator_keeps_its_existing_port_and_unknown_video_type_fails() {
+        let copies = [creation("a", "actor")];
+        let (payload, _) = build_flow_payload("@actor", &copies, "image-model", "16:9", 1, None, Some("image"), None, None).unwrap();
+        assert_eq!(payload["elements"][1]["workflowConnections"]["incoming"][0]["targetPort"], "reference");
+        assert!(build_flow_payload("@actor", &copies, "seedance-2-5-pro", "16:9", 1, None, Some("video"), Some(5.0), None).is_err());
+    }
+
+    #[test]
+    fn unsupported_media_is_not_silently_an_image_and_video_timeout_matches_extensions() {
+        assert!(upload_references(&[PathBuf::from("notes.txt")]).is_err());
+        assert!(upload_references(&[PathBuf::from("song.wav")]).is_err());
+        for name in ["clip.mp4", "clip.MOV", "clip.webm", "clip.m4v", "clip.avi", "clip.mkv"] {
+            let file = PathBuf::from(name);
+            assert!(is_video_path(&file));
+            assert_eq!(upload_references(&[file]).unwrap()[0].media_type, ReferenceMediaType::Video);
+        }
+    }
+
+    #[test]
+    fn seedance_desktop_data_uses_the_observed_model_fields_and_duration() {
+        let data = video_generator_data("seedance-2-5-pro", "16:9", Some(15.0), Some("720p"), "프롬프트").unwrap();
+        assert_eq!(data["model"], "bytedance-seedance-pro-2.5");
+        assert_eq!(data["api"], "bytedance");
+        assert_eq!(data["mode"], "pro-2.5");
+        assert_eq!(data["modeModel"], "seedance");
+        assert_eq!(data["duration"], 15.0);
+        assert_eq!(data["resolution"], "720p");
+        assert_eq!(data["prompt"], "프롬프트");
+        assert_eq!(data["videoPreset"], "custom");
+        assert_eq!(data["withSoundEffects"], true);
+        assert_eq!(data["extraParameters"]["style"], "default");
+        assert!(data.get("durationSeconds").is_none());
+        assert!(data.get("cost").is_none());
+        let default = video_generator_data("bytedance-seedance-pro-2.5", "16:9", None, None, "p").unwrap();
+        assert_eq!(default["duration"], 5.0);
+        assert_eq!(default["resolution"], "1080p");
+    }
+
+    #[test]
+    fn unsupported_desktop_video_settings_are_rejected() {
+        assert!(video_generator_data("unknown", "16:9", Some(5.0), Some("720p"), "p").is_err());
+        assert!(video_generator_data("seedance-2-5-pro", "16:9", Some(5.0), Some("4k"), "p").is_err());
+        for duration in [f64::NAN, f64::INFINITY, 0.0, 31.0] {
+            assert!(video_generator_data("seedance-2-5-pro", "16:9", Some(duration), None, "p").is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_video_model_fails_before_any_board_or_file_access() {
+        let error = magnific_compose_auto("없는 폴더".into(), vec!["없는 영상.mp4".into()], "p".into(), "unknown".into(), "16:9".into(), 1, Some("video".into()), Some(5.0), Some("720p".into())).await;
+        assert!(matches!(error, Err(message) if message.contains("데스크톱 생성기 설정")));
+    }
+
+    #[test]
+    fn copied_ids_may_change_but_dom_selection_and_clipboard_must_be_current() {
+        assert!(exact_upload_selection(&["dom-a".into(), "dom-v".into()], &["dom-v".into(), "dom-a".into()]));
+        assert!(!exact_upload_selection(&["dom-a".into()], &["old".into()]));
+        assert!(!exact_upload_selection(&["dom-a".into()], &["dom-a".into(), "unrelated".into()]));
+        assert!(!exact_upload_selection(&[], &[]));
+        assert!(clipboard_copy_is_fresh(100, 101));
+        assert!(!clipboard_copy_is_fresh(100, 100));
+        assert!(!clipboard_copy_is_fresh(100, 0));
     }
 }

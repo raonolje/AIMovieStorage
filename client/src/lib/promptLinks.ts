@@ -43,6 +43,8 @@ export interface PromptLinkPerson {
 
 export interface PromptLinkInput {
   people: PromptLinkPerson[];
+  /** 영상 전용 외형 참조. 이미지 프롬프트는 이 값을 넘기지 않습니다. */
+  representativeImagePath?: string;
   /** 구도 캡처. 있으면 참고 줄 맨 앞에 둡니다. */
   guidePath?: string;
   /** 배경 판. */
@@ -75,6 +77,8 @@ const HEAD_EN = "Reference images:";
 */
 const PENDING_KO = "아직 그림 없음:";
 const PENDING_EN = "Not yet generated:";
+const OPTIONAL_KO = "첨부하지 않은 개별 인물 시트(선택 사항):";
+const OPTIONAL_EN = "Optional individual sheets not attached:";
 
 const tagOf = (path: string) => `@${fileStemOf(path)}`;
 
@@ -97,12 +101,13 @@ const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&
 /** 꼬리 줄의 머리말로 시작하는가 — 「참고 그림:」 「아직 그림 없음:」 과 그 영문. */
 const isTailHead = (line: string) => {
   const head = line.trimStart();
-  return head.startsWith(HEAD_KO) || head.startsWith(HEAD_EN) || head.startsWith(PENDING_KO) || head.startsWith(PENDING_EN);
+  return [HEAD_KO, HEAD_EN, PENDING_KO, PENDING_EN, OPTIONAL_KO, OPTIONAL_EN].some(prefix => head.startsWith(prefix));
 };
 
 /** 지금 걸려 있는 태그 전부. 본문 토큰이 살아 있는지 판별할 때 씁니다. */
 function livingTags(input: PromptLinkInput): Set<string> {
   const all = new Set<string>();
+  if (input.representativeImagePath) all.add(tagOf(input.representativeImagePath));
   if (input.guidePath) all.add(tagOf(input.guidePath));
   if (input.backgroundPath) all.add(tagOf(input.backgroundPath));
   input.people.forEach((person) =>
@@ -115,6 +120,7 @@ function livingTags(input: PromptLinkInput): Set<string> {
 /** 참고 줄 한 줄을 짓습니다. 걸린 그림이 하나도 없으면 빈 문자열. */
 function linkLine(input: PromptLinkInput, lang: "ko" | "en"): string {
   const parts: string[] = [];
+  if (input.representativeImagePath) parts.push(`${lang === "ko" ? "대표 그림" : "representative image"} ${tagOf(input.representativeImagePath)}`);
   if (input.guidePath)
     parts.push(
       lang === "ko"
@@ -165,7 +171,7 @@ function pendingLine(input: PromptLinkInput, lang: "ko" | "en"): string {
   if (!input.backgroundPath && input.background?.name)
     say(input.background.name, en ? undefined : input.background.look);
   input.people.forEach((person) => {
-    if (!person.paths.some(Boolean)) say(displayName(person, lang), en ? undefined : person.look);
+    if (!input.representativeImagePath && !person.paths.some(Boolean)) say(displayName(person, lang), en ? undefined : person.look);
   });
   if (!parts.length) return "";
   return `${lang === "ko" ? PENDING_KO : PENDING_EN} ${parts.join(" / ")}`;
@@ -316,7 +322,11 @@ export function relinkPromptText(
       aliases: person.aliases,
     })),
   );
-  const tail = [linkLine(input, lang), pendingLine(input, lang)].filter(Boolean);
+  const missingSheets = input.representativeImagePath ? input.people.filter(person => !person.paths.some(Boolean)) : [];
+  const optional = missingSheets.length
+    ? `${lang === "ko" ? OPTIONAL_KO : OPTIONAL_EN} ${missingSheets.map(person => oneLine(displayName(person, lang))).join(" / ")}`
+    : "";
+  const tail = [linkLine(input, lang), pendingLine(input, lang), optional].filter(Boolean);
   if (!tail.length) return linked;
   return linked ? `${linked}\n\n${tail.join("\n")}` : tail.join("\n");
 }

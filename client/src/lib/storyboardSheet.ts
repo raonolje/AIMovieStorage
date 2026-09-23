@@ -1,5 +1,5 @@
 import { composeSheet } from "@/lib/sheetCompose";
-import { cutVideoSeconds, heroImageOf } from "@/lib/cutVideoPrompt";
+import { cutVideoSecondsOf, heroImageOf } from "@/lib/cutVideoPrompt";
 import { describeCameraMoves } from "@/lib/cameraMoves";
 import { cameraMovesOf } from "@/lib/compositionEdit";
 import { describeMarksForLlm, type DrawableMark } from "@/lib/imageMarkDraw";
@@ -265,7 +265,7 @@ function cutNotes(cell: StoryboardCell): { label: string; value: string }[] {
   const { cut } = cell;
   // 줄바꿈은 표 안에서 알아서 접히므로 여기서는 한 줄로 폅니다.
   const flat = (text: string) => text.split(/\s+/).join(" ").trim();
-  const seconds = cutVideoSeconds(cut.composition, cut.plannedSeconds);
+  const seconds = cutVideoSecondsOf(cut);
   const moves = cut.composition ? cameraMovesOf(cut.composition) : [];
   const camera = describeCameraMoves(moves);
   return [
@@ -395,7 +395,7 @@ export function buildStoryboardVideoPrompt(input: {
   const { cells } = input;
   const raw = cells.reduce(
     (total, cell) =>
-      total + cutVideoSeconds(cell.cut.composition, cell.cut.plannedSeconds),
+      total + cutVideoSecondsOf(cell.cut),
     0,
   );
   const seconds = Math.min(
