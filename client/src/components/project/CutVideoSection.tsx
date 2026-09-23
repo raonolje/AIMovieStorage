@@ -9,6 +9,7 @@ import type { Cut, GeneratedImageAsset } from "@/lib/projectTypes";
 /**
  * **컷을 영상으로 뽑는 칸.**
  *
+ *
  * 그림 프롬프트와 칸을 나눈 까닭은 `lib/cutVideoPrompt.ts` 에 적어 두었습니다 —
  * 한 칸에 섞으면 그림 쪽 자세가 흐려집니다.
  *
@@ -37,6 +38,7 @@ export default function CutVideoSection({
   applyVideoPrompt: () => void;
   /**
    * LLM 으로 받는 「프롬프트 작성」 — 규칙 뼈대 위에 상황·환경·동작·표정을 채웁니다.
+   *
    */
   runVideoPrompt: () => void;
   videoBusy: boolean;

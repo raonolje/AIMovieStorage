@@ -228,9 +228,14 @@ def main():
                     raise IOError("결과를 놓을 폴더가 없습니다: {}".format(folder))
 
                 report(1, "모델 준비 (가중치가 없으면 여기서 내려받습니다)")
-                engine.load(root, opts)
-                report(8, "생성 시작")
-                extra = engine.generate(output_path, opts, report) or {}
+                try:
+                    engine.load(root, opts)
+                    report(8, "생성 시작")
+                    extra = engine.generate(output_path, opts, report) or {}
+                finally:
+                    # 살아 있는 모델은 임의로 지우지 않습니다. 작업 사이의 임시 객체와 캐시를
+                    # 먼저 정리하고, Rust가 사용률/설정에 따라 이 자식 프로세스의 수명을 정합니다.
+                    common.free_vram()
                 if not os.path.isfile(output_path):
                     raise IOError("엔진이 결과 파일을 만들지 않았습니다.")
 
@@ -241,6 +246,7 @@ def main():
                     "seconds": round(time.time() - started, 2),
                 }
                 done.update(extra)
+                done["memory"] = common.memory_usage()
                 send(done)
             else:
                 raise ValueError("모르는 명령입니다: {}".format(op))

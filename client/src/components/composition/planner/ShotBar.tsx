@@ -16,6 +16,8 @@ import { confirmDialog } from "@/components/ConfirmDialog";
 /**
  * 3D 화면 **왼쪽**에 붙는 «저장해 둔 카메라» 목록.
  *
+ *
+ *
  * # 카메라 무빙과 무엇이 다른가
  *
  * 무빙(`cameraMoves`)은 «시간에 따라 움직이는 한 대» 이고, 이쪽은 «세워 둔 여러 대» 입니다.

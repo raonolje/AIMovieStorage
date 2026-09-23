@@ -219,7 +219,9 @@ export default function GeneratedImageShelf({
               }
               onChange((current) =>
                 // 이미 같은 파일이 다시 들어와 있으면 두 장이 되지 않게.
-                current.some((item) => item.filePath === path) ? current : [...current, image],
+                current.some((item) => item.filePath === back)
+                  ? current
+                  : [...current, { ...image, filePath: back, thumb: assetSrc(back) || image.thumb }],
               );
               toast.success(`${image.name} 을 되돌렸습니다.`);
             });

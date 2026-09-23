@@ -15,7 +15,7 @@
 const STORAGE_KEY = "ai-video-storage.bgm-projects.v1";
 
 import type { SavedPromptEntry } from "@/lib/promptHistory";
-import { queueMirrorWrite, registerMirrorSection } from "@/lib/mediaLibrary";
+import { queueMirrorWrite, queueMirrorWriteAndConfirm, registerMirrorSection } from "@/lib/mediaLibrary";
 
 export interface BgmTrack {
   id: string;
@@ -62,7 +62,7 @@ export interface BgmTrack {
   promptKo: string;
   promptEn: string;
   /**
-   * **받아 둔 스타일·가사 이력**. 
+   * **받아 둔 스타일·가사 이력**.
    *
    * 곡도 여러 번 받아 보고 고르는 일이라, 앞서 받은 것을 잃으면 «아까 그게 나았는데» 가 됩니다.
    * 인물·장소 카드와 **같은 부품**(`PromptHistoryShelf`)을 씁니다.
@@ -82,6 +82,8 @@ export interface BgmProject {
   tracks: BgmTrack[];
   createdAt: number;
   updatedAt: number;
+  /** 같은 외부 생성 요청을 다시 받아도 작품을 두 벌 만들지 않기 위한 표입니다. */
+  controllerCreation?: { fingerprint: string };
 }
 
 /**
@@ -306,6 +308,47 @@ export function saveBgmProjects(projects: BgmProject[]) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
   // 설치본과 개발 서버는 웹뷰 origin 이 달라 저장소를 따로 씁니다 — 파일에도 한 벌 둡니다.
   queueMirrorWrite(BGM_MIRROR_SECTION, projects);
+  publishBgmProjects();
+}
+
+/** 화면과 조종기가 같은 스타일·가사 칸과 연주곡 스위치를 고쳐야 합니다. */
+export function patchBgmTrack(current: BgmTrack, patch: Partial<BgmTrack>): BgmTrack {
+  const next = { ...current, ...patch, updatedAt: Date.now() };
+  if (patch.styleKo !== undefined) next.promptKo = patch.styleKo;
+  else if (patch.promptKo !== undefined) next.styleKo = patch.promptKo;
+  if (patch.styleEn !== undefined) next.promptEn = patch.styleEn;
+  else if (patch.promptEn !== undefined) next.styleEn = patch.promptEn;
+  if (patch.lyricsKo !== undefined) next.lyrics = patch.lyricsKo;
+  else if (patch.lyrics !== undefined) next.lyricsKo = patch.lyrics;
+  if (patch.instrumental !== undefined || patch.vocals !== undefined) {
+    if (patch.instrumental === undefined && patch.vocals?.some((voice) => voice !== "연주곡")) next.instrumental = false;
+    next.vocals = next.instrumental ? ["연주곡"] : (next.vocals ?? []).filter((voice) => voice !== "연주곡");
+    next.structure = (next.structure ?? []).filter((part) => structureOptionsOf(next.instrumental).includes(part));
+  }
+  return next;
+}
+
+const bgmListeners = new Set<() => void>();
+function publishBgmProjects() { bgmListeners.forEach((listener) => listener()); }
+export function subscribeBgmProjects(listener: () => void): () => void {
+  bgmListeners.add(listener);
+  return () => { bgmListeners.delete(listener); };
+}
+/** 화면과 외부 조종이 같은 최신 목록을 고칩니다. 오래된 화면 배열로 되돌리지 않습니다. */
+export function updateBgmProjects(updater: (current: BgmProject[]) => BgmProject[]): BgmProject[] {
+  const next = updater(loadBgmProjects());
+  saveBgmProjects(next);
+  return next;
+}
+/** 로컬 목록은 즉시 반영하지만 성공 응답은 앱 데이터 파일에 쓰인 뒤 돌려줍니다. */
+export function saveBgmProjectsAndConfirm(projects: BgmProject[]): Promise<void> {
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+  const saved = queueMirrorWriteAndConfirm(BGM_MIRROR_SECTION, projects);
+  publishBgmProjects();
+  return saved;
+}
+export function updateBgmProjectsAndConfirm(updater: (current: BgmProject[]) => BgmProject[]): Promise<void> {
+  return saveBgmProjectsAndConfirm(updater(loadBgmProjects()));
 }
 
 /** 거울 안에서 BGM 기록이 앉는 칸 이름. */
@@ -345,6 +388,7 @@ registerMirrorSection<BgmProject[]>(BGM_MIRROR_SECTION, {
   },
   write: (value) => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+    publishBgmProjects();
   },
   merge: mergeBgmProjects,
 });

@@ -26,8 +26,10 @@ import { TUTORIAL_CUT_EVENT } from "@/lib/tutorialStore";
 export default function StepScenes({
   draft,
   onChange,
+  controlCutRequest,
 }: {
   draft: ProjectDraft;
+  controlCutRequest?: { cutId: string } | null;
   /**
    * 초안을 고칩니다. **지금 값을 받아 다음 값을 만드는 함수** 여야 합니다.
    *
@@ -37,7 +39,7 @@ export default function StepScenes({
   onChange: (updater: (current: ProjectDraft) => Partial<ProjectDraft>) => void;
 }) {
   /*
-    **장면은 기본으로 전부 펴 둡니다.** 
+    **장면은 기본으로 전부 펴 둡니다.**
 
     여태 첫 장면 하나만 펴 두었더니, 장면이 넷이면 나머지 셋은 컷이 몇 개인지도 안 보였습니다.
     여기는 «훑어보는 자리» 가 아니라 컷을 만드는 자리라 다 보이는 편이 맞습니다.
@@ -47,6 +49,11 @@ export default function StepScenes({
   const isOpen = (id: string) => !closedIds.includes(id);
   const toggle = (id: string) =>
     setClosedIds((now) => (now.includes(id) ? now.filter((item) => item !== id) : [...now, id]));
+  useEffect(() => {
+    if (!controlCutRequest) return;
+    const scene = draft.scenes.find(item => item.cuts.some(cut => cut.id === controlCutRequest.cutId));
+    if (scene) setClosedIds(current => current.filter(id => id !== scene.id));
+  }, [controlCutRequest]);
   /*
     장소 칸은 **장면이 하나도 없을 때만 펴 둡니다.**
     새 작품은 장소부터
@@ -337,7 +344,7 @@ function SceneCard({
               videoModel={draft.magnific?.videoModel}
               videoAspect={draft.aspect?.video}
               /*
-                **이 프로젝트에서 잡아 둔 구도들.** 
+                **이 프로젝트에서 잡아 둔 구도들.**
                 지금 컷은 뺍니다 — 제 구도를 제게 불러올 일은 없습니다.
               */
               savedShots={draft.scenes.flatMap((other, otherIndex) =>

@@ -21,6 +21,8 @@ import type { PoseFrameSet } from "@/lib/poseFrames";
 /**
  * «로컬로 뽑기» — 이 컴퓨터의 모델로 그림·영상을 바로 만듭니다.
  *
+ *
+ *
  * 카드마다 프롬프트를 따로 쓰지 않습니다. **적어 둔 프롬프트를 그대로** 가져가되,
  * 보내는 순간에 마그니픽 전제(@칩·미드저니 매개변수)를 걷어냅니다(`tuneForLocal`).
  *
@@ -91,6 +93,8 @@ export default function LocalGenerateButton({
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   /**
    * 모캡에서 구운 **동작 기준**. 영상에서만 씁니다.
+   *
+   *
    */
   const [pose, setPose] = useState<PoseFrameSet | null>(null);
 

@@ -27,7 +27,7 @@
  *
  * # 판(edition) — 비공개 / 공개
  *
- * - `private`(기본) — 지금까지와 똑같습니다. 아무것도 안 바꿉니다.
+ * - `private`(기본) — 전체 엔진을 유지하고 `target/private` 에 빌드합니다.
  * - `public` — 저장소 뿌리 `edition.json` 의 제외 엔진을 번들에서 뺍니다. 세 군데가 같이 움직입니다.
  * 1. `VITE_EDITION=public` → 화면 목록에서 빠짐 (`client/src/lib/edition.ts`)
  * 2. `FRAMEFORGE_EDITION=public` → Rust 가 설치·실행을 거절 (`src-tauri/src/edition.rs`)
@@ -49,14 +49,32 @@
  * 판 변수를 먼저 지우고 나서 심습니다(`stripEditionKeys`).
  *
  * 제외 id 는 여기 적지 않습니다. `edition.json` 한 곳만 읽습니다.
+ * 공개판은 `target/public` 에 빌드하고, 두 판 모두 정확한 파일 이름·해시를
+ * `release/bundle/build-manifest.json` 에 남깁니다. 업데이트와 게시도 이 명세를 읽습니다.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  buildLayout,
+  bundleResources,
+  inside,
+  stagePortable,
+  writeBuildManifest,
+} from "./release-artifacts.mjs";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 const tauriDir = path.join(repoRoot, "src-tauri");
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -73,11 +91,16 @@ for (let i = 1; i < argv.length; i += 1) {
   const arg = argv[i];
   if (arg === "--dry-run") dryRun = true;
   else if (arg === "--edition") edition = argv[(i += 1)] ?? "";
-  else if (arg.startsWith("--edition=")) edition = arg.slice("--edition=".length);
+  else if (arg.startsWith("--edition="))
+    edition = arg.slice("--edition=".length);
   else if (arg === "dev" || arg === "build") {
     /* 첫 인자와 같은 것을 또 준 것 — 무시 */
   } else {
-    fail([`모르는 인자입니다: ${arg}`, "", "  쓰는 법: node scripts/tauri.mjs dev|build [--edition private|public] [--dry-run]"]);
+    fail([
+      `모르는 인자입니다: ${arg}`,
+      "",
+      "  쓰는 법: node scripts/tauri.mjs dev|build [--edition private|public] [--dry-run]",
+    ]);
   }
 }
 
@@ -89,7 +112,9 @@ if (edition !== "private" && edition !== "public") {
 // 판 — 제외 엔진과 번들 덧씌움
 // ─────────────────────────────────────────────────────────────────────────────
 
-const rules = JSON.parse(readFileSync(path.join(repoRoot, "edition.json"), "utf8"));
+const rules = JSON.parse(
+  readFileSync(path.join(repoRoot, "edition.json"), "utf8"),
+);
 /** @type {string[]} */
 const excluded = edition === "public" ? rules.public.excludeEngines : [];
 
@@ -99,31 +124,17 @@ const excluded = edition === "public" ? rules.public.excludeEngines : [];
  * `Cargo.toml` 에도 판이 있지만 Tauri 는 **설정 쪽을 씁니다**(설정에 있으면 그것이 이김).
  * 두 값이 어긋나 있던 적이 있어(Cargo 0.1.0 · 설정 0.2.0) 여기서 한 곳만 봅니다.
  */
-const tauriConf = JSON.parse(readFileSync(path.join(repoRoot, "src-tauri", "tauri.conf.json"), "utf8"));
-
-/**
- * 실행 파일 이름 — `Cargo.toml` 의 `[[bin]] name` 한 곳에서 읽습니다.
- *
- * 여기 글자로 박아 두면 이름을 바꿀 때 한쪽만 고쳐집니다. 이 저장소가 반복해 겪은
- * 「여덟 곳은 맞고 한 곳만 틀리다」 라서 읽어 씁니다.
- */
-function binaryName() {
-  const toml = readFileSync(path.join(repoRoot, "src-tauri", "Cargo.toml"), "utf8");
-  const found = /\[\[bin\]\][\s\S]*?name\s*=\s*"([^"]+)"/.exec(toml);
-  if (!found) fail(["Cargo.toml 에서 [[bin]] name 을 찾지 못했습니다."]);
-  return found[1];
-}
-
-/** 이 판의 제품 이름. 공개판은 «-Public» 이 붙습니다 — 설치 파일·무설치본 이름이 여기서 나옵니다. */
-function productNameFor(which) {
-  return which === "public" ? `${tauriConf.productName}-Public` : tauriConf.productName;
-}
+const layout = buildLayout(repoRoot, edition, process.env.CARGO_TARGET_DIR);
+const resources = bundleResources(repoRoot, edition);
 
 /** 판 이름을 나르는 환경 변수 — 화면(vite)과 Rust(cargo)가 하나씩 읽습니다. 심는 것도 지우는 것도 이 목록입니다. */
 const EDITION_KEYS = ["VITE_EDITION", "FRAMEFORGE_EDITION"];
 
 /** 자식(vite · cargo)에 심을 환경. 비공개판은 **아무것도 안 심습니다** — 지금까지와 바이트 단위로 같아야 합니다. */
-const editionEnv = edition === "public" ? Object.fromEntries(EDITION_KEYS.map((key) => [key, "public"])) : {};
+const editionEnv =
+  edition === "public"
+    ? Object.fromEntries(EDITION_KEYS.map((key) => [key, "public"]))
+    : {};
 
 /**
  * 부모 셸이 물려준 판 변수를 자식 환경에서 걷어냅니다. 지운 «이름=값» 을 돌려줍니다(dry-run 이 보여 줌).
@@ -137,79 +148,22 @@ const editionEnv = edition === "public" ? Object.fromEntries(EDITION_KEYS.map((k
 function stripEditionKeys(env) {
   const cleared = [];
   for (const key of Object.keys(env)) {
-    if (!EDITION_KEYS.some((name) => name.toLowerCase() === key.toLowerCase())) continue;
+    if (!EDITION_KEYS.some((name) => name.toLowerCase() === key.toLowerCase()))
+      continue;
     cleared.push(`${key}=${env[key]}`);
     delete env[key];
   }
   return cleared;
 }
 
-/**
- * `resources/<갈래>/engines/<id>.py` · `engines/<id>/…` 에서 id 를 읽습니다.
- * 공용 도우미(`_mocap.py` · `__init__.py`)는 id 가 아니라 걸리지 않습니다 — 제외 목록에 없으니까요.
- */
-function engineIdOf(resourcePath) {
-  const hit = /\/engines\/([^/]+?)(?:\.py)?(?:\/|$)/.exec(resourcePath.replace(/\\/g, "/"));
-  return hit ? hit[1] : null;
-}
-
-function isExcludedResource(resourcePath) {
-  const id = engineIdOf(resourcePath);
-  return id !== null && excluded.includes(id);
-}
-
-/**
- * 글롭 하나를 src-tauri 기준 실제 파일 목록으로 폅니다.
- *
- * 쓰는 무늬가 `*` 와 `**` 뿐이라 라이브러리 없이 정규식으로 받습니다. 글롭 글자가 나오기 전까지의
- * 고정 경로에서만 훑습니다 — `resources/` 통째로 훑으면 `__pycache__` 까지 읽어 느립니다.
- */
-function expandGlob(pattern) {
-  const normalized = pattern.replace(/\\/g, "/");
-  const segments = normalized.split("/");
-  const firstGlob = segments.findIndex((segment) => segment.includes("*"));
-  if (firstGlob < 0) return existsSync(path.join(tauriDir, normalized)) ? [normalized] : [];
-  const base = segments.slice(0, firstGlob).join("/");
-  const regex = new RegExp(
-    "^" +
-      normalized
-        .replace(/[.+^${}()|\\]/g, "\\$&")
-        .replace(/\*\*\//g, "\0")
-        .replace(/\*\*/g, "\0")
-        .replace(/\*/g, "[^/]*")
-        .replace(/\0/g, "(?:.*/)?") +
-      "$",
-  );
-  const out = [];
-  const walk = (relative) => {
-    const absolute = path.join(tauriDir, relative);
-    if (!existsSync(absolute)) return;
-    for (const name of readdirSync(absolute).sort()) {
-      const child = `${relative}/${name}`;
-      if (statSync(path.join(tauriDir, child)).isDirectory()) walk(child);
-      else if (regex.test(child)) out.push(child);
-    }
-  };
-  walk(base);
-  return out;
-}
-
-/** 공개판 번들 리소스 — tauri.conf.json 의 글롭을 펼치고 제외 엔진의 파일을 뺀 명시 목록. */
-function publicBundleResources(conf) {
-  const resources = Array.isArray(conf.bundle?.resources) ? conf.bundle.resources : [];
-  const kept = [];
-  const dropped = [];
-  for (const pattern of resources) {
-    for (const file of expandGlob(pattern)) (isExcludedResource(file) ? dropped : kept).push(file);
-  }
-  return { kept, dropped };
-}
-
 /** `tauri build` 에 붙일 인자와, 그 덧씌움 파일. 비공개판·dev 는 덧씌움이 없습니다. */
 function tauriExtraArgs() {
-  if (edition !== "public" || action !== "build") return { args: [], overlay: null, dropped: [] };
-  const conf = JSON.parse(readFileSync(path.join(tauriDir, "tauri.conf.json"), "utf8"));
-  const { kept, dropped } = publicBundleResources(conf);
+  if (edition !== "public" || action !== "build")
+    return { args: [], overlay: null, dropped: [] };
+  const conf = JSON.parse(
+    readFileSync(path.join(tauriDir, "tauri.conf.json"), "utf8"),
+  );
+  const { kept, dropped } = resources;
   /*
     productName 에 «-Public» 을 붙입니다 — 설치 파일 이름·설치 폴더·시작 메뉴가 전부 여기서 나와,
     어느 판을 받았고 어느 판이 깔려 있는지 이름만으로 보입니다. `identifier` 는 **그대로** 둡니다:
@@ -220,15 +174,24 @@ function tauriExtraArgs() {
     일이 생기고, 받는 사람이 한국어 윈도우를 쓴다는 보장도 없습니다. 화면에 뜨는 글은 그대로
     한국어(다국어)이고, 폴더와 파일 이름만 영문으로 둡니다.
   */
-  const productName = productNameFor("public");
+  const productName = layout.productName;
   const overlay = { productName, bundle: { resources: kept } };
   /* Tauri NSIS 번들러의 이름 규칙(`<productName>_<version>_<arch>-setup.exe`). release.yml 의 글롭
      `bundle/nsis/*.exe` 는 그대로 맞습니다. */
-  const installerName = `${productName}_${conf.version}_x64-setup.exe`;
-  const overlayPath = path.join(os.tmpdir(), "aimoviestorage-tauri-public.conf.json");
-  if (!dryRun) writeFileSync(overlayPath, JSON.stringify(overlay, null, 2));
+  const installerName = layout.installer;
+  const overlayPath = path.join(layout.targetDir, "tauri-public.conf.json");
+  if (!dryRun) {
+    mkdirSync(layout.targetDir, { recursive: true });
+    writeFileSync(overlayPath, JSON.stringify(overlay, null, 2));
+  }
   // shell: true 로 띄우므로 경로에 공백이 있어도 되게 따옴표를 우리가 칩니다.
-  return { args: ["--config", `"${overlayPath}"`], overlay, overlayPath, dropped, installerName };
+  return {
+    args: ["--config", `"${overlayPath}"`],
+    overlay,
+    overlayPath,
+    dropped,
+    installerName,
+  };
 }
 
 const extra = tauriExtraArgs();
@@ -241,11 +204,18 @@ console.log(
 
 if (dryRun) {
   console.log("");
-  console.log(`  [dry-run] 실행할 명령: pnpm exec tauri ${[action, ...extra.args].join(" ")}`);
+  console.log(
+    `  [dry-run] 실행할 명령: pnpm exec tauri ${[action, ...extra.args].join(" ")}`,
+  );
   // 실제 실행과 같은 순서 — 물려받은 판 변수를 지운 뒤 결정한 판을 심습니다. 셸에 남은 값이 보이게.
   const inherited = stripEditionKeys({ ...process.env });
-  console.log(`  [dry-run] 부모 셸에서 지우는 환경: ${inherited.length ? inherited.join(", ") : "(없음)"}`);
-  console.log(`  [dry-run] 심을 환경: ${Object.keys(editionEnv).length ? JSON.stringify(editionEnv) : "(없음)"}`);
+  console.log(
+    `  [dry-run] 부모 셸에서 지우는 환경: ${inherited.length ? inherited.join(", ") : "(없음)"}`,
+  );
+  console.log(`  [dry-run] 빌드 폴더: ${layout.targetDir}`);
+  console.log(
+    `  [dry-run] 심을 환경: ${Object.keys(editionEnv).length ? JSON.stringify(editionEnv) : "(없음)"}`,
+  );
   if (extra.overlay) {
     console.log(`  [dry-run] 설치 파일 이름: ${extra.installerName}`);
     console.log(`  [dry-run] 번들에서 빠지는 파일 ${extra.dropped.length}개:`);
@@ -262,7 +232,7 @@ if (process.platform !== "win32") {
   // 맥·리눅스는 링커 사정이 없습니다. 물려받은 판 변수를 지우고 결정한 판만 심어 그대로 넘깁니다.
   const childEnv = { ...process.env };
   stripEditionKeys(childEnv);
-  Object.assign(childEnv, editionEnv);
+  Object.assign(childEnv, editionEnv, { CARGO_TARGET_DIR: layout.targetDir });
   process.exit(
     spawnSync("pnpm", ["tauri", action, ...extra.args], {
       stdio: "inherit",
@@ -272,26 +242,48 @@ if (process.platform !== "win32") {
   );
 }
 
-const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+const programFilesX86 =
+  process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
 const programFiles = process.env.ProgramFiles || "C:\\Program Files";
 
 /** Visual Studio 설치 위치를 찾습니다. 판이 여럿이라 넓게 훑습니다. */
 function findVsDevCmd() {
-  const vswhere = path.join(programFilesX86, "Microsoft Visual Studio", "Installer", "vswhere.exe");
+  const vswhere = path.join(
+    programFilesX86,
+    "Microsoft Visual Studio",
+    "Installer",
+    "vswhere.exe",
+  );
   if (existsSync(vswhere)) {
-    const found = spawnSync(vswhere, ["-latest", "-products", "*", "-property", "installationPath"], {
-      encoding: "utf8",
-    });
+    const found = spawnSync(
+      vswhere,
+      ["-latest", "-products", "*", "-property", "installationPath"],
+      {
+        encoding: "utf8",
+      },
+    );
     const root = (found.stdout || "").split(/\r?\n/)[0].trim();
-    const candidate = root && path.join(root, "Common7", "Tools", "VsDevCmd.bat");
+    const candidate =
+      root && path.join(root, "Common7", "Tools", "VsDevCmd.bat");
     if (candidate && existsSync(candidate)) return candidate;
   }
 
   for (const base of [programFilesX86, programFiles]) {
     for (const year of ["2022", "2019"]) {
-      for (const edition of ["BuildTools", "Community", "Professional", "Enterprise"]) {
+      for (const edition of [
+        "BuildTools",
+        "Community",
+        "Professional",
+        "Enterprise",
+      ]) {
         const candidate = path.join(
-          base, "Microsoft Visual Studio", year, edition, "Common7", "Tools", "VsDevCmd.bat",
+          base,
+          "Microsoft Visual Studio",
+          year,
+          edition,
+          "Common7",
+          "Tools",
+          "VsDevCmd.bat",
         );
         if (existsSync(candidate)) return candidate;
       }
@@ -343,7 +335,8 @@ if (!env) {
 }
 
 // cmd 는 대소문자를 안 가리지만 Node 는 가립니다. 하나로 모읍니다.
-const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") || "Path";
+const pathKey =
+  Object.keys(env).find((key) => key.toLowerCase() === "path") || "Path";
 let entries = env[pathKey].split(";").filter(Boolean);
 
 /**
@@ -377,14 +370,20 @@ console.log(`  링커 확인: ${found}`);
 // 판 환경은 VsDevCmd 환경 위에 얹습니다 — VsDevCmd 가 이 이름을 쓸 일은 없지만, `set` 은 부모 셸의
 // 변수까지 그대로 내놓으므로 물려받은 판 변수는 먼저 지웁니다(`stripEditionKeys` 의 까닭 참조).
 stripEditionKeys(env);
-Object.assign(env, editionEnv);
+Object.assign(env, editionEnv, { CARGO_TARGET_DIR: layout.targetDir });
 
 const tauri = spawnSync("pnpm", ["exec", "tauri", action, ...extra.args], {
   stdio: "inherit",
   shell: true,
   env,
 });
-if (tauri.status === 0 && action === "build") packPortable(env);
+if (tauri.status === 0 && action === "build") {
+  try {
+    packPortable();
+  } catch (error) {
+    fail([String(error)]);
+  }
+}
 process.exit(tauri.status ?? 1);
 
 /**
@@ -400,69 +399,60 @@ process.exit(tauri.status ?? 1);
  * 윈도 11 에는 WebView2 가 기본으로 있습니다. 없는 기계(옛 윈도 10)에서는 한 번 깔아야 하므로
  * 안내 파일을 함께 넣습니다.
  */
-function packPortable(childEnv) {
-  const releaseDir = path.join(
-    childEnv.CARGO_TARGET_DIR ? path.resolve(childEnv.CARGO_TARGET_DIR) : path.join(repoRoot, "src-tauri", "target"),
-    "release",
-  );
-  /*
-    실행 파일 이름은 **설정에서 읽습니다** — 폴더를 훑어 첫 exe 를 집지 않습니다.
+function packPortable() {
+  const releaseDir = layout.releaseDir;
+  // 공개·비공개가 같은 target 을 쓰지 않고, 남은 파일도 허용 목록에 없으면 옮기지 않습니다.
+  const stage = mkdtempSync(path.join(releaseDir, "portable-stage-"));
+  try {
+    stagePortable(layout, stage, resources.kept);
+    writeFileSync(
+      path.join(stage, "읽어보세요.txt"),
+      [
+        "무설치본입니다 — 이 폴더를 원하는 자리에 두고 실행 파일을 켜면 됩니다.",
+        "",
+        "· 설정·프로젝트·모델 가중치는 이 폴더가 아니라 사용자 앱 데이터 폴더에 저장됩니다.",
+        "  (설치본과 같은 자리라 두 판이 같은 자료를 봅니다.)",
+        "· 화면이 하얗게만 나오면 WebView2 런타임이 없는 것입니다.",
+        "  마이크로소프트에서 «WebView2 런타임» 을 받아 한 번 설치해 주세요(윈도 11 은 기본 탑재).",
+        "· resources 폴더는 실행 파일 옆에 그대로 두어야 합니다 — 로컬 모델 워커가 거기 있습니다.",
+        "",
+      ].join("\r\n"),
+      "utf8",
+    );
 
-    이름을 `frameforge.exe` → `AIMovieStorage.exe` 로 바꾼 날, 옛 exe 가 `target/release`
-    에 남아 있어서 무설치본이 **옛 것을 집어** 묶였습니다(2026-09-23). 폴더 훑기는
-    「지금 빌드한 것」 이 아니라 「거기 있는 것」 을 집습니다.
-  */
-  const exe = `${binaryName()}.exe`;
-  if (!existsSync(path.join(releaseDir, exe))) {
-    console.log(`  무설치본: ${exe} 를 찾지 못해 건너뜁니다 — ` + releaseDir);
-    return;
-  }
-  const stage = path.join(releaseDir, "portable-stage");
-  rmSync(stage, { recursive: true, force: true });
-  mkdirSync(stage, { recursive: true });
-  cpSync(path.join(releaseDir, exe), path.join(stage, exe));
-  const resources = path.join(releaseDir, "resources");
-  if (existsSync(resources)) cpSync(resources, path.join(stage, "resources"), { recursive: true });
-  else console.log("  무설치본: resources 폴더가 없습니다 — 워커 없이 묶입니다.");
-  writeFileSync(
-    path.join(stage, "읽어보세요.txt"),
-    [
-      "무설치본입니다 — 이 폴더를 원하는 자리에 두고 실행 파일을 켜면 됩니다.",
-      "",
-      "· 설정·프로젝트·모델 가중치는 이 폴더가 아니라 사용자 앱 데이터 폴더에 저장됩니다.",
-      "  (설치본과 같은 자리라 두 판이 같은 자료를 봅니다.)",
-      "· 화면이 하얗게만 나오면 WebView2 런타임이 없는 것입니다.",
-      "  마이크로소프트에서 «WebView2 런타임» 을 받아 한 번 설치해 주세요(윈도 11 은 기본 탑재).",
-      "· resources 폴더는 실행 파일 옆에 그대로 두어야 합니다 — 로컬 모델 워커가 거기 있습니다.",
-      "",
-    ].join("\r\n"),
-    "utf8",
-  );
-
-  const outDir = path.join(releaseDir, "bundle", "portable");
-  mkdirSync(outDir, { recursive: true });
-  /*
+    const outDir = path.join(releaseDir, "bundle", "portable");
+    mkdirSync(outDir, { recursive: true });
+    /*
     이름을 **설치 파일과 같은 모양**으로 답니다 — `<제품>_<판>_x64-portable.zip`.
 
     예전에는 실행 파일 이름을 따서 `frameforge_portable.zip` 이었습니다. 릴리스 목록에
     `AIMovieStorage-Public_0.2.0_x64-setup.exe` 와 나란히 놓이니 둘이 다른 앱처럼 보였고,
     판도 이름에 안 들어가 어느 판인지 몰랐습니다.
   */
-  const zipName = `${productNameFor(edition)}_${tauriConf.version}_x64-portable.zip`;
-  const zipPath = path.join(outDir, zipName);
-  rmSync(zipPath, { force: true });
-  // 윈도에 기본으로 있는 것만 씁니다 — 빌드 기계에 압축 도구를 더 깔게 하지 않으려고요.
-  const zipped = spawnSync(
-    "powershell",
-    ["-NoProfile", "-Command", `Compress-Archive -Path '${stage}\\*' -DestinationPath '${zipPath}' -Force`],
-    { stdio: "inherit", shell: false },
-  );
-  rmSync(stage, { recursive: true, force: true });
-  if (zipped.status !== 0) {
-    console.log("  무설치본: 압축에 실패했습니다.");
-    return;
+    const zipName = layout.portable;
+    const zipPath = path.join(outDir, zipName);
+    rmSync(zipPath, { force: true });
+    // 윈도에 기본으로 있는 것만 씁니다 — 빌드 기계에 압축 도구를 더 깔게 하지 않으려고요.
+    const zipped = spawnSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-Command",
+        `Compress-Archive -Path '${stage.replaceAll("'", "''")}\\*' -DestinationPath '${zipPath.replaceAll("'", "''")}' -Force`,
+      ],
+      { stdio: "inherit", shell: false },
+    );
+    if (zipped.status !== 0) throw new Error("무설치본 압축에 실패했습니다.");
+    writeBuildManifest(layout, resources.kept);
+    console.log(`  무설치본: ${zipPath}`);
+    console.log(`  빌드 명세: ${layout.manifestPath}`);
+  } finally {
+    // 이번 함수가 만든 작업 폴더만 정리합니다. 경계를 확인하기 전에 재귀 삭제하지 않습니다.
+    const checkedStage = inside(releaseDir, path.relative(releaseDir, stage));
+    if (!path.basename(checkedStage).startsWith("portable-stage-"))
+      throw new Error("작업 폴더 이름이 다릅니다.");
+    rmSync(checkedStage, { recursive: true, force: true });
   }
-  console.log(`  무설치본: ${zipPath}`);
 }
 
 function fail(lines) {

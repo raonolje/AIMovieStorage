@@ -12,6 +12,8 @@ import type { ProjectContextSummary } from "@/lib/projectContext";
  * 안쪽에서 조용히 «저장 폴더 없음» 이 됩니다.
  */
 export interface ProjectMedia {
+  /** 외부 조종기 저장도 현재 프로젝트의 같은 저장 경로를 사용합니다. */
+  projectId?: string;
   /** 저장 폴더 안의 프로젝트 폴더 이름이 되는 값 */
   projectName: string;
   /** 장르·스타일·시대 요약. 없으면 아직 아무것도 안 골랐다는 뜻입니다. */

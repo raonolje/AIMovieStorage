@@ -85,7 +85,9 @@ describe("판 가르기", () => {
     expect(body).toContain("edition::is_public()");
     expect(body).toContain("tauri_plugin_updater");
     // 등록 줄이 판 검사 **안쪽**에 있어야 합니다.
-    expect(body.indexOf("is_public()")).toBeLessThan(body.indexOf("tauri_plugin_updater"));
+    expect(body.indexOf("is_public()")).toBeLessThan(
+      body.indexOf("tauri_plugin_updater"),
+    );
   });
 });
 
@@ -123,7 +125,8 @@ describe("릴리스 흐름", () => {
       를 집으면 **옛 판을 새 판이라고 올립니다** — 받는 사람은 업데이트했는데 판이 그대로이거나
       오히려 내려갑니다. 실제로 시험 삼아 돌렸다가 0.1.0 을 집었습니다(2026-09-23).
     */
-    expect(MANIFEST).toContain("name.includes(`_${version}_`)");
+    expect(MANIFEST).toContain("readBuildManifest(layout)");
+    expect(MANIFEST).toContain("const setup = layout.installer");
   });
 
   it("암호 변수를 빈 값이라도 줍니다", () => {
@@ -150,12 +153,14 @@ describe("이름", () => {
       실행 파일을 남깁니다.
     */
     expect(CARGO).toContain('name = "AIMovieStorage"');
-    expect(read("src-tauri/src/main.rs")).toContain("aimoviestorage_lib::run()");
+    expect(read("src-tauri/src/main.rs")).toContain(
+      "aimoviestorage_lib::run()",
+    );
   });
 
   it("무설치본 이름이 설치 파일과 같은 모양입니다", () => {
-    const script = read("scripts/tauri.mjs");
-    expect(script).toContain("_x64-portable.zip");
+    const script = read("scripts/release-artifacts.mjs");
+    expect(script).toContain("portable: `${stem}-portable.zip`");
     expect(script).not.toContain("_portable.zip`;");
   });
 });

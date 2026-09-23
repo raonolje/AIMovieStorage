@@ -30,6 +30,8 @@ use serde::{Deserialize, Serialize};
 /// 로컬 업스케일 엔진(설치·상주 워커·실행). ComfyUI 다리와는 별개입니다 —
 /// 이 파일 아래쪽의 `comfy_*` 는 «외부 엔진» 으로 그대로 남습니다.
 mod comfy;
+mod control;
+pub use control::run_mcp;
 mod datafiles;
 mod download;
 mod edition;
@@ -222,7 +224,7 @@ const SIX_FACES_DIR: &str = "6면";
 
 /// 파노라마(돔) 원본이 들어가는 하위 폴더. 프런트 `faceSets.ts` 의 `PANORAMA_DIR` 와 같은 값.
 ///
-/// 
+///
 /// 실외 방에 거는 것은 파노라마 한 장뿐인데, 한 폴더에 섞여 있으면 목록에서 가릴 길이 이름뿐이었습니다.
 const PANORAMA_DIR: &str = "파노라마";
 
@@ -398,7 +400,7 @@ fn save_project_asset(request: SaveAssetRequest) -> Res<String> {
 
 /// 이미 **디스크에 있는 파일**을 프로젝트 폴더로 옮겨 담습니다.
 ///
-/// 
+///
 /// 데스크톱에서 고른 영상은 경로만 기억하고 **복사를 안 하고 있었습니다** — 브라우저로
 /// 열었을 때만 바이트가 앱을 지나가 `save_project_asset` 을 탔습니다. 그래서 프로젝트를
 /// 통째로 옮기면 분석 결과만 남고 원본 영상은 남의 폴더에 있었습니다.
@@ -1350,7 +1352,13 @@ pub fn run() {
         .plugin(tauri_plugin_log::Builder::new().build())
         // 업스케일 워커·설치 상태를 앱이 사는 동안 들고 있습니다.
         .manage(upscale::UpscaleState::default())
+        .manage(control::ControlState::default())
         .invoke_handler(tauri::generate_handler![
+            control::control_status,
+            control::control_enable,
+            control::control_respond,
+            control::control_read_journal,
+            control::control_write_journal,
             choose_storage_directory,
             save_project_asset,
             import_project_asset,

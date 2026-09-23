@@ -47,6 +47,12 @@ import { abandonLlmResumes } from "@/lib/llmActivity";
 export type TaskLane = "llm" | "media";
 export type TaskStatus = "waiting" | "running" | "done" | "failed" | "stopped";
 
+export interface TaskResult {
+  assetIds?: string[];
+  paths?: string[];
+  data?: Record<string, unknown>;
+}
+
 export interface QueueTask {
   id: string;
   lane: TaskLane;
@@ -73,6 +79,11 @@ export interface QueueTask {
   startedAt?: number;
   finishedAt?: number;
   error?: string;
+  /** 응답이 끊겨 같은 명령이 다시 와도 결과를 두 번 만들지 않도록 남기는 열쇠입니다. */
+  operationId?: string;
+  requestFingerprint?: string;
+  cancelRequestedAt?: number;
+  result?: TaskResult;
   /** 앱을 껐다 켜도 이어 갈 수 있게, 그 일에 필요한 재료를 통째로 들고 있습니다. */
   payload: unknown;
   /**
@@ -91,6 +102,106 @@ export interface QueueTask {
 /** 끝난 것을 몇 개까지 남길까. 「뭐가 끝났더라」 를 볼 만큼만. */
 const KEEP_DONE = 60;
 const STORAGE_KEY = "frameforge.taskQueue";
+const OPERATIONS_KEY = "frameforge.taskQueue.operations.v1";
+
+export interface TaskJournalSnapshot {
+  version: 1;
+  tasks: QueueTask[];
+  operations: QueueTask[];
+}
+
+export interface TaskJournalAdapter {
+  read: () => Promise<unknown | null>;
+  write: (journal: TaskJournalSnapshot) => Promise<void>;
+}
+
+const operations = new Map<string, QueueTask>();
+let journalAdapter: TaskJournalAdapter | null = null;
+let journalInitialization: Promise<void> | null = null;
+let journalWrites: Promise<void> = Promise.resolve();
+let journalError: string | null = null;
+// 설치본에서는 원본 작업 기록을 읽기 전에 옛 웹뷰 기록으로 생성부터 시작하면 안 됩니다.
+let journalReady = typeof window === "undefined" || !("__TAURI_INTERNALS__" in window);
+
+function snapshotJournal(): TaskJournalSnapshot {
+  return JSON.parse(JSON.stringify({ version: 1, tasks, operations: [...operations.values()] })) as TaskJournalSnapshot;
+}
+
+function queueJournalWrite() {
+  if (!journalAdapter) return;
+  const journal = snapshotJournal();
+  const adapter = journalAdapter;
+  journalWrites = journalWrites.then(async () => {
+    try {
+      await adapter.write(journal);
+      journalError = null;
+    } catch (error) {
+      journalError = String(error instanceof Error ? error.message : error);
+      listeners.forEach((listener) => listener());
+    }
+  });
+}
+
+/** 기록 실패를 숨기면 외부 조종기는 실행하지 않은 일도 안전하게 접수됐다고 믿습니다. */
+export async function flushTaskJournal(): Promise<void> {
+  await whenTaskJournalReady();
+  // 기다리는 사이 완료·취소 기록이 뒤에 붙을 수 있습니다. 옛 쓰기만 기다린 뒤 최신 메모리
+  // 상태를 돌려주면 «완료»를 받은 직후 재시작했는데 결과가 없는 상태로 되살아납니다.
+  for (;;) {
+    const pending = journalWrites;
+    await pending;
+    if (pending === journalWrites) break;
+  }
+  if (journalError) throw new Error(`작업 기록을 저장하지 못했습니다: ${journalError}`);
+}
+
+export function getTaskJournalError(): string | null {
+  return journalError;
+}
+
+export function whenTaskJournalReady(): Promise<void> {
+  return journalInitialization ?? (journalReady ? Promise.resolve() : Promise.reject(new Error("작업 기록 연결을 기다리고 있습니다.")));
+}
+
+/** 저장 위치는 앱이 정합니다. 큐는 같은 기록을 UI와 외부 조종기가 함께 쓰도록 합니다. */
+export function registerTaskJournal(adapter: TaskJournalAdapter): Promise<void> {
+  if (journalInitialization) return journalInitialization;
+  load();
+  journalReady = false;
+  const before = new Map(tasks.map((task) => [task.id, task]));
+  journalInitialization = (async () => {
+    try {
+      const raw = await adapter.read();
+      if (raw !== null) {
+        const saved = raw as Partial<TaskJournalSnapshot>;
+        if (saved.version !== 1 || !Array.isArray(saved.tasks) || !Array.isArray(saved.operations))
+          throw new Error("작업 기록의 저장 형식을 읽을 수 없습니다.");
+        const changed = tasks.filter((task) => before.get(task.id) !== task);
+        const restored = new Map(saved.tasks.map((task) => [task.id, restoreTask(task)]));
+        changed.forEach((task) => restored.set(task.id, task));
+        tasks = [...restored.values()];
+        operations.clear();
+        saved.operations.forEach((task) => {
+          if (task.operationId) operations.set(task.operationId, restoreTask(task));
+        });
+      }
+      tasks.forEach((task) => { if (task.operationId) operations.set(task.operationId, task); });
+      // 재시작하면서 달라진 상태도 먼저 남깁니다. 그 전에 러너가 돌면 같은 결과를 두 번 만들 수 있습니다.
+      await adapter.write(snapshotJournal());
+      journalAdapter = adapter;
+      journalReady = true;
+      journalError = null;
+      save();
+      listeners.forEach((listener) => listener());
+      pump();
+    } catch (error) {
+      journalError = String(error instanceof Error ? error.message : error);
+      listeners.forEach((listener) => listener());
+      throw error;
+    }
+  })();
+  return journalInitialization;
+}
 
 /**
  * 이만큼 소식이 없으면 «멈춘 것 같다» 고 적습니다.
@@ -109,6 +220,15 @@ function makeId() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function restoreTask(task: QueueTask): QueueTask {
+  if (task.status !== "running" && task.status !== "waiting") return task;
+  if (task.cancelRequestedAt) return { ...task, status: "stopped", finishedAt: Date.now(), step: "중지 요청이 남아 있어 다시 실행하지 않았습니다", llmResponseId: undefined, llmResumeStep: undefined };
+  if (task.status !== "running") return task;
+  // 외부 명령은 산출물이 이미 만들어졌을 수 있습니다. 확인 없이 처음부터 다시 생성하지 않습니다.
+  if (task.operationId && !task.llmResponseId) return { ...task, status: "failed", finishedAt: Date.now(), error: "앱이 닫혀 작업이 중단됐습니다. 결과를 확인한 뒤 다시 실행해 주세요.", step: "중단된 결과 확인 필요" };
+  return { ...task, status: "waiting", step: task.llmResponseId ? "앱이 닫혀 — 이어 받는 중" : "앱이 닫혀 처음부터 다시 합니다", startedAt: undefined, beatAt: undefined };
+}
+
 function load() {
   if (loaded) return;
   loaded = true;
@@ -120,17 +240,16 @@ function load() {
       도는지는 적어 둡니다 — 이어 받을 열쇠(`llmResponseId`)가 있으면 답을 잃은 것이 아니라
       서버가 아직 들고 있는 것이라, 러너가 처음부터 보내지 않고 그 답을 묻습니다.
     */
-    tasks = (Array.isArray(saved) ? saved : []).map((task) =>
-      task.status === "running"
-        ? {
-            ...task,
-            status: "waiting" as const,
-            step: task.llmResponseId ? "앱이 닫혀 — 이어 받는 중" : "앱이 닫혀 처음부터 다시 합니다",
-            startedAt: undefined,
-            beatAt: undefined,
-          }
-        : task,
-    );
+    tasks = (Array.isArray(saved) ? saved : []).map(restoreTask);
+    try {
+      const archived = JSON.parse(localStorage.getItem(OPERATIONS_KEY) || "[]") as QueueTask[];
+      if (Array.isArray(archived)) archived.forEach((task) => {
+        if (task.operationId) operations.set(task.operationId, restoreTask(task));
+      });
+    } catch {
+      // 완료 기록 하나가 깨졌다고 아직 대기 중인 작업까지 버리면 안 됩니다. 앱 기록에서 다시 읽습니다.
+    }
+    tasks.forEach((task) => { if (task.operationId) operations.set(task.operationId, task); });
   } catch {
     tasks = [];
   }
@@ -139,12 +258,15 @@ function load() {
 function save() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    localStorage.setItem(OPERATIONS_KEY, JSON.stringify([...operations.values()]));
   } catch {
     // 저장이 막혀도(용량) 이번 세션 동안은 그대로 돕니다.
   }
+  queueJournalWrite();
 }
 
 function publish(next: QueueTask[]) {
+  next.forEach((task) => { if (task.operationId) operations.set(task.operationId, task); });
   /*
     끝난 것만 잘라 냅니다. 대기·진행은 **몇 개든 남깁니다** — 줄에서 잘라 내면 그 일은
     영영 안 돕니다.
@@ -187,7 +309,7 @@ export type TaskRunner = (
   payload: unknown,
   report: (change: { progress?: number; step?: string }) => void,
   task: QueueTask,
-) => Promise<void>;
+) => Promise<void | TaskResult>;
 
 const runners = new Map<string, TaskRunner>();
 
@@ -265,6 +387,60 @@ export interface NewTask {
   dedupe?: string;
 }
 
+function requestFingerprint(next: NewTask): string {
+  const ordered = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(ordered);
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, ordered(item)]));
+    return value;
+  };
+  return JSON.stringify(ordered({ lane: next.lane, projectId: next.projectId, kind: next.kind, payload: next.payload }));
+}
+
+/** 같은 명령의 재전송은 끝난 작업도 찾아 돌려줍니다. 새로 뽑기는 새 열쇠로 요청합니다. */
+export async function enqueueTaskOperation(next: NewTask & { operationId: string }): Promise<{ jobId: string; reused: boolean }> {
+  await whenTaskJournalReady();
+  if (!journalAdapter) throw new Error("외부 작업을 받기 전에 앱 작업 기록을 연결해야 합니다.");
+  load();
+  const operationId = next.operationId.trim();
+  if (!operationId) throw new Error("작업 요청 열쇠가 비었습니다.");
+  const fingerprint = requestFingerprint(next);
+  const previous = operations.get(operationId);
+  if (previous) {
+    if (previous.requestFingerprint !== fingerprint) throw new Error("같은 작업 요청 열쇠에 다른 내용이 들어왔습니다.");
+    // 앞 접수의 기록 쓰기가 실패했으면 같은 작업을 다시 남깁니다. 생성은 아직 시작하지 않았습니다.
+    queueJournalWrite();
+    await flushTaskJournal();
+    pump();
+    return { jobId: previous.id, reused: true };
+  }
+  const task: QueueTask = { ...JSON.parse(JSON.stringify(next)) as NewTask, operationId, requestFingerprint: fingerprint, id: makeId(), status: "waiting", queuedAt: Date.now() };
+  publish([...tasks, task]);
+  await flushTaskJournal();
+  pump();
+  return { jobId: task.id, reused: false };
+}
+
+/** 호출자가 반환값을 고쳐 큐의 원본까지 바꾸지 못하게 사본을 줍니다. */
+export function getTask(id: string): QueueTask | null {
+  load();
+  const task = tasks.find((item) => item.id === id) ?? [...operations.values()].find((item) => item.id === id);
+  return task ? JSON.parse(JSON.stringify(task)) as QueueTask : null;
+}
+
+export function listTasks(filter: { projectId?: string; status?: TaskStatus } = {}): QueueTask[] {
+  load();
+  return JSON.parse(JSON.stringify(tasks.filter((task) =>
+    (!filter.projectId || task.projectId === filter.projectId) && (!filter.status || task.status === filter.status),
+  ))) as QueueTask[];
+}
+
+/** 결과 등록도 같은 작업 기록에 넣어야 재접속한 조종기가 만든 파일을 다시 찾습니다. */
+export function setTaskResult(id: string, result: TaskResult): void {
+  load();
+  if (!tasks.some((task) => task.id === id)) throw new Error("결과를 붙일 작업을 찾지 못했습니다.");
+  patch(id, { result: JSON.parse(JSON.stringify(result)) as TaskResult });
+}
+
 export function enqueueTask(next: NewTask): string | null {
   load();
   if (next.dedupe) {
@@ -292,16 +468,15 @@ export function enqueueTask(next: NewTask): string | null {
 /** 여럿을 한 번에 — 하나씩 넣으면 넣을 때마다 줄이 움직여 순서가 흔들립니다. */
 export function enqueueTasks(list: NewTask[]): number {
   load();
+  const seen = new Set(tasks.filter((task) => task.status === "waiting" || task.status === "running")
+    .map((task) => (task.payload as { dedupe?: string })?.dedupe).filter(Boolean));
   const made = list
-    .filter(
-      (next) =>
-        !next.dedupe ||
-        !tasks.some(
-          (task) =>
-            (task.payload as { dedupe?: string })?.dedupe === next.dedupe &&
-            (task.status === "waiting" || task.status === "running"),
-        ),
-    )
+    .filter((next) => {
+      if (!next.dedupe) return true;
+      if (seen.has(next.dedupe)) return false;
+      seen.add(next.dedupe);
+      return true;
+    })
     .map<QueueTask>((next) => ({
       id: makeId(),
       status: "waiting",
@@ -325,21 +500,22 @@ export function enqueueTasks(list: NewTask[]): number {
  * 길이 있습니다). 러너가 `isStopping` 을 들여다보고 제 자리에서 그만둡니다.
  */
 export function stopTask(id: string) {
+  load();
   const task = tasks.find((item) => item.id === id);
   if (!task) return;
   if (task.status === "waiting") {
-    patch(id, { status: "stopped", finishedAt: Date.now(), step: "시작 전에 뺐습니다", ...NO_RESUME });
+    patch(id, { status: "stopped", cancelRequestedAt: Date.now(), finishedAt: Date.now(), step: "시작 전에 뺐습니다", ...NO_RESUME });
     return;
   }
   if (task.status === "running") {
     stopping.add(id);
-    patch(id, { step: "멈추는 중… 지금 것까지만 마칩니다" });
+    patch(id, { cancelRequestedAt: Date.now(), step: "멈추는 중… 지금 것까지만 마칩니다" });
   }
 }
 
 const stopping = new Set<string>();
 export function isStopping(id: string): boolean {
-  return stopping.has(id);
+  return stopping.has(id) || Boolean(tasks.find((task) => task.id === id)?.cancelRequestedAt);
 }
 
 /**
@@ -415,6 +591,10 @@ export function stopAllTasks() {
 
 /** 실패하거나 멈춘 일을 다시 줄에 세웁니다. 이어 받을 열쇠는 없습니다 — «다시» 는 처음부터 보내는 것입니다. */
 export function retryTask(id: string) {
+  load();
+  const task = tasks.find((item) => item.id === id);
+  if (!task || (task.status !== "failed" && task.status !== "stopped")) return;
+  stopping.delete(id);
   patch(id, {
     status: "waiting",
     error: undefined,
@@ -423,6 +603,8 @@ export function retryTask(id: string) {
     startedAt: undefined,
     finishedAt: undefined,
     beatAt: undefined,
+    cancelRequestedAt: undefined,
+    result: undefined,
     ...NO_RESUME,
   });
   pump();
@@ -597,6 +779,7 @@ let wakeTimer: ReturnType<typeof setTimeout> | null = null;
  * 첫 줄에서 상태를 «진행» 으로 적어, 같은 일을 두 번 집지 않습니다.
  */
 function pump() {
+  if (!journalReady) return;
   load();
   const now = Date.now();
   let soonest = Infinity;
@@ -647,12 +830,19 @@ async function run(task: QueueTask, runner: TaskRunner) {
   const report = (change: { progress?: number; step?: string }) =>
     patch(task.id, { ...change, beatAt: Date.now() });
   try {
-    await runner(task.payload, report, task);
+    // 앱 데이터에 시작 기록이 남기 전에는 GPU·외부 요청을 보내지 않습니다.
+    if (journalAdapter) await flushTaskJournal();
+    if (isStopping(task.id)) {
+      patch(task.id, { status: "stopped", finishedAt: Date.now(), ...NO_RESUME });
+      return;
+    }
+    const result = await runner(task.payload, report, task);
     patch(task.id, {
       status: stopping.has(task.id) ? "stopped" : "done",
       progress: 1,
       finishedAt: Date.now(),
       step: undefined,
+      ...(result ? { result } : {}),
       ...NO_RESUME,
     });
     if (task.lane === "llm" && !stopping.has(task.id)) noteLlmOutcome("ok");

@@ -416,7 +416,7 @@ export function LayoutPanel({
                   </button>
                 )}
                 {/*
-                  **마네킹은 목록에서 바로 뺍니다.** 
+                  **마네킹은 목록에서 바로 뺍니다.**
                   프로젝트 인물은 지우지 않습니다 — 그건 캐릭터 단계의 것이고 여기서는 «이 컷에서 빼기»(눈)뿐입니다.
                 */}
                 {state.mannequins.some((item) => item.id === character.id) && (

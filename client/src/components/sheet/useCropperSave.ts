@@ -360,7 +360,7 @@ export function useCropperSave({
       const saved: CropperSavedFile[] = [];
 
       // 지운 판 자체도 남깁니다. 원본은 그대로 두고 새 파일로.
-      // 이름은 «원본 이름_지움» — 
+      // 이름은 «원본 이름_지움» —
       if (erases.length) {
         const blob = await toBlob(clean);
         if (blob) {

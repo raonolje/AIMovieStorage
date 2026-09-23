@@ -2,5 +2,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-  aimoviestorage_lib::run();
+    if std::env::args().any(|arg| arg == "--mcp") {
+        if let Err(error) = aimoviestorage_lib::run_mcp() {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    aimoviestorage_lib::run();
 }

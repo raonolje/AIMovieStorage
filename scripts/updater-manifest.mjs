@@ -22,11 +22,19 @@
  * 여기서 없으면 만들지 않고 큰 소리로 멈춥니다 — 조용히 넘어가면 「업데이트가 안 된다」
  * 는 보고만 남고 까닭을 못 찾습니다.
  */
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  buildLayout,
+  inside,
+  readBuildManifest,
+} from "./release-artifacts.mjs";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
 function fail(lines) {
   console.error("\n" + lines.join("\n") + "\n");
@@ -36,7 +44,11 @@ function fail(lines) {
 const args = process.argv.slice(2);
 const tagAt = args.indexOf("--tag");
 const tag = tagAt >= 0 ? args[tagAt + 1] : process.env.GITHUB_REF_NAME;
-if (!tag) fail(["태그를 알 수 없습니다.", "  쓰는 법: node scripts/updater-manifest.mjs --tag v0.2.1"]);
+if (!tag)
+  fail([
+    "태그를 알 수 없습니다.",
+    "  쓰는 법: node scripts/updater-manifest.mjs --tag v0.2.1",
+  ]);
 
 const conf = JSON.parse(
   readFileSync(path.join(repoRoot, "src-tauri", "tauri.conf.json"), "utf8"),
@@ -51,28 +63,24 @@ if (tag.replace(/^v/, "") !== version) {
   ]);
 }
 
-const nsisDir = path.join(repoRoot, "src-tauri", "target", "release", "bundle", "nsis");
-if (!existsSync(nsisDir)) fail([`설치 파일 폴더가 없습니다: ${nsisDir}`, "  먼저 빌드해 주세요."]);
-
-const files = readdirSync(nsisDir);
-/*
-  **이번 판의 설치 파일만** 고릅니다.
-
-  폴더에는 지난 판들이 그대로 쌓여 있습니다(`…_0.1.0_…`, `…_0.1.2_…`). 그냥 첫 `-setup.exe`
-  를 집으면 **옛 판을 새 판이라고 올리는** 사고가 납니다 — 받는 사람은 업데이트했는데
-  판이 그대로이거나 오히려 내려갑니다(2026-09-23 실측에서 실제로 0.1.0 을 집었습니다).
-  CI 는 폴더가 깨끗하지만 사람이 손으로 돌릴 때는 안 그렇습니다.
-*/
-const setup = files.find((name) => name.includes(`_${version}_`) && name.endsWith("-setup.exe"));
-if (!setup) {
+// 같은 버전의 비공개 설치본이 옆에 있어도 이번 공개 빌드 명세의 파일만 고릅니다.
+const layout = buildLayout(repoRoot, "public", process.env.CARGO_TARGET_DIR);
+let built;
+try {
+  built = readBuildManifest(layout);
+} catch (error) {
   fail([
-    `판 ${version} 의 설치 파일을 찾지 못했습니다: ${nsisDir}`,
-    `  있는 것: ${files.filter((name) => name.endsWith("-setup.exe")).join(", ") || "(없음)"}`,
+    "공개판 빌드 명세를 확인하지 못했습니다.",
+    String(error),
+    "  먼저 build:public 으로 다시 빌드해 주세요.",
   ]);
 }
+const setup = layout.installer;
+const setupPath = inside(layout.releaseDir, built.artifacts.installer.path);
+const nsisDir = path.dirname(setupPath);
 
 const sigName = `${setup}.sig`;
-if (!files.includes(sigName)) {
+if (!existsSync(`${setupPath}.sig`)) {
   fail([
     `서명 파일이 없습니다: ${sigName}`,
     "  `bundle.createUpdaterArtifacts` 가 켜져 있고 서명 열쇠(TAURI_SIGNING_PRIVATE_KEY)가",
@@ -94,7 +102,7 @@ const manifest = {
   },
 };
 
-const outDir = path.join(repoRoot, "src-tauri", "target", "release", "bundle", "updater");
+const outDir = path.join(layout.releaseDir, "bundle", "updater");
 mkdirSync(outDir, { recursive: true });
 const outPath = path.join(outDir, "latest.json");
 writeFileSync(outPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");

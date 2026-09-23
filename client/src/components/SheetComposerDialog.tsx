@@ -57,7 +57,7 @@ import { useUndoHistory } from "@/lib/useUndoStack";
  * # 좌표는 규격(캔버스)의 실제 px 로 저장합니다
  *
  * 처음에는 «긴 변 = 6000» 기준으로 저장하고 굽는 순간 규격에 맞춰 통째로 줄였습니다.
- * 그러자 규격을 바꿔도 같은 그림이 작아질 뿐이었습니다 — 
+ * 그러자 규격을 바꿔도 같은 그림이 작아질 뿐이었습니다 —
  * 「이미지는 출력된 사이즈로 들어가야해」. 이제 규격 = 캔버스 px, 칸 = 그 캔버스의 px,
  * 그림을 넣으면 칸이 그 그림의 뽑힌 크기가 됩니다. 규격을 바꿔도 칸의 px 는 그대로이고
  * 밖으로 나가는 칸만 안으로 밀려 들어옵니다(`fitPlacements`). 화면은 긴 변을 VIEW 에
@@ -149,6 +149,7 @@ export default function SheetComposerDialog({
   onSheetCreated: (image: GeneratedImageAsset) => void;
   /**
    * 고치는 중인 시트. 있으면 «다시 굽기» 가 이 항목을 갈아 끼웁니다.
+   *
    */
   editing?: GeneratedImageAsset;
   /** 다시 구운 시트. previousPath 는 지운 옛 파일 — 경로를 열쇠로 든 곳(표시·구도 배경)을 갈아 끼우려고 넘깁니다. */
@@ -374,6 +375,8 @@ export default function SheetComposerDialog({
 
   /**
    * 칸의 그림을 바꿉니다. 상자 크기는 그대로 — 칸이 곧 규격입니다.
+   *
+   *
    */
   const replaceSlot = (placementId: string, imageId: string) =>
     commit((current) =>

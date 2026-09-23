@@ -21,7 +21,7 @@ import { useEntityLineage } from "@/components/project/useEntityLineage";
  * 맡습니다. 캐릭터·배경과 한 벌이라, 여기서 따로 고치면 안 됩니다(규칙 1).
  *
  * «공용 에셋 관리» 창은 없앴습니다(2026-09-08). 목록이 이미 계보 패널로 다 보이고,
- * 카드를 누르면 편집 창이 열리니 따로 열 창이 없었습니다. 
+ * 카드를 누르면 편집 창이 열리니 따로 열 창이 없었습니다.
  */
 export default function SharedAssetSection({
   assets,

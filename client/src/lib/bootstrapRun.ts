@@ -153,7 +153,7 @@ registerTaskRunner(BOOTSTRAP_TASK, async (raw, report, task) => {
  * 세 왕복을 차례로 돕니다.
  *
  * 진행은 두 군데에 적습니다 — 살림(창이 읽는 것)과 작업 줄(옆 판이 읽는 것). 줄 쪽에는
- * **몇 프로인지**도 함께 적습니다. 
+ * **몇 프로인지**도 함께 적습니다.
  */
 async function runBootstrap(
   project: string,

@@ -269,7 +269,7 @@ export function renderPanoramaSpaceEn(
 }
 
 /**
- * 칩에 맞춘 상자 치수. 실외는 **정육면체**(한 변 = 가로) — 
+ * 칩에 맞춘 상자 치수. 실외는 **정육면체**(한 변 = 가로) —
  * 실내 층고가 비었거나 눈높이보다 낮으면 2.4 m 로 봅니다(천장이 눈 아래면 각도 단서가 뒤집힙니다).
  */
 export function panoramaBoxOf(space: PanoramaSpace, indoor: boolean): Required<PanoramaSpace> {
@@ -707,7 +707,7 @@ export const DOME_CHIP_ID = "space-panorama-dome";
 export const isOutdoorSpaceChipId = (id: string) => id === CUBEMAP_CHIP_ID || id === DOME_CHIP_ID;
 
 /**
- * «전개도 · 방 안쪽» 칩 id. 
+ * «전개도 · 방 안쪽» 칩 id.
  * 방 안쪽은 등장방형(360°) 말고도 전개도로 뽑을 수 있습니다 — 벽이 휘지 않고 곧게 나오는 대신 앵커 시점이 없습니다.
  * 바깥쪽 전개도와 틀 그림·치수를 같이 씁니다.
  */

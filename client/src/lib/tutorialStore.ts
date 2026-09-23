@@ -5,6 +5,8 @@ import { HOLDS_ENTITY_CARD } from "@/lib/tutorialPanels";
 /**
  * **튜토리얼 살림** — 켜짐 · 본 것 · 지금 따라가는 걸음.
  *
+ *
+ *
  * # 왜 React 상태가 아니라 모듈인가
  *
  * 안내 창(`TutorialOverlay`)은 앱 뿌리에 하나, 여는 단추는 위 띠(`TutorialMenu`)와 설정 화면 두 곳,
@@ -139,6 +141,7 @@ export function setTutorialsEnabled(enabled: boolean) {
 
 /**
  * **튜토리얼이 설 자리를 함께 마련합니다.**
+ *
  *
  * 「튜토리얼 버튼 누르면 연습용 예시 작품을 만들어야지」.
  *

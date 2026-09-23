@@ -35,7 +35,9 @@ import {
   createBgmProject,
   createBgmTrack,
   loadBgmProjects,
-  saveBgmProjects,
+  updateBgmProjects,
+  subscribeBgmProjects,
+  patchBgmTrack,
 } from "@/lib/bgmProjects";
 
 /**
@@ -172,6 +174,7 @@ export default function BgmProjectsPage() {
   const [newName, setNewName] = useState("");
 
   useEffect(() => {
+    const unsubscribe = subscribeBgmProjects(() => setProjects(loadBgmProjects()));
     /*
       **폴더를 한 번 훑어 되살립니다.**
 
@@ -189,18 +192,16 @@ export default function BgmProjectsPage() {
     let alive = true;
     void restoreBgmProjectsFromDisk().then((filled) => {
       if (!alive || filled === loaded) return;
-      setProjects(filled);
+      setProjects(loadBgmProjects());
       setSelectedId((current) => current ?? filled[0]?.id ?? null);
     });
     return () => {
       alive = false;
+      unsubscribe();
     };
   }, []);
 
-  const persist = (next: BgmProject[]) => {
-    setProjects(next);
-    saveBgmProjects(next);
-  };
+  const persist = updateBgmProjects;
 
   const createProject = () => {
     const name = newName.trim();
@@ -209,7 +210,7 @@ export default function BgmProjectsPage() {
       return;
     }
     const created = createBgmProject(name);
-    persist([...projects, created]);
+    persist((current) => [...current, created]);
     setSelectedId(created.id);
     setSelectedTrackId(null);
     setAdding(false);
@@ -234,8 +235,7 @@ export default function BgmProjectsPage() {
       tone: "danger",
     });
     if (!ok) return;
-    const next = projects.filter((item) => item.id !== target.id);
-    persist(next);
+    const next = persist((current) => current.filter((item) => item.id !== target.id));
     if (selectedId === target.id) {
       setSelectedId(next[0]?.id ?? null);
       setSelectedTrackId(null);
@@ -252,7 +252,7 @@ export default function BgmProjectsPage() {
   const updateTrack = (patch: Partial<BgmTrack>) => {
     if (!project || !track) return;
     persist(
-      projects.map((item) =>
+      (current) => current.map((item) =>
         item.id !== project.id
           ? item
           : {
@@ -261,7 +261,7 @@ export default function BgmProjectsPage() {
               tracks: item.tracks.map((entry) =>
                 entry.id !== track.id
                   ? entry
-                  : { ...entry, ...patch, updatedAt: Date.now() },
+                  : patchBgmTrack(entry, patch),
               ),
             },
       ),
@@ -609,10 +609,10 @@ export default function BgmProjectsPage() {
                   onClick={() => {
                     const created = createBgmTrack();
                     persist(
-                      projects.map((item) =>
+                      (current) => current.map((item) =>
                         item.id !== project.id
                           ? item
-                          : { ...item, tracks: [...item.tracks, created] },
+                          : { ...item, updatedAt: Date.now(), tracks: [...item.tracks, created] },
                       ),
                     );
                     setSelectedTrackId(created.id);
@@ -699,11 +699,12 @@ export default function BgmProjectsPage() {
                       });
                       if (!ok) return;
                       persist(
-                        projects.map((item) =>
+                        (current) => current.map((item) =>
                           item.id !== project!.id
                             ? item
                             : {
                                 ...item,
+                                updatedAt: Date.now(),
                                 tracks: item.tracks.filter(
                                   (entry) => entry.id !== track.id,
                                 ),

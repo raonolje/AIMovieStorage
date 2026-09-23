@@ -256,7 +256,7 @@ export function roomsExtentOf(current: CompositionState): {
  * 가로·깊이·층고 칸에서 언제든 바꿉니다.
  */
 /**
- * 실외 방(돔)의 **기본 한 변**(m). 
+ * 실외 방(돔)의 **기본 한 변**(m).
  * 파노라마를 뽑을 때 프롬프트에 적히는 크기이기도 해서, 여기 하나만 고치면 화면·프롬프트가 같이 따라갑니다.
  */
 export const OUTDOOR_ROOM_SIDE = 100;
@@ -379,7 +379,7 @@ export function setRoomPlacementIn(
     Number.isFinite(next ?? NaN) ? (next as number) : fallback;
   const moved = patchRoomIn(current, roomId, (room) => {
     /*
-      **실외는 늘 가운데**입니다. 
+      **실외는 늘 가운데**입니다.
       실외는 돔이든 큰 상자든 «세상» 이라, 옆으로 밀면 그 안에 있어야 할 방들이 밖으로 나가 버립니다.
       높이만 사람이 정합니다(2층 무대처럼 바닥을 올릴 때).
     */

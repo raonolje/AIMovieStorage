@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 /*
-  **앱을 껐다 켰을 때** API 기록과 작업 줄이 어떻게 되살아나는가 — 
+  **앱을 껐다 켰을 때** API 기록과 작업 줄이 어떻게 되살아나는가 —
 
   두 저장소 모듈은 불러오는 순간 localStorage 를 읽으므로, 앱이 닫힐 때의 모습을 먼저 가짜 localStorage 에
   넣어 두고 그 뒤에 동적으로 불러옵니다. node 에는 window 가 없어 `window` 도 이 파일 안에서만 흉내 냅니다.

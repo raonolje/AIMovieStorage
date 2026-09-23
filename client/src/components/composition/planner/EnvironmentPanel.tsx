@@ -64,7 +64,7 @@ import type { SectionToggles } from "./PlannerChrome";
  *
  * 실내 방 : 치수 · 뒤를 가릴 면 · 외벽 투시 · 장소(전개도 만들기) · 6면 세트
  * 실외 방 : 치수 · 장소(파노라마 만들기) · 파노라마 그림 목록
- * 호리존 : 치수 · 호리존 색 
+ * 호리존 : 치수 · 호리존 색
  *
  * 세 갈래 모두 그 아래에 «이 방의 소품» 이 옵니다 — 호리존의 제품도 소품입니다.
  *
@@ -170,6 +170,8 @@ export interface EnvironmentPanelProps extends SectionToggles {
     remove: (id: string) => void;
     /**
      * **다른 작품에서 방 끌어오기** 를 여는 자리. 안 주면 단추가 안 보입니다.
+     *
+     *
      */
     borrow?: () => void;
   };
@@ -177,6 +179,7 @@ export interface EnvironmentPanelProps extends SectionToggles {
   onOpenGallery: () => void;
   /**
    * **장소 라이브러리**(옛 배경 단계) 열기 — 계보(관계도)·보유 에셋을 봅니다.
+   *
    */
   onOpenLibrary?: () => void;
   /**
@@ -310,7 +313,7 @@ export function EnvironmentPanel({
           type="button"
           onClick={onOpenLibrary}
           /*
-            **장소 카드는 이 창 안에 있습니다.** 
+            **장소 카드는 이 창 안에 있습니다.**
             전개도 여섯 면·파노라마·앵커 찍기·표시하기는 장소 그림에서 하는 일인데, 그 카드로 가는
             길이 여기 하나뿐이라 안내 창이 먼저 이 문을 눌러 줍니다.
           */
@@ -1179,7 +1182,7 @@ function RoomProperties({
             </span>
             <div className="flex items-center gap-1">
               {/*
-                **바깥에서 바로 들여오기.** 
+                **바깥에서 바로 들여오기.**
                 여태는 앱에서 뽑은 것만 목록에 올라, 밖에서 만든 360°(스카이박스 생성기·실촬)를 쓸 길이 없었습니다.
               */}
               {onImportPanorama && (
@@ -1511,7 +1514,8 @@ function RoomProps({
           </label>
 
           {/*
-            **벽과 조명에는 에셋이 없습니다.*          */}
+            **벽과 조명에는 에셋이 없습니다.**
+          */}
           {SWAPPABLE_KINDS.includes(picked.kind) && (
             <>
               <select

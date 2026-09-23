@@ -122,6 +122,8 @@ export function setAutoUnfoldEnabled(on: boolean): void {
 /**
  * 전개도가 들어오면 **자동으로 여섯 면을 잘라 저장합니다.**
  *
+ *
+ *
  * 전개도는 우리가 프롬프트를 정해 뽑으므로 판 배치가 늘 같습니다(가로 십자). 그러니
  * 사람이 창을 열어 선을 확인하고 저장을 누르는 일은 **매번 같은 손놀림**입니다.
  * 그림이 카드에 붙는 순간 여기서 대신 합니다.
@@ -147,7 +149,8 @@ export function setAutoUnfoldEnabled(on: boolean): void {
  *
  * 자른 뒤에도 전개도는 목록에 남습니다 — 다시
  * 자르거나, 선을 고쳐 다시 뽑을 때 그것이 재료입니다. 대신 `unfoldedAt` 을 찍어 **두 번
- * 자르지 않습니다.* */
+ * 자르지 않습니다.**
+ */
 export function useAutoUnfold(options: {
   /** 이 카드의 생성 이미지. 전개도를 여기서 찾습니다. */
   images: GeneratedImageAsset[] | undefined;

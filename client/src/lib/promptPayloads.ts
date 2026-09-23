@@ -40,6 +40,8 @@ import type { Background, Character, Cut, GeneratedImageAsset, ReferenceImage } 
 /**
  * **프롬프트 요청의 재료와 넣기 — 카드 단추와 「AI 일괄 생성」 이 한 벌로 씁니다.**
  *
+ *
+ *
  * # 왜 어제 고친 것이 안 먹었는가
  *
  * 카드마다 있는 「프롬프트 작성」 은 풍부한 요청 문구(`cut-prompt.md`·`character-sheet.md`…)를 타지만,
@@ -193,7 +195,7 @@ export function isUnfoldTemplateReference(image: ReferenceImage | undefined): bo
  * 태그가 없는 그림이 생겨서 엉뚱한 것을 가리킵니다.
  *
  * 마그니픽은 파일 이름으로 그림을 부릅니다. tag 도 name 도 파일 이름으로 보내야
- * LLM 이 `@정체성` 같은 표시 이름을 쓰지 않습니다. 
+ * LLM 이 `@정체성` 같은 표시 이름을 쓰지 않습니다.
  */
 export function sheetReferenceTags(list: ReferenceImage[], platform: string): SheetReferenceTag[] {
   /*
@@ -670,6 +672,8 @@ export interface CutRequestInput {
 /**
  * 컷 키 이미지 프롬프트를 받을 때 LLM 에 넘기는 **재료 한 벌**.
  *
+ *
+ *
  * 여태 여기로 간 것은 «씬 요약 · 컷 설명 · 연출 토글 · VFX» 뿐이었습니다. 구도는 그림만
  * 올라가고 **글로는 한 마디도 안 갔고**, 고른 시트도, 대사·연기 지시도 안 갔습니다.
  * 그래서 프롬프트가 「그 컷이 무엇인지」 를 반쯤만 알고 쓰였습니다.
@@ -770,6 +774,8 @@ export function cutRequestPayload(input: CutRequestInput) {
 
 /**
  * 컷 프롬프트 이력에 적는 조건 한 줄.
+ *
+ *
  *
  * 「무엇이 체크되었나」 는 컷에서 **연출 토글·기법·구도를 쓰는지**입니다. 그 조건이
  * 적혀 있어야 「아까 판이 더 나았다」 를 되짚을 수 있습니다.

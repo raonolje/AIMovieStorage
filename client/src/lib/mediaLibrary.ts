@@ -125,6 +125,9 @@ function writeMirrorStamp(section: string, savedAt: number) {
 
 /** 파일 쓰기를 한 줄로 세웁니다. 두 칸이 같은 순간에 저장하면 뒤엣것이 앞엣것을 지웁니다. */
 let mirrorWrites: Promise<void> = Promise.resolve();
+const mirrorValueKey = (value: unknown) => JSON.stringify(value, (_key, item) =>
+  item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]])) : item);
 
 /**
  * 거울 파일에 한 칸을 씁니다. 화면을 기다리게 하지 않으려고 줄에 세우기만 합니다.
@@ -133,10 +136,17 @@ let mirrorWrites: Promise<void> = Promise.resolve();
  * 진짜인가» 가 두 군데가 됩니다.
  */
 export function queueMirrorWrite(section: string, value: unknown, savedAt = Date.now()) {
+  // 화면의 기존 동기 저장은 유지합니다. 확인이 필요한 외부 명령은 아래 Promise를 기다립니다.
+  void queueMirrorWriteAndConfirm(section, value, savedAt).catch(() => undefined);
+}
+
+/** 해당 쓰기의 파일 반영까지 확인합니다. 뒤의 성공이 앞의 실패를 가려서는 안 됩니다. */
+export function queueMirrorWriteAndConfirm(section: string, value: unknown, savedAt = Date.now()): Promise<void> {
+  const snapshot = JSON.parse(JSON.stringify(value)) as unknown;
   writeMirrorStamp(section, savedAt);
-  mirrorFile.entries[section] = { savedAt, value };
-  if (!isDesktopApp()) return;
-  mirrorWrites = mirrorWrites
+  mirrorFile.entries[section] = { savedAt, value: snapshot };
+  if (!isDesktopApp()) return Promise.reject(new Error("앱 데이터 파일의 저장 확인은 데스크톱 앱에서만 가능합니다."));
+  const write = mirrorWrites
     // **다 읽기 전에 쓰면 아직 못 읽은 칸을 지웁니다.** 읽기가 끝난 뒤에 줄을 섭니다.
     .then(() => appSettingsReady)
     .then(async () => {
@@ -155,18 +165,17 @@ export function queueMirrorWrite(section: string, value: unknown, savedAt = Date
       const merged = await invoke<string>("merge_app_settings", {
         section,
         savedAt,
-        value,
+        value: snapshot,
       });
-      try {
-        const next = JSON.parse(merged) as MirrorFile;
-        if (next && next.entries) mirrorFile = next;
-      } catch {
-        // 돌려받은 글이 이상해도 파일은 이미 쓰였습니다 — 제 사본만 그대로 둡니다.
-      }
+      const next = JSON.parse(merged) as MirrorFile;
+      if (!next?.entries || mirrorValueKey(next.entries[section]?.value) !== mirrorValueKey(snapshot))
+        throw new Error("앱 설정 파일에서 요청한 값을 확인하지 못했습니다. 최신 내용을 다시 읽어 주세요.");
+      mirrorFile = next;
     })
-    .then(() => undefined)
-    // 못 써도 앱은 그대로 돕니다. 거울이 낡을 뿐입니다.
-    .catch(() => undefined);
+    .then(() => undefined);
+  // 한 쓰기가 실패해도 다음 저장은 재시도할 수 있어야 합니다. 실패는 해당 호출자에게 전달합니다.
+  mirrorWrites = write.catch(() => undefined);
+  return write;
 }
 
 /** 거울을 다 읽었는가. 읽기 전에는 `localStorage` 가 비어 있어도 «없다» 고 단정할 수 없습니다. */
@@ -577,7 +586,7 @@ export type EditAction =
   | typeof MOTION_MASK_ACTION;
 
 /**
- * 편집 결과 파일 이름. 
+ * 편집 결과 파일 이름.
  *
  * 지움: 원본 `냥이_클로즈업_001` → `냥이_클로즈업_지움`
  * (변형 창: 접두 `냥이_겨울` + 원본 꼬리 `클로즈업` → `냥이_겨울_클로즈업_지움`)

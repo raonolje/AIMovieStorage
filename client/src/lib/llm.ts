@@ -32,7 +32,7 @@ export type LlmTask =
   | "assetPrompt"
   | "cutPrompt"
   /**
-   * 컷 **영상** 프롬프트. 
+   * 컷 **영상** 프롬프트.
    *
    * 여태 영상 프롬프트는 규칙 조립뿐이라(`buildCutVideoPrompt`) LLM 작업이 아예 없었습니다 —
    * 규칙은 상황과 표정을 지어낼 수 없습니다. 뼈대는 규칙이 짓고 그 사이를 LLM 이 채웁니다.
@@ -43,7 +43,7 @@ export type LlmTask =
   | "projectBootstrap"
   | "projectDetails"
   /**
-   * BGM 프롬프트. 
+   * BGM 프롬프트.
    *
    * 규칙 조립(`buildBgmPrompt`)은 고른 태그를 그대로 늘어놓습니다 — 「긴장, 오케스트라,
    * 현악」. 그런데 수노는 **곡의 흐름**(도입·전개·끝)을 적어 줄수록 잘 뽑습니다. 사람이
@@ -51,12 +51,12 @@ export type LlmTask =
    */
   | "bgmPrompt"
   /**
-   * 모캡 키 다듬기. 
+   * 모캡 키 다듬기.
    * 흔들림 후보 구간의 숫자표를 읽고 «인식 오류인가, 의도한 빠른 동작인가» 를 가립니다(`motionCleanup.cleanupPrompt`).
    */
   | "motionCleanup"
   /**
-   * **평소 말투 → 프롬프트 말.** 
+   * **평소 말투 → 프롬프트 말.**
    *
    * 「슬프게 말해」 를 「시선이 내려가고 입술이 다물린다」 로 바꿉니다. 짧은 글 하나를
    * 바꾸는 일이라 **싼 단**으로 충분합니다 — 대신 자주 눌립니다.

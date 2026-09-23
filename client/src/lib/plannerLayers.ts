@@ -40,7 +40,7 @@ export function plannerLayerTargets(
       kind: "object" as const,
     }));
   /*
-    **GLB 도 타임라인 대상입니다.** 
+    **GLB 도 타임라인 대상입니다.**
 
     GLB 는 제 애니메이션(클립)을 갖고 오지만, «그 사람이 어디서 어디로 걸어가는가» 는 우리 타임라인의 일입니다.
     인물·소품과 같은 트랙(`MotionTrack.targetId`)을 쓰므로 키를 찍는 방법도 같습니다.

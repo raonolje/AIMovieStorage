@@ -207,7 +207,8 @@ export interface CompositionViewportProps {
    * **시계가 정말 도는 동안만** 참. 배경 영상을 돌릴지 멈출지가 여기 달려 있습니다.
    *
    * `previewingRef`(«카메라를 타임라인이 몹니다»)와 다릅니다 — 저쪽은 눈금을 한 번 끌기만 해도
-   * 켜지고 사람이 화면을 돌릴 때까지 켜진 채라, 그걸 믿으면 **멈춘 뒤에도 배경만 계속 움직입니다.*   */
+   * 켜지고 사람이 화면을 돌릴 때까지 켜진 채라, 그걸 믿으면 **멈춘 뒤에도 배경만 계속 움직입니다.**
+   */
   playingRef?: MutableRefObject<boolean>;
   /**
    * **멈춰 있을 때의** 재생 위치(초)와 재생 여부. 상태로 받습니다.
@@ -258,7 +259,7 @@ export interface CompositionViewportProps {
    * `backgroundOnly` 면 인물·소품·헬퍼를 빼고 **배경만** 그립니다(생성기에 줄 배경 플레이트).
    */
   onCaptureReady: (
-    capture: ((options?: { backgroundOnly?: boolean }) => string) | null,
+    capture: ((options?: { backgroundOnly?: boolean; requireReady?: boolean }) => string) | null,
   ) => void;
   onVideoRenderReady?: (renderer: VideoFrameRenderer | null) => void;
 }
@@ -715,7 +716,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
     : null;
   const selectedGlbId = selected.startsWith("glb:") ? selected.slice(4) : null;
   /**
-   * 잡은 **방**. 
+   * 잡은 **방**.
    */
   const selectedRoomId = selected.startsWith("room:") ? selected.slice(5) : null;
 
@@ -1228,6 +1229,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
 
     /**
      * 수치는 **잡고 있는 손잡이 옆**에 뜹니다.
+     *
      *
      * 화면 맨 위에 두었더니 손은 기즈모를 잡고 눈은 위를 보는 꼴이었습니다. 끄는 동안 포인터가 곧 그 축 손잡이라,
      * 포인터를 따라다니게 하면 «축에 붙은» 것이 됩니다. 화면 밖으로 나가지 않게 가장자리에서 안으로 접습니다.
@@ -1907,6 +1909,36 @@ export default function CompositionViewport(props: CompositionViewportProps) {
       A→B 컷 전환에서도 배경이 그대로입니다.
     */
     handlersRef.current.onCaptureReady((options) => {
+      // 외부 조종기는 기둥 대체물이나 덜 읽은 배경을 보고 다음 판단을 하면 안 됩니다.
+      // 수동 캡처는 기존 동작을 지키고, 완료를 보장하는 명령만 실제 로딩 상태를 확인합니다.
+      if (options?.requireReady) {
+        if (videoRenderState) throw new Error("레퍼런스 영상 렌더가 끝나야 구도를 캡처할 수 있습니다.");
+        // Codex/Claude가 앞에 있으면 rAF가 멈출 수 있습니다. 평소 재생 루프의 같은 계산을 직접 적용합니다.
+        applyMotionTime();
+        applyCameraMove();
+        applyGlbTime();
+        applyBackgroundDrift();
+        applyBackgroundVideo();
+        controls.update();
+        placeBackgroundRig(ctx.background, camera);
+        renderer.shadowMap.needsUpdate = true;
+        const current = handlersRef.current.composition;
+        const missingCharacter = current.characters.some(item => !item.hidden && !ctx.characterRigs.has(item.characterId));
+        const missingGlb = (current.glbTracks ?? []).some(item => item.visible && (item.filePath || item.url) && !ctx.glbRoots.has(item.id));
+        let missingTexture = false;
+        scene.traverseVisible(node => {
+          if (!(node instanceof THREE.Mesh)) return;
+          if (node.userData.captureAssetPending || node.userData.captureAssetFailed) missingTexture = true;
+          const materials = Array.isArray(node.material) ? node.material : [node.material];
+          for (const material of materials) {
+            const map = (material as THREE.MeshStandardMaterial).map;
+            if (!map) continue;
+            const source = map.image as HTMLImageElement | HTMLVideoElement | undefined;
+            if (!source || (source instanceof HTMLImageElement && (!source.complete || source.naturalWidth === 0)) || (source instanceof HTMLVideoElement && (source.readyState < 2 || source.seeking))) missingTexture = true;
+          }
+        });
+        if (missingCharacter || missingGlb || missingTexture) throw new Error("구도에 필요한 모델 또는 그림을 읽는 중입니다.");
+      }
       const helper = transform.getHelper();
       const wasHelper = helper.visible;
       helper.visible = false;
@@ -1933,13 +1965,14 @@ export default function CompositionViewport(props: CompositionViewportProps) {
         ctx.foreground.visible = false;
         hidden.push(ctx.foreground);
       }
-      renderer.render(scene, camera);
-      const shot = renderer.domElement.toDataURL("image/png");
-      hidden.forEach((node) => {
-        node.visible = true;
-      });
-      helper.visible = wasHelper;
-      return shot;
+      try {
+        renderer.render(scene, camera);
+        return renderer.domElement.toDataURL("image/png");
+      } finally {
+        // 캔버스 읽기가 실패해도 사람이 보던 화면의 헬퍼·전경은 반드시 돌려놓습니다.
+        hidden.forEach((node) => { node.visible = true; });
+        helper.visible = wasHelper;
+      }
     });
 
     // 레퍼런스 영상용 프레임 렌더러.
@@ -2897,11 +2930,16 @@ export default function CompositionViewport(props: CompositionViewportProps) {
               three 의 로더가 직접 읽습니다(캡처는 WebGL 이라 오염되지 않습니다).
             */
             const source = assetSrc(item.image) || item.image;
+            mesh.userData.captureAssetPending = true;
             new THREE.TextureLoader().load(source, (texture) => {
               texture.colorSpace = THREE.SRGBColorSpace;
               material.map = texture;
               material.color.set("#ffffff");
               material.needsUpdate = true;
+              mesh.userData.captureAssetPending = false;
+            }, undefined, () => {
+              mesh.userData.captureAssetPending = false;
+              mesh.userData.captureAssetFailed = true;
             });
           }
           mesh.updateMatrixWorld(true);

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -71,6 +72,8 @@ import {
   type RoomFaceShell,
 } from "@/lib/compositionEdit";
 import { useUndoStack } from "@/lib/useUndoStack";
+import { useCompositionControl, type ControlledCapture } from "@/components/composition/planner/useCompositionControl";
+import { withCompositionChangeSource, type CompositionCapture } from "@/lib/compositionControl";
 import { isTypingTarget } from "@/lib/isTypingTarget";
 import { currentTutorialPage, reportTutorialPage } from "@/lib/tutorialStore";
 import { HOLDS_PLANNER } from "@/lib/useTutorialPanel";
@@ -131,6 +134,8 @@ import { uid, type Background, type Character } from "@/lib/projectTypes";
  */
 
 export interface CompositionPlannerProps {
+  cutId?: string;
+  onControlCommit?: (composition: CompositionState, captures: CompositionCapture) => Promise<unknown>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** 이 컷에 나오는 인물들 */
@@ -151,6 +156,8 @@ export interface CompositionPlannerProps {
   onCapture?: (shots: { guide: string; plate: string }) => void;
   /**
    * 레퍼런스 영상을 저장했을 때 — 컷이 경로와 길이를 받아 둡니다.
+   *
+   *
    */
   onVideoSaved?: (path: string, seconds: number) => void;
   /** 인물 이름·키를 여기서 고쳤을 때 프로젝트에 올려보냅니다 */
@@ -179,6 +186,8 @@ export interface CompositionPlannerProps {
   /**
    * **장소 라이브러리** — 걷어낸 «배경» 단계를 창으로 되살립니다.
    *
+   *
+   *
    * 장소는 구도잡기에서 만들지만, **계보(관계도)와 보유 에셋**은 카드 하나가 아니라 목록 전체를 봐야 하는 일입니다.
    * 그래서 씬 단계에 있던 그 화면(`StepBackgrounds`)을 그대로 창에 띄웁니다 — 새로 짜면 두 자리가 갈라집니다(규칙 1).
    */
@@ -202,6 +211,8 @@ export interface CompositionPlannerProps {
 }
 
 export default function CompositionPlanner({
+  cutId,
+  onControlCommit,
   open,
   onOpenChange,
   characters,
@@ -264,8 +275,12 @@ export default function CompositionPlanner({
   const setState = history.set;
   /** 되돌리기에 안 쌓는 변경 — «사람이 한 편집» 이 아닌 것(자동 키·방 자동 맞춤). */
   const setStateRaw = history.replace;
-  const undo = history.undo;
-  const redo = history.redo;
+  const undo = useCallback(() => withCompositionChangeSource(
+    cutId && projectName ? { projectName, cutId } : null, "undo", () => flushSync(history.undo),
+  ), [cutId, projectName, history.undo]);
+  const redo = useCallback(() => withCompositionChangeSource(
+    cutId && projectName ? { projectName, cutId } : null, "redo", () => flushSync(history.redo),
+  ), [cutId, projectName, history.redo]);
 
   useEffect(() => {
     if (open) {
@@ -385,6 +400,8 @@ export default function CompositionPlanner({
   /**
    * 타임라인 인물 줄에서 **오른쪽 단추**를 눌렀을 때 뜨는 메뉴.
    *
+   *
+   *
    * 메뉴를 **타임라인이 아니라 여기서** 띄우는 까닭: 고를 모션 목록과 모캡 창을 이 화면이
    * 들고 있습니다. 타임라인이 그것을 알면 두 화면이 서로를 끌어안습니다.
    */
@@ -426,9 +443,7 @@ export default function CompositionPlanner({
   const toggleSection = (key: string) =>
     setOpenSections((current) => ({ ...current, [key]: !current[key] }));
 
-  const captureRef = useRef<
-    ((options?: { backgroundOnly?: boolean }) => string) | null
-  >(null);
+  const captureRef = useRef<ControlledCapture | null>(null);
 
   // ── 재생 ──────────────────────────────────────────────────────────────
   const timeline = timelineOf(state);
@@ -660,6 +675,16 @@ export default function CompositionPlanner({
           part,
         }),
       ),
+  });
+
+  useCompositionControl({
+    open,
+    identity: cutId && projectName ? { cutId, projectName, sceneTitle, cutOrder } : null,
+    history,
+    context: { characterIds: characters.map(item => item.id), imageIds: media.availableBackgrounds.map(item => item.id) },
+    capture: () => captureRef.current,
+    stopPlayback: () => { setPlaying(false); setPreviewing(false); },
+    commit: onControlCommit,
   });
 
   // ── 구도 요약 ─────────────────────────────────────────────────────────
@@ -948,7 +973,7 @@ export default function CompositionPlanner({
                   */
                   anchorOf={(targetId, ratio) => {
                     /*
-                      **지금 시각의 자리**를 씁니다. 
+                      **지금 시각의 자리**를 씁니다.
                       동선 트랙이 있으면 상태에 적힌 자리는 «키를 찍던 그때» 이고 화면에
                       서 있는 자리는 재생 머리가 정한 자리라, 그대로 쓰면 어긋납니다.
                     */

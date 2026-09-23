@@ -3,6 +3,8 @@ import { LM, type CapturePoint, type CaptureSample, type CapturedPerson } from "
 /**
  * **튐 보정** — 검출기가 한두 장 사람을 잘못 봐서 팔다리가 확 튀었다 돌아오는 곳을 찾아 앞뒤로 메웁니다.
  *
+ *
+ *
  * 떨림 줄이기(One Euro, `smoothSamples`)는 **작은 떨림**을 누르는 것이라 이런 곳을 못 고칩니다 — 한 장이 30 cm 튀면 필터가
  * 그것을 «빠른 동작» 으로 보고 오히려 따라갑니다. 그래서 거르기 **전에** 다음을 차례로 봅니다.
  *

@@ -50,6 +50,7 @@ export interface MocapSource {
   /**
    * 이 영상이 **원래 초당 몇 장**인가. 화면이 한 번 재어 적어 둡니다(`requestVideoFrameCallback`).
    *
+   *
    * HTML 영상은 초당 장수를 알려 주지 않아서, 장이 넘어가는 간격을 두 번 재어 가까운 흔한 값으로 맞춥니다.
    */
   nativeFps?: number;
@@ -187,6 +188,8 @@ export function removeMocapSource(project: string, id: string) {
 
 /**
  * 올린 영상을 **프로젝트 폴더**에 넣습니다(`<프로젝트>/mocap/<영상 이름>/`).
+ *
+ *
  */
 export async function saveMocapVideo(
   project: string,
@@ -285,6 +288,8 @@ let running: { project: string; id: string; abort: AbortController } | null = nu
 
 /**
  * 분석을 **줄에 세웁니다.** 이미 서 있거나 도는 중이면 아무 일도 하지 않습니다.
+ *
+ *
  */
 export function enqueueMocap(project: string, id: string) {
   const source = (store.byProject[project] ?? []).find((item) => item.id === id);

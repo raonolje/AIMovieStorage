@@ -61,7 +61,7 @@ export default function CropperSurface({
           onPointerUp={endDraw}
           onPointerCancel={endDraw}
           /*
-            **창에 들어가는 만큼만 키웁니다.** 
+            **창에 들어가는 만큼만 키웁니다.**
 
             예전에는 `w-full` 이라 그림을 **칸 너비에 맞춰 늘였습니다.** 창이 넓으면 1024px 짜리
             세로 그림이 1450px 로 부풀어 세로가 2000px 을 넘고, 아래 띠(저장·닫기)가 화면 밖으로

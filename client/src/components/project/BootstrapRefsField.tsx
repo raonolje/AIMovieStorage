@@ -8,6 +8,8 @@ import { refTag, type BootstrapRef } from "@/lib/bootstrapStore";
 /**
  * **일괄 생성에 함께 올리는 그림·영상.**
  *
+ *
+ *
  * # 왜 «무엇을 참조할지» 를 따로 적는가
  *
  * 파일만 올리면 모델은 그것을 **무엇으로 쓸지** 모릅니다. 같은 춤 영상이라도 「이 안무

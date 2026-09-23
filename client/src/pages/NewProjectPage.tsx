@@ -28,6 +28,7 @@ import {
 } from "@/lib/localProjectStore";
 import { adoptBootstrapRun } from "@/lib/bootstrapStore";
 import { registerProjectTarget } from "@/lib/projectWrite";
+import { registerCompositionProjectPage } from "@/lib/compositionControl";
 import { withoutEmptyEraRanges } from "@/lib/projectContext";
 import { buildProjectMedia, pickProjectMediaInput, projectMediaDeps } from "@/lib/projectMedia";
 import { newProjectDraft, settleLoading, type ProjectDraft } from "@/lib/projectTypes";
@@ -92,6 +93,7 @@ export default function NewProjectPage() {
 
   const [draft, setDraft] = useState<ProjectDraft>(newProjectDraft);
   const [step, setStep] = useState(1);
+  const [controlCutRequest, setControlCutRequest] = useState<{ cutId: string } | null>(null);
 
   /**
    * **저장하고 프로젝트 목록으로.** 확인이 끝나면 갈 곳은 거기뿐입니다.
@@ -518,6 +520,17 @@ export default function NewProjectPage() {
     projectMediaDeps(mediaInput),
   );
 
+  useEffect(() => {
+    if (!media.projectName || (projectId && !loaded)) return;
+    return registerCompositionProjectPage(media.projectName, () => draftRef.current.scenes.flatMap(scene => scene.cuts.map(cut => ({
+      projectName: media.projectName, cutId: cut.id, sceneTitle: scene.title, cutOrder: cut.order,
+    }))), cutId => {
+      setControlCutRequest({ cutId });
+      setStep(3);
+      setMaxStep(current => Math.max(current, 3));
+    });
+  }, [media.projectName, projectId, loaded]);
+
   const current = STEPS.find((item) => item.id === step) || STEPS[0];
 
   return (
@@ -691,7 +704,7 @@ export default function NewProjectPage() {
             />
           )}
           {step === 2 && <StepCharacters draft={draft} onChange={patch} />}
-          {step === 3 && <StepScenes draft={draft} onChange={patch} />}
+          {step === 3 && <StepScenes draft={draft} onChange={patch} controlCutRequest={controlCutRequest} />}
           {step === 4 && <StepFinish projectId={bootstrapKey} draft={draft} onChange={patch} />}
 
           <div className="mt-5 flex items-center gap-2">

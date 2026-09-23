@@ -136,6 +136,15 @@ const diskVersion = new Map<string, string>();
  * 도장이 같아, 앞 판을 쓴 뒤 뒤 판을 «이미 있다» 로 버리게 됩니다. 객체 그 자체로 봅니다.
  */
 const onDisk = new WeakSet<LocalProject>();
+/** 같은 초안을 다시 저장해도 첫 파일 쓰기가 끝나기 전에는 성공으로 답하면 안 됩니다. */
+const pendingPersists = new WeakMap<LocalProject, Promise<PersistOutcome>>();
+function trackPersistence(project: LocalProject, persisted: Promise<PersistOutcome>): Promise<PersistOutcome> {
+  pendingPersists.set(project, persisted);
+  void persisted.then(() => {
+    if (pendingPersists.get(project) === persisted) pendingPersists.delete(project);
+  });
+  return persisted;
+}
 
 /** 디스크가 달라서 다시 읽었을 때 알립니다. 편집 화면이 초안을 갈아 끼우는 데 씁니다. */
 const reloadListeners = new Set<(project: LocalProject) => void>();
@@ -726,8 +735,15 @@ function stageLocalProject(
     두 창이 서로를 되돌리는 핑퐁입니다(2026-09-21). 편집 화면의 객체 동일성 검사가 먼저
     막고, 이건 그 검사를 지나친 길(단계 넘기기·폴더 맞추기·창 밖 결과)의 보험입니다.
   */
-  if (previous && JSON.stringify(previous.draft) === JSON.stringify(serialized))
-    return { project: previous, persisted: Promise.resolve("same") };
+  if (previous && JSON.stringify(previous.draft) === JSON.stringify(serialized)) {
+    const pending = pendingPersists.get(previous);
+    return {
+      project: previous,
+      persisted: pending ?? (!canUseProjectFiles() || onDisk.has(previous)
+        ? Promise.resolve("same")
+        : trackPersistence(previous, persistToFile(previous, { previous }))),
+    };
+  }
 
   const project: LocalProject = {
     id,
@@ -762,7 +778,8 @@ function stageLocalProject(
     `updatedAt`. 둘 다 없으면 새 작품이거나 옛 파일이라 검사 없이 씁니다. `previous` 는 못 썼을 때
     물릴 자리이기도 합니다.
   */
-  return { project, persisted: persistToFile(project, { previous }) };
+  const persisted = persistToFile(project, { previous });
+  return { project, persisted: trackPersistence(project, persisted) };
 }
 
 /**

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Cpu, Loader2, Trash2, Download, HardDriveDownload, X } from "lucide-react";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/ConfirmDialog";
+import { useT } from "@/lib/i18n";
 import {
   cancelLocalInstall,
   installLocalEngine,
@@ -20,11 +21,14 @@ import {
   PRECISION_LABEL,
   precisionFor,
   savePrecision,
+  saveLocalMemoryPolicy,
+  useLocalMemoryPolicy,
   type EngineFit,
   type HardwareProbe,
   type LocalPrecision,
   type LocalEngineId,
   type LocalEngineStatus,
+  type LocalMemoryPolicy,
 } from "@/lib/localEngines";
 
 /**
@@ -43,7 +47,15 @@ export default function LocalEnginesPanel({
   kinds?: LocalEngineStatus["kind"][];
   compact?: boolean;
 }) {
+  const t = useT();
   const { engines, installs, loaded, statusError } = useLocalEngines();
+  const memoryPolicy = useLocalMemoryPolicy();
+  const [stoppingWorkers, setStoppingWorkers] = useState(false);
+  const updateMemoryPolicy = (next: LocalMemoryPolicy) => {
+    const failed = (error: unknown) => toast.error(t("메모리 설정을 저장하지 못했습니다: {error}", { error: String(error) }));
+    try { void saveLocalMemoryPolicy(next).catch(failed); }
+    catch (error) { failed(error); }
+  };
   const shown = kinds
     ? engines.filter((engine) => kinds.includes(engine.kind))
     : engines;
@@ -108,6 +120,52 @@ export default function LocalEnginesPanel({
       )}
       {!compact && <HuggingFaceTokenRow />}
 
+      {!compact && (
+        <div className="space-y-2 rounded-lg border border-white/10 p-3 text-[11px]">
+          <label className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold">{t("생성 후 메모리")}</span>
+            <select
+              value={memoryPolicy.mode}
+              onChange={(event) => updateMemoryPolicy({ ...memoryPolicy, mode: event.target.value as LocalMemoryPolicy["mode"] })}
+              className="rounded-md border border-white/10 bg-background px-2 py-1.5"
+            >
+              <option value="release">{t("생성 후 메모리 비우기 (기본)")}</option>
+              <option value="adaptive">{t("사용량이 기준 이상이면 메모리 비우기")}</option>
+              <option value="retain">{t("빠른 연속 생성을 위해 모델 유지")}</option>
+            </select>
+          </label>
+          {memoryPolicy.mode === "adaptive" && (
+            <div className="flex flex-wrap gap-3">
+              {(["ramPercent", "vramPercent"] as const).map(field => (
+                <label key={field} className="flex items-center gap-2">
+                  <span>{t(field === "ramPercent" ? "RAM 사용률 기준 (%)" : "VRAM 사용률 기준 (%)")}</span>
+                  <input
+                    type="number" min={1} max={99} step={1} value={memoryPolicy[field]}
+                    onChange={(event) => {
+                      const percent = event.target.valueAsNumber;
+                      if (!Number.isInteger(percent) || percent < 1 || percent > 99) return;
+                      updateMemoryPolicy({ ...memoryPolicy, [field]: percent });
+                    }}
+                    className="w-16 rounded-md border border-white/10 bg-background px-2 py-1"
+                  />
+                </label>
+              ))}
+            </div>
+          )}
+          <p className="leading-relaxed text-muted-foreground">
+            {memoryPolicy.mode === "release"
+              ? t("로컬 생성 후 사용한 워커를 종료해 RAM·VRAM을 돌려줍니다. 다음 생성은 모델을 다시 불러오므로 더 오래 걸릴 수 있습니다.")
+              : memoryPolicy.mode === "adaptive"
+                ? t("생성이 끝나면 캐시를 정리합니다. RAM 또는 VRAM 사용률이 기준 이상이거나 사용량을 읽지 못하면 해당 워커를 종료합니다. 모델을 다시 불러오는 시간이 늘어날 수 있습니다.")
+                : t("모델을 메모리에 남겨 다음 생성의 로딩 시간을 줄입니다. RAM·VRAM 점유가 계속될 수 있습니다.")}
+          </p>
+          <p className="leading-relaxed text-muted-foreground">
+            {t("설정은 다음 생성부터 적용됩니다. 이미 남아 있는 모델은 ‘워커 내리기’로 해제하세요.")}
+            {" "}{t("자동 정리는 생성이 끝난 뒤에만 실행하며, 생성 도중 사용률을 이유로 작업을 중단하지 않습니다.")}
+          </p>
+        </div>
+      )}
+
       {shown.map((engine) => (
         <LocalEngineCard
           key={engine.id}
@@ -133,19 +191,22 @@ export default function LocalEnginesPanel({
           </button>
           <button
             type="button"
-            onClick={() =>
-              void stopLocalWorkers().then(() =>
-                toast.success("로컬 모델 워커를 내렸습니다. VRAM 이 비었습니다."),
-              )
-            }
-            title="지금 떠 있는 워커를 전부 내려 VRAM 을 비웁니다. 다음 생성 때 다시 올라옵니다"
+            disabled={stoppingWorkers}
+            onClick={() => {
+              setStoppingWorkers(true);
+              void stopLocalWorkers()
+                .then(() => toast.success(t("로컬 모델 워커를 내렸습니다. 해당 워커의 RAM·VRAM을 해제했습니다.")))
+                .catch((error) => toast.error(t("워커를 내리지 못했습니다: {error}", { error: String(error) })))
+                .finally(() => setStoppingWorkers(false));
+            }}
+            title={t("현재 로컬 워커를 모두 종료합니다. 실행 중인 생성도 중단될 수 있으며 다음 생성 때 모델을 다시 불러옵니다.")}
             className="rounded-md px-2.5 py-1.5 text-[11px] font-semibold"
             style={{
               background: "oklch(1 0 0 / 6%)",
               color: "oklch(0.72 0.14 60)",
             }}
           >
-            워커 내리기
+            {t(stoppingWorkers ? "워커를 내리는 중…" : "워커 내리기")}
           </button>
         </div>
       )}

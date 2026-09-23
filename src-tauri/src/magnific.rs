@@ -1210,7 +1210,7 @@ pub async fn magnific_compose_auto(
     model: String,
     aspect_ratio: String,
     count: u32,
-    // "image" 또는 "video". 
+    // "image" 또는 "video".
     // 안 넘기면 예전처럼 이미지입니다(옛 호출을 안 깨뜨리려고).
     kind: Option<String>,
     // 영상일 때 러닝타임(초). 구도잡기 타임라인이 정한 값이 그대로 옵니다.

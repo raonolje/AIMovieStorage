@@ -2,6 +2,8 @@ import { composeInMagnific } from "@/lib/magnificCompose";
 import { HOLDS_PLANNER } from "@/lib/useTutorialPanel";
 import { aspectNumberOf } from "@/components/composition/planner/PlannerChrome";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CompositionControlError, registerCompositionOpener } from "@/lib/compositionControl";
+import { writeProjectAndConfirm } from "@/lib/projectWrite";
 import {
   ChevronDown,
   ChevronRight,
@@ -131,6 +133,7 @@ const PICK_ACCENT = {
 /**
  * 인물·장소를 «그림으로» 고르는 타일 한 장.
  *
+ *
  * 배경만 드롭다운(«고르지 않음»)이었는데, 이름만으로는 «어느 골목» 인지 알 수 없어
  * 결국 2단계로 돌아가 확인해야 했습니다.
  *
@@ -246,7 +249,7 @@ export default function CutCard({
   /** 튜토리얼이 「이 컷을 펴 둬라」 고 고른 것. 접힌 컷은 머리줄만 보여 자리를 못 가리킵니다. */
   tutorialOpen?: boolean;
 }) {
-  const { projectName, sharedAssets } = useProjectMedia();
+  const { projectId, projectName, sharedAssets } = useProjectMedia();
   const t = useT();
   const [open, setOpen] = useState(false);
 
@@ -260,6 +263,8 @@ export default function CutCard({
   /** LlmRequestButton 과 API 요청이 **같은 재료**를 쓰게 한 곳에 둡니다. */
   /**
    * 컷 키 이미지 프롬프트를 받을 때 LLM 에 넘기는 **재료 한 벌**.
+   *
+   *
    *
    * 여태 여기로 간 것은 «씬 요약 · 컷 설명 · 연출 토글 · VFX» 뿐이었습니다. 구도는 그림만
    * 올라가고 **글로는 한 마디도 안 갔고**, 고른 시트도, 대사·연기 지시도 안 갔습니다.
@@ -337,6 +342,8 @@ export default function CutCard({
 
   /**
    * 구도를 레퍼런스 삼아 마그니픽에서 뽑기.
+   *
+   *
    *
    * 이 길이 축척 문제를 통째로 비켜 갑니다. 3D 는 **카메라 각도·인물 자리·누가 어디에**
    * 만 말하면 되고, 잔디와 인물의 크기를 픽셀 단위로 맞추는 일은 생성기가 합니다.
@@ -663,6 +670,12 @@ export default function CutCard({
     if (synced.notice) toast.message(synced.notice);
     setPlanning(true);
   };
+  const openPlannerRef = useRef(openPlanner);
+  openPlannerRef.current = openPlanner;
+  useEffect(() => {
+    if (!projectName) return;
+    return registerCompositionOpener({ projectName, cutId: cut.id, sceneTitle, cutOrder: cut.order }, () => openPlannerRef.current());
+  }, [projectName, cut.id, sceneTitle, cut.order]);
 
   /** 인물·배경을 그림으로 고르는 줄. 배경은 6면 세트가 있으면 세트 카드로 보여 줍니다. */
   const characterTiles = useMemo(
@@ -779,6 +792,8 @@ export default function CutCard({
 
   /**
    * 받은 프롬프트를 **칸에 넣고 기록에도 남깁니다.**
+   *
+   *
    *
    * 「무엇이 체크되었나」 는 컷에서 **연출 토글·기법·구도를 쓰는지**입니다. 그 조건이
    * 적혀 있어야 「아까 판이 더 나았다」 를 되짚을 수 있습니다.
@@ -1167,6 +1182,7 @@ export default function CutCard({
   }, [tabImages]);
   /**
    * ── 인물마다 «이 그림을 레퍼런스로» ────────────────────────────────
+   *
    *
    * 묶음 머리줄이 곧 인물 이름이라 이름으로 인물을 찾습니다(`collectEntityPickerImages` 의 `ownerName`). 변형·시트·보유 에셋도
    * 그 인물 이름으로 묶여 들어와, 한 인물의 어떤 그림이든 고를 수 있습니다. 공용 에셋 묶음은 인물이 없어 고르기가 안 뜹니다.
@@ -2129,6 +2145,30 @@ export default function CutCard({
       )}
 
       <CompositionPlanner
+        cutId={cut.id}
+        onControlCommit={async (composition, captures) => {
+          if (!projectId) throw new CompositionControlError("project_not_saved", "프로젝트를 먼저 저장해 주세요.");
+          const [guideImagePath, plateImagePath] = await Promise.all([
+            storeCapture(captures.guide, "구도"),
+            storeCapture(captures.plate, "배경"),
+          ]);
+          if (!guideImagePath || !plateImagePath) throw new CompositionControlError("capture_save_failed", "구도와 배경 그림을 프로젝트 폴더에 모두 저장하지 못했습니다.");
+          let cutMissing = false;
+          const result = await writeProjectAndConfirm(projectId, current => {
+            const latest = current.scenes.flatMap(scene => scene.cuts).find(item => item.id === cut.id);
+            // React 갱신 안에서 예외를 던지면 편집 화면 전체가 깨집니다. 컷은 건드리지 않고 호출자에게 알립니다.
+            if (!latest) { cutMissing = true; return {}; }
+            const patch = readCompositionIntoCut(composition, { cut: latest, characters: current.characters, backgrounds: current.backgrounds }).patch;
+            return {
+              scenes: current.scenes.map(scene => ({ ...scene, cuts: scene.cuts.map(item => item.id === cut.id ? {
+                ...item, ...patch, composition, guideImage: captures.guide, plateImage: captures.plate, guideImagePath, plateImagePath,
+              } : item) })),
+            };
+          });
+          if (cutMissing) throw new CompositionControlError("cut_not_found", "저장하는 동안 컷이 삭제되었습니다.", { guideImagePath, plateImagePath });
+          if (!result.persisted) throw new CompositionControlError("persist_failed", result.why ?? "구도를 프로젝트 파일에 저장하지 못했습니다.", { guideImagePath, plateImagePath });
+          return { guideImagePath, plateImagePath, persisted: true };
+        }}
         open={planning}
         onOpenChange={setPlanning}
         // 컷에 체크한 인물만 주면, 아직 체크 전일 때 세울 사람이 없습니다.

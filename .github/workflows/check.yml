@@ -7,8 +7,8 @@
 # 읽어서는 못 찾습니다. 그래서 자료로 세는 시험이 여럿 있는데(앵커 표 ↔ 화면, 창이 품은 목록 ↔
 # 여는 문, 세 나라말 사전의 열쇠), 그것들이 돌지 않으면 있으나 마나입니다.
 #
-# Rust 는 여기서 컴파일하지 않습니다. 600개 크레이트를 매번 올리면 20분이 넘고, 설치 파일을
-# 만드는 워크플로(`release.yml`)가 어차피 컴파일합니다. 여기서는 **몇 분 안에 끝나는 것**만 봅니다.
+# 네이티브 저장·작업 큐·메모리 정책은 Windows 작업에서 별도로 검사합니다.
+# Rust 캐시를 재사용하며, 외부 서비스가 필요한 live 시험은 기본 실행에서 제외합니다.
 name: 검사
 
 on:
@@ -61,3 +61,16 @@ jobs:
           python -m pip install --quiet numpy pillow
           python src-tauri/resources/local/test_freeze_by_mask.py
           python src-tauri/resources/local/test_lora_shapes.py
+          python src-tauri/resources/local/test_memory_cleanup.py
+
+  native:
+    name: 네이티브 저장·워커 검사
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Rust 단위 시험
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked

@@ -51,7 +51,7 @@ export default function CutPromptSection({
    * 이 작품이 **그림을 뽑을 모델**(`targetModels("image")` 의 id).
    *
    * 있으면 LLM 요청에 그 모델의 가이드가 함께 붙어, 그 문법으로 쓰인 프롬프트가
-   * 돌아옵니다. 
+   * 돌아옵니다.
    */
   modelId?: string;
 }) {

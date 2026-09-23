@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import UpdateBanner from "@/components/UpdateBanner";
+import AppControlPanel from "@/components/AppControlPanel";
 import {
   fetchedAtFor,
   isLoadingModels,
@@ -469,6 +470,8 @@ export default function SettingsPage() {
           「최신입니다」 한 줄로 채워집니다 — 확인은 아래 단추로 언제든 다시 합니다.
         */}
         <UpdateBanner />
+
+        <AppControlPanel />
 
         {/* ── 프롬프트 작성 프로필 ─────────────────────────────────── */}
         <Section icon={Cpu} tint="oklch(0.78 0.18 290)" title={t("프롬프트 작성 프로필")} anchor="settings-profile">

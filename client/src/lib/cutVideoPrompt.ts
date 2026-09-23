@@ -11,6 +11,8 @@ import type { Cut, GeneratedImageAsset } from "@/lib/projectTypes";
 /**
  * 컷 하나를 **영상으로** 뽑는 프롬프트.
  *
+ *
+ *
  * # 그림 프롬프트와 무엇이 다른가
  *
  * 그림은 **한순간**을 적습니다 — 「누가 어디에 어떤 표정으로 서 있다」. 영상은 **무엇이
@@ -403,6 +405,8 @@ export function backgroundMotionHint(composition?: CompositionState | null): str
 
 /**
  * 이 컷의 **대표 그림** — 스토리보드에 실릴 한 장.
+ *
+ *
  *
  * 대표 표시는 **그림 선반의 별(`isPrimary`)** 하나만 씁니다. 컷에만 따로 «대표 id» 를
  * 두려다 말았습니다 — 캐릭터·배경·에셋이 이미 별로 대표를 정하는데 컷만 다른 길을 쓰면,

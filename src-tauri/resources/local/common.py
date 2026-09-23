@@ -815,6 +815,47 @@ def free_vram():
     gc.collect()
 
 
+def memory_usage():
+    """캐시 정리 뒤 전체 RAM과 현재 GPU의 사용률을 잽니다. 모르는 값은 0이 아니라 None입니다."""
+    result = {"ram_used_percent": None, "vram_used_percent": None}
+    try:
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            class MemoryStatus(ctypes.Structure):
+                _fields_ = [("length", wintypes.DWORD), ("load", wintypes.DWORD)] + [
+                    (name, ctypes.c_ulonglong) for name in (
+                        "total_phys", "avail_phys", "total_page", "avail_page",
+                        "total_virtual", "avail_virtual", "avail_extended")
+                ]
+
+            status = MemoryStatus()
+            status.length = ctypes.sizeof(status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                result["ram_used_percent"] = float(status.load)
+        elif sys.platform.startswith("linux"):
+            with open("/proc/meminfo", encoding="ascii") as source:
+                values = {line.split(":", 1)[0]: int(line.split()[1]) for line in source}
+            total = values.get("MemTotal", 0)
+            available = values.get("MemAvailable")
+            if total > 0 and available is not None:
+                result["ram_used_percent"] = round(100 * (1 - available / total), 2)
+    except Exception as error:
+        log("RAM 사용률을 확인하지 못했습니다: {}".format(error))
+    try:
+        import torch
+        if torch.cuda.is_available():
+            free, total = torch.cuda.mem_get_info()
+            if total > 0:
+                result["vram_used_percent"] = round(100 * (1 - free / total), 2)
+            result["vram_allocated_bytes"] = int(torch.cuda.memory_allocated())
+            result["vram_reserved_bytes"] = int(torch.cuda.memory_reserved())
+    except Exception as error:
+        log("VRAM 사용률을 확인하지 못했습니다: {}".format(error))
+    return result
+
+
 def step_reporter(report, total_steps, base=10, span=85):
     """디퓨전 스텝을 진행률로 바꿔 주는 콜백.
 

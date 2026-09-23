@@ -19,6 +19,8 @@ import { confirmDialog } from "@/components/ConfirmDialog";
 /**
  * 세워 둔 **방들** — 고르기·더하기·지우기와 활성 방의 자리.
  *
+ *
+ *
  * # 왜 방을 나누는가 — 크게 만들면 되지 않나
  *
  * 안 됩니다. **방 크기가 곧 축척**이기 때문입니다(`roomAutoGrow` 주석). 거실과 주방을
@@ -69,7 +71,7 @@ export function RoomList({
   };
 
   /**
-   * 방을 세우고 **바로 펼칩니다**. 
+   * 방을 세우고 **바로 펼칩니다**.
    * 세우자마자 하는 일이 크기 맞추기라, 한 번 더 눌러야 열리면 손이 한 번 더 갑니다.
    */
   const addRoom = (kind: RoomKind) =>

@@ -150,7 +150,7 @@ export function enginesOf(draft: ProjectDraft): { image: BatchEngine; video: Bat
  * 시트를 뽑아야 하는 인물 — 프롬프트는 있는데 그림이 아직 없는 사람.
  *
  * `redo` 면 **이미 그림이 있어도** 셉니다. 모델을 바꿔 통째로 다시 뽑는 자리(「그림만 다시 뽑기」)가
- * 그것입니다 — 
+ * 그것입니다 —
  * 옛 그림은 지우지 않습니다. 번호가 올라가 나란히 쌓이고, 대표는 카드에서 고릅니다.
  */
 export function charactersToGenerate(draft: ProjectDraft, redo = false) {

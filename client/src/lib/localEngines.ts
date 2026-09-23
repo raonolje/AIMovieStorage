@@ -3,9 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isDesktopApp } from "@/lib/llm";
 import { isEngineIncluded } from "@/lib/edition";
+import { queueMirrorWriteAndConfirm, registerMirrorSection, whenAppSettingsReady } from "@/lib/mediaLibrary";
 
 /**
  * 로컬 생성 엔진 — 프런트 쪽.
+ *
+ *
  *
  * 살림(설치·워커·취소·제거)은 업스케일 엔진과 **같은 Rust 코드**를 씁니다
  * (`src-tauri/src/upscale.rs` 의 `Family`). 이 파일은 `upscale.ts` 와 같은 모양의
@@ -131,6 +134,8 @@ export interface LocalEngineInfo {
   priority: number;
   /**
    * **동작을 그대로 옮길 수 있는가**(컨트롤넷·포즈 조건).
+   *
+   *
    *
    * 아무 모델에나 뼈 그림을 준다고 따라 그리지 않습니다 — **그 조건을 학습한 가지**가
    * 따로 있어야 합니다. 없는 엔진에 주면 조용히 무시되고, 사람은 「왜 안 따라 하지」 를
@@ -840,9 +845,9 @@ export async function uninstallLocalEngine(id: LocalEngineId): Promise<void> {
   }
 }
 
-/** 워커를 전부 내립니다. VRAM 을 비우고 싶을 때. */
+/** 로컬 워커를 전부 종료해 해당 프로세스가 쥔 RAM·VRAM을 해제합니다. */
 export async function stopLocalWorkers(): Promise<void> {
-  if (!isDesktopApp()) return;
+  assertDesktop("로컬 워커를 종료");
   await invoke("local_stop_workers");
 }
 
@@ -972,6 +977,67 @@ export function savePrecision(value: LocalPrecision): void {
   }
 }
 
+/** 기본은 생성마다 워커를 내려 RAM·VRAM이 다음 작업까지 남지 않게 합니다. */
+export interface LocalMemoryPolicy {
+  mode: "release" | "adaptive" | "retain";
+  ramPercent: number;
+  vramPercent: number;
+}
+const DEFAULT_MEMORY_POLICY: LocalMemoryPolicy = Object.freeze({ mode: "release", ramPercent: 85, vramPercent: 85 });
+const MEMORY_POLICY_KEY = "frameforge.localMemoryPolicy.v1";
+const MEMORY_POLICY_SECTION = "localMemoryPolicy";
+const memoryPolicyListeners = new Set<() => void>();
+let memoryPolicyRaw: string | null | undefined;
+let memoryPolicyCached = DEFAULT_MEMORY_POLICY;
+function normalizeLocalMemoryPolicy(value: unknown): LocalMemoryPolicy | null {
+  // 처음 시험판이 저장한 문자열도 이어 읽습니다.
+  if (value === "release" || value === "retain") return { ...DEFAULT_MEMORY_POLICY, mode: value };
+  if (!value || typeof value !== "object") return null;
+  const policy = value as Partial<LocalMemoryPolicy>;
+  const percent = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 99;
+  if ((policy.mode !== "release" && policy.mode !== "adaptive" && policy.mode !== "retain") || !percent(policy.ramPercent) || !percent(policy.vramPercent)) return null;
+  return { mode: policy.mode, ramPercent: policy.ramPercent, vramPercent: policy.vramPercent };
+}
+function readLocalMemoryPolicy(): LocalMemoryPolicy | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const saved = window.localStorage.getItem(MEMORY_POLICY_KEY);
+    if (!saved) return null;
+    return normalizeLocalMemoryPolicy(saved === "release" || saved === "retain" ? saved : JSON.parse(saved));
+  } catch { return null; }
+}
+export function getLocalMemoryPolicy(): LocalMemoryPolicy {
+  let raw: string | null = null;
+  try { if (typeof window !== "undefined") raw = window.localStorage.getItem(MEMORY_POLICY_KEY); } catch { /* 기본 해제 */ }
+  // useSyncExternalStore의 스냅샷 참조는 값이 같을 때도 새로 만들면 안 됩니다.
+  if (raw !== memoryPolicyRaw) {
+    memoryPolicyRaw = raw;
+    memoryPolicyCached = Object.freeze(readLocalMemoryPolicy() ?? DEFAULT_MEMORY_POLICY);
+  }
+  return memoryPolicyCached;
+}
+function writeLocalMemoryPolicy(value: LocalMemoryPolicy): void {
+  const normalized = normalizeLocalMemoryPolicy(value);
+  if (!normalized) throw new Error("메모리 기준은 1~99 사이의 정수여야 합니다.");
+  window.localStorage.setItem(MEMORY_POLICY_KEY, JSON.stringify(normalized));
+  memoryPolicyListeners.forEach(listener => listener());
+}
+export function saveLocalMemoryPolicy(value: LocalMemoryPolicy): Promise<void> {
+  writeLocalMemoryPolicy(value);
+  return queueMirrorWriteAndConfirm(MEMORY_POLICY_SECTION, getLocalMemoryPolicy());
+}
+registerMirrorSection<LocalMemoryPolicy>(MEMORY_POLICY_SECTION, {
+  read: readLocalMemoryPolicy,
+  write: writeLocalMemoryPolicy,
+});
+function subscribeLocalMemoryPolicy(listener: () => void) {
+  memoryPolicyListeners.add(listener);
+  return () => { memoryPolicyListeners.delete(listener); };
+}
+export function useLocalMemoryPolicy(): LocalMemoryPolicy {
+  return useSyncExternalStore(subscribeLocalMemoryPolicy, getLocalMemoryPolicy, () => DEFAULT_MEMORY_POLICY);
+}
+
 /**
  * 이 엔진을 **지금 켜면 어떻게 올라갈까** — 워커와 같은 셈을 화면에서 미리 합니다.
  *
@@ -1068,11 +1134,13 @@ export async function runLocal(
   },
 ): Promise<LocalRunResult> {
   assertDesktop("로컬 모델로 생성");
+  await whenAppSettingsReady();
   await ensureProgressHook();
   const off = hooks?.onProgress
     ? onLocalProgress(hooks.onProgress, engine)
     : () => {};
   try {
+    const memoryPolicy = getLocalMemoryPolicy();
     const raw = await invoke<{
       output: string;
       seconds: number;
@@ -1080,7 +1148,14 @@ export async function runLocal(
     }>("local_run", {
       engine,
       outputPath,
-      opts: options,
+      // 화면·MCP·BGM 모두 이 설정 한 곳을 따릅니다. 호출자가 별도 값으로 우회하지 않습니다.
+      opts: {
+        ...options,
+        memory_policy: memoryPolicy.mode,
+        memory_ram_percent: memoryPolicy.ramPercent,
+        memory_vram_percent: memoryPolicy.vramPercent,
+        keep_worker: memoryPolicy.mode === "retain",
+      },
       timeoutSecs: hooks?.timeoutSecs,
     });
     return {
@@ -1109,6 +1184,8 @@ export interface LoraEntry {
   engine: LocalEngineId;
   /**
    * 이 로라가 **무엇을 바꾸는가**.
+   *
+   *
    *
    * 맞습니다 — **화풍 로라는 한 번에 하나**입니다. 둘을 겹치면 어느 쪽도 아닌 그림이 나오고,
    * 그게 로라 탓인지 프롬프트 탓인지 가려낼 수가 없습니다. 반면 «동작»·«질감» 은 화풍과

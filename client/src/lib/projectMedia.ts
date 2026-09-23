@@ -75,6 +75,7 @@ export function buildProjectMedia(
     // 제목이 아니라 **프로젝트 폴더 이름**입니다.
     // 제목으로 갈라 두었더니, 제목을 한 번 고치면 project.json 은 옛 폴더에,
     // 새로 뽑은 그림은 새 폴더에 남아 「프로젝트 하나 = 폴더 하나」가 깨졌습니다.
+    projectId: input.savedId || undefined,
     projectName: projectFolderName(input.savedId, input.title),
     projectContext: projectContextOf(input),
     sharedAssets: input.sharedAssets || [],

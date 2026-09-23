@@ -83,7 +83,7 @@ export function floorSizeOf(composition: CompositionState): number {
     방이 여럿이면 **전부** 담습니다(`roomsExtentOf`). 활성 방만 보면 옆방 아래에 바닥이
     없어져, 「거실에서 주방으로 걸어간다」 를 잡을 때 인물이 허공에 뜬 것처럼 보입니다.
 
-    **줄어들지는 않습니다.** 
+    **줄어들지는 않습니다.**
     5 m 방을 세우면 격자가 5 m 로 쪼그라들어, 옆에 세운 실외 100 m 방이 격자 밖으로 나가 «하늘에 뜬» 것처럼 보였습니다.
   */
   return Math.max(FLOOR_SIZE, roomsExtentOf(composition).width, floorReachOf(composition));
@@ -1127,7 +1127,7 @@ export function setBackgroundOcclusion(
  * 뒤집혀 저장됩니다). 그래서 보정을 옆 네 면에만 걸면
  * 옆면 = 뒤집힘 × 보정 = 바름, 천장·바닥 = 뒤집힘 × 거울 = 바름
  * 으로 여섯 장이 모두 맞습니다. 보정 전에는 옆면만 거울이라 모서리마다 전혀 다른
- * 경도의 그림이 맞닿았습니다 — 2026-09-09 
+ * 경도의 그림이 맞닿았습니다 — 2026-09-09
  *
  * **천장·바닥의 uv 를 같이 뒤집으면 안 됩니다.** 그러면 이미 거울인 그림이 한 번 더
  * 뒤집혀 어긋납니다. 저장 파일 쪽(`panorama.ts`)을 바로잡는 길도 있지만, 그러면

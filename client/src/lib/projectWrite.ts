@@ -113,7 +113,8 @@ export function readProject(projectId: string): ProjectDraft | null {
 const WRITE_ATTEMPTS = 3;
 
 /**
- * 쓰기의 결말. `draft` 가 있으면 **실제로 저장된 그 판**이고, 없으면 `why` 가 까닭입니다.
+ * 쓰기의 결말. `draft` 는 열린 화면에서는 적용한 판, 닫힌 작품에서는 저장한 판입니다.
+ * 파일 저장 완료까지 필요한 외부 호출은 `writeProjectAndConfirm` 을 씁니다.
  *
  * 까닭을 함께 주는 이유: 예전에는 null 하나뿐이라 부른 쪽이 «프로젝트를 못 찾았거나 다른 창이
  * 먼저 저장했습니다» 로 단정해 적었는데, 파일 쓰기 실패(`error`)·폴더에 다른 작품(`blocked`)도
@@ -121,6 +122,30 @@ const WRITE_ATTEMPTS = 3;
  * 보였습니다(2026-09-22 검토). 말하는 곳은 **부른 쪽 하나**이고, 여기는 까닭만 건넵니다.
  */
 export type WriteOutcome = { draft: ProjectDraft; why?: undefined } | { draft: null; why: string };
+
+export interface ConfirmedWriteOutcome {
+  /** 실패해도 화면에 적용한 편집은 남을 수 있습니다. 저장 여부와 따로 봅니다. */
+  draft: ProjectDraft | null;
+  persisted: boolean;
+  outcome: PersistOutcome;
+  why?: string;
+}
+
+/**
+ * 외부 조종기는 화면에 넣었다는 응답을 파일 저장 완료로 알아들으면 안 됩니다.
+ * 기존 쓰기 통로로 적용한 뒤 같은 저장 관문의 결말을 기다립니다. 실패한 편집을
+ * 임의로 되풀이하지 않습니다 — 사람이 화면에서 더 고친 값을 덮을 수 있기 때문입니다.
+ */
+export async function writeProjectAndConfirm(projectId: string, updater: Updater): Promise<ConfirmedWriteOutcome> {
+  if (!getLocalProject(projectId)) {
+    return { draft: null, persisted: false, outcome: "blocked", why: "프로젝트를 먼저 저장한 뒤 조종해 주세요." };
+  }
+  const applied = await writeProject(projectId, updater);
+  if (!applied.draft) return { ...applied, persisted: false, outcome: "blocked" };
+  const { outcome } = await saveLocalProjectAndConfirm(applied.draft, projectId);
+  if (outcome === "written" || outcome === "same") return { draft: applied.draft, persisted: true, outcome };
+  return { draft: applied.draft, persisted: false, outcome, why: whyNotWritten(outcome) };
+}
 
 /** 저장 관문의 결말을 사람 말로 — 부른 쪽이 「…에 못 붙였습니다 — {why}」 처럼 이어 적습니다. */
 function whyNotWritten(outcome: Exclude<PersistOutcome, "written" | "same">): string {
@@ -137,7 +162,7 @@ function whyNotWritten(outcome: Exclude<PersistOutcome, "written" | "same">): st
 /**
  * 프로젝트를 고칩니다. **지금 값을 받아 다음 값을 만드는 함수**여야 합니다(CLAUDE.md).
  *
- * # 돌려주는 것은 «실제로 저장된 그 판» 입니다
+ * # 돌려주는 것은 «실제로 적용한 그 판» 입니다
  *
  * 넣는 함수가 카드 id 를 **그 안에서 만듭니다**(`uid()`). 그래서 같은 함수를 밖에서 한 번
  * 더 돌려 «방금 넣은 것» 을 얻으려 하면, 글자는 같아도 **id 가 다른** 딴 물건이 나옵니다.
@@ -226,7 +251,7 @@ export async function writeProject(projectId: string, updater: Updater): Promise
  * (`LIVE_WRITE_GRACE_MS` 의 까닭).
  */
 function writeLive(live: Target, updater: Updater): Promise<ProjectDraft | null> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let settled = false;
     const abandon = () => {
       if (settled) return;
@@ -235,7 +260,16 @@ function writeLive(live: Target, updater: Updater): Promise<ProjectDraft | null>
     };
     live.abandon.add(abandon);
     live.apply((current) => {
-      const patch = updater(current);
+      let patch: Partial<ProjectDraft>;
+      try {
+        patch = updater(current);
+      } catch (error) {
+        // 생성이 끝나기 전에 사람이 대상을 지울 수 있습니다. 갱신 오류로 React 화면까지 깨뜨리면 안 됩니다.
+        settled = true;
+        live.abandon.delete(abandon);
+        reject(error);
+        return {};
+      }
       if (!settled) {
         settled = true;
         live.abandon.delete(abandon);

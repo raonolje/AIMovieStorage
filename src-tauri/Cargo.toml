@@ -6,7 +6,7 @@ authors = ["AIMovieStorage"]
 license = ""
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.88"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -70,6 +70,10 @@ tokio-tungstenite = "0.24"
 futures-util = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 dirs = "5"
+rmcp = { version = "=3.4.0", default-features = false, features = ["server", "transport-io"] }
+uuid = { version = "1", features = ["v4"] }
+fs2 = "0.4"
+tempfile = "3"
 tauri-plugin-updater = "2.12"
 tauri-plugin-process = "2.3"
 

@@ -14,6 +14,7 @@ import { PromptDialogHost } from "@/components/PromptDialog";
 import TutorialOverlay from "@/components/tutorial/TutorialOverlay";
 import { allowStorageDirectory } from "@/lib/mediaLibrary";
 import { checkForUpdate } from "@/lib/appUpdate";
+import { initializeAppControl } from "@/lib/appControl";
 
 /**
  * 화면 배치.
@@ -24,6 +25,9 @@ import { checkForUpdate } from "@/lib/appUpdate";
  */
 export default function App() {
   const [, navigate] = useLocation();
+  useEffect(() => {
+    void initializeAppControl(navigate).catch(() => undefined);
+  }, [navigate]);
   /*
     저장 폴더를 asset 프로토콜에 열어 둡니다.
 

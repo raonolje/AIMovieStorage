@@ -11,6 +11,8 @@ import type { GeneratedImageAsset, ProjectDraft } from "@/lib/projectTypes";
 /**
  * **작품 대표 그림** — 프로젝트 보드 카드에 뜨는 한 장.
  *
+ *
+ *
  * 세 가지 길을 나란히 둡니다.
  *
  * ① **아무것도 안 해도** 작품 안의 그림 한 장이 저절로 걸립니다(`coverOf`). 인물이나 장소를

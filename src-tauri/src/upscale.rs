@@ -2722,11 +2722,20 @@ pub(crate) fn generate_blocking(
     let queue = state.queue(&engine);
     let _guard = queue.lock_safe();
 
+    // 생성 결과가 파일에 놓인 뒤에도 CPU offload 가중치와 CUDA allocator는 프로세스에
+    // 남습니다. 기본은 이 작업의 자식만 종료하며, 명시적으로 유지한 경우만 재사용합니다.
+    // 큐 잠금보다 나중에 만들어야 정리가 끝난 뒤 다음 생성이 같은 엔진을 올립니다.
+    let mut release = WorkerRelease {
+        app: &app,
+        state: &state,
+        engine: &engine,
+        retain: false,
+    };
     let worker = ensure_worker(&app, &state, &engine)?;
     let request = json!({
         "op": "generate",
         "output": temp.to_string_lossy(),
-        "opts": opts,
+        "opts": &opts,
     });
     let reply = ask(&app, &state, &engine, &worker, request, timeout)?;
     if reply.get("event").and_then(|v| v.as_str()) == Some("error") {
@@ -2769,12 +2778,75 @@ pub(crate) fn generate_blocking(
         object.remove("id");
         object.remove("event");
         object.remove("output");
+        object.insert("worker_retained".into(), json!(retain_generation_worker(&opts, &reply)));
     }
+    release.retain = retain_generation_worker(&opts, &reply);
     Ok(GenerateResult {
         output: final_path.to_string_lossy().to_string(),
         seconds: started.elapsed().as_secs_f64(),
         meta,
     })
+}
+
+fn retain_generation_worker(opts: &Value, reply: &Value) -> bool {
+    // 옛 호출에서 필드가 빠졌을 때만 keep_worker를 읽습니다. 잘못된 새 정책은 해제합니다.
+    if opts.get("memory_policy").is_none() {
+        return opts.get("keep_worker").and_then(Value::as_bool) == Some(true);
+    }
+    match opts.get("memory_policy").and_then(Value::as_str) {
+        Some("retain") => true,
+        Some("adaptive") => {
+            let limit = |key: &str| opts.get(key).and_then(Value::as_f64).filter(|v|v.is_finite() && v.fract() == 0.0 && *v >= 1.0 && *v <= 99.0).unwrap_or(85.0);
+            let below = |key: &str, threshold: f64| reply.get("memory").and_then(|memory|memory.get(key)).and_then(Value::as_f64).is_some_and(|v|v.is_finite() && v >= 0.0 && v < threshold);
+            // 사용률을 읽지 못한 판을 «여유 있음» 으로 단정하면 다시 메모리가 쌓입니다.
+            below("ram_used_percent", limit("memory_ram_percent")) && below("vram_used_percent", limit("memory_vram_percent"))
+        }
+        Some(_) => false,
+        None => false,
+    }
+}
+
+struct WorkerRelease<'a> {
+    app: &'a AppHandle,
+    state: &'a UpscaleState,
+    engine: &'a str,
+    retain: bool,
+}
+
+impl Drop for WorkerRelease<'_> {
+    fn drop(&mut self) {
+        if !self.retain {
+            progress(self.app, self.engine, "run", None, "로컬 모델 메모리를 정리합니다");
+            stop_worker(self.app, self.state, self.engine);
+        }
+    }
+}
+
+#[cfg(test)]
+mod generation_memory_tests {
+    use super::retain_generation_worker;
+    use serde_json::json;
+
+    #[test]
+    fn release_is_default_for_old_and_new_callers() {
+        for opts in [json!({}), json!({"keep_worker":false}), json!({"keep_worker":"true"}), json!(null)] {
+            assert!(!retain_generation_worker(&opts, &json!({})));
+        }
+        assert!(retain_generation_worker(&json!({"keep_worker":true}), &json!({})));
+        for policy in [json!(null), json!(123), json!([]), json!({}), json!("invalid")] {
+            assert!(!retain_generation_worker(&json!({"memory_policy":policy,"keep_worker":true}), &json!({})));
+        }
+    }
+
+    #[test]
+    fn adaptive_releases_on_either_limit_and_unknown_measurement() {
+        let opts = json!({"memory_policy":"adaptive","memory_ram_percent":80,"memory_vram_percent":90});
+        assert!(retain_generation_worker(&opts, &json!({"memory":{"ram_used_percent":79,"vram_used_percent":89}})));
+        for memory in [json!({"ram_used_percent":80,"vram_used_percent":40}), json!({"ram_used_percent":40,"vram_used_percent":90}), json!({"ram_used_percent":40}), json!(null)] {
+            assert!(!retain_generation_worker(&opts, &json!({"memory":memory})));
+        }
+        assert!(!retain_generation_worker(&json!({"memory_policy":"release","keep_worker":true}), &json!({})));
+    }
 }
 
 #[cfg(test)]

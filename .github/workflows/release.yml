@@ -68,6 +68,7 @@ jobs:
           python -m pip install --quiet numpy pillow
           python src-tauri/resources/local/test_freeze_by_mask.py
           python src-tauri/resources/local/test_lora_shapes.py
+          python src-tauri/resources/local/test_memory_cleanup.py
 
   windows:
     needs: check
@@ -92,7 +93,7 @@ jobs:
       # Rust 의존성 캐시 — 600개 크레이트를 매번 처음부터 컴파일하면 20분이 넘습니다.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: src-tauri -> target/${{ env.FRAMEFORGE_EDITION }}
 
       - name: 의존성
         run: pnpm install --frozen-lockfile
@@ -176,6 +177,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') && env.FRAMEFORGE_EDITION == 'public'
         run: node scripts/updater-manifest.mjs --tag ${{ github.ref_name }}
 
+      - name: 배포할 파일 확인
+        id: artifacts
+        run: node scripts/verify-release.mjs
+
       # 태그로 시작한 공개판만 Releases 에 올립니다. 손으로 돌린 것(특히 비공개판)은 실행 결과에 붙는
       # 작업 산출물로만 남깁니다 — 비공개판을 공개 Releases 에 올리는 사고를 막기 위해서입니다.
       # 공개판 설치 파일은 이름에 «-Public» 이 들어갑니다(`AIMovieStorage-Public_<판>_x64-setup.exe` —
@@ -187,9 +192,10 @@ jobs:
           name: ${{ github.ref_name }}
           # 설치본(NSIS)과 무설치본(zip)을 함께 올립니다 — 「깔기 싫다」 는 쪽을 위해 둘 다 둡니다.
           files: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/portable/*.zip
-            src-tauri/target/release/bundle/updater/latest.json
+            ${{ steps.artifacts.outputs.installer }}
+            ${{ steps.artifacts.outputs.portable }}
+            ${{ steps.artifacts.outputs.manifest }}
+            src-tauri/target/${{ env.FRAMEFORGE_EDITION }}/release/bundle/updater/latest.json
           generate_release_notes: true
 
       - name: 작업 산출물로 남기기
@@ -198,6 +204,7 @@ jobs:
         with:
           name: aimoviestorage-${{ env.FRAMEFORGE_EDITION }}-windows
           path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/portable/*.zip
+            ${{ steps.artifacts.outputs.installer }}
+            ${{ steps.artifacts.outputs.portable }}
+            ${{ steps.artifacts.outputs.manifest }}
           if-no-files-found: error
