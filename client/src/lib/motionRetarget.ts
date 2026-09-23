@@ -11,6 +11,7 @@ import {
 } from "@/lib/motionCapture";
 import { applyBasePose, applyBonePose, boneOf } from "@/lib/rig";
 import { lockFootPlants, type FootPlantReport } from "@/lib/footPlant";
+import { retargetHands, CAPTURE_FINGER_BONES } from "@/lib/handRetarget";
 
 /**
  * 영상에서 뽑은 관절 좌표 → **우리 캐릭터 구조 그대로**의 키 값.
@@ -32,7 +33,7 @@ import { lockFootPlants, type FootPlantReport } from "@/lib/footPlant";
  * 비틀어, 인형의 접히는 축이 영상의 «어깨–팔꿈치–손목 평면» 과 맞게 한 다음 아래 마디를 돌립니다.
  */
 
-/** 키로 넣는 관절 — 편집 목록(`EDITABLE_BONES`)의 몸통·팔다리와 같습니다. 손가락은 영상에서 못 읽습니다. */
+/** 몸 33점으로 푸는 관절. 손 21점이 있으면 `retargetHands`가 손가락 30마디를 더합니다. */
 export const CAPTURE_BONES = [
   "Hips",
   "Spine",
@@ -407,7 +408,8 @@ export function retargetPerson(
     }
     previousYaw = yaw;
     const unturned = points.map((point) => point.clone().applyAxisAngle(UP, -yaw));
-    const bones = solvePose(rig, unturned, sample.world.map((point) => point.v));
+    const body = solvePose(rig, unturned, sample.world.map((point) => point.v));
+    const bones = retargetHands(rig.model, body, sample.hands, yaw);
     return {
       time: sample.time,
       root: { x: smoothX[i], y: smoothJump[i], z: smoothZ[i] },
@@ -440,7 +442,9 @@ function despikeRotations(frames: RetargetFrame[]) {
       const current = frames[i];
       const after = frames[i + 1];
       if (after.time - before.time > 0.25) continue;
-      for (const name of CAPTURE_BONES) {
+      for (const name of [...CAPTURE_BONES, ...CAPTURE_FINGER_BONES]) {
+        // 미검출 손가락을 0으로 채워 앞뒤 실측값까지 지우지 않습니다.
+        if (!current.bones[name] || !before.bones[name] || !after.bones[name]) continue;
         const a = quat(before.bones[name] ?? zero);
         const b = quat(current.bones[name] ?? zero);
         const c = quat(after.bones[name] ?? zero);

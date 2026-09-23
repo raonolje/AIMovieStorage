@@ -34,9 +34,11 @@ import { confirmDialog } from "@/components/ConfirmDialog";
 export function PlannerShotBar({
   state,
   setState,
+  onGoToShot,
 }: {
   state: CompositionState;
   setState: UpdateComposition;
+  onGoToShot?: () => void;
 }) {
   const shots = cameraShotsOf(state);
   const activeId = state.activeShotId ?? null;
@@ -144,9 +146,11 @@ export function PlannerShotBar({
                 ) : (
                   <button
                     type="button"
-                    onClick={() =>
-                      setState((current) => goToCameraShotIn(current, shot.id))
-                    }
+                    onClick={() => {
+                      onGoToShot?.();
+                      setState((current) => goToCameraShotIn(current, shot.id));
+                    }}
+                    aria-pressed={on}
                     onDoubleClick={() =>
                       setEditing({ id: shot.id, text: shot.name })
                     }

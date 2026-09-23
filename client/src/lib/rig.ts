@@ -151,7 +151,14 @@ function applyBoneDeltas(
   const euler = new THREE.Euler();
   const delta = new THREE.Quaternion();
 
-  for (const [boneName, rotation] of Object.entries(bonePose)) {
+  const entries = Object.entries(bonePose);
+  // JSON의 키 삽입 순서는 자세의 일부가 아닙니다. 월드축으로 도는 손가락은
+  // 몸·손목을 먼저 세운 뒤 부모 마디→끝 마디 순서로 걸어야 같은 자세가 재생됩니다.
+  const ordered = [
+    ...entries.filter(([name]) => !FINGER_BONE_RE.test(name)),
+    ...entries.filter(([name]) => FINGER_BONE_RE.test(name)).sort(([a], [b]) => Number(a.at(-1)) - Number(b.at(-1))),
+  ];
+  for (const [boneName, rotation] of ordered) {
     if (!rotation || (!rotation.x && !rotation.y && !rotation.z)) continue;
     const bone = boneOf(model, boneName);
     if (!bone) continue;

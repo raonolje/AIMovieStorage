@@ -72,7 +72,9 @@ import {
   type RoomFaceShell,
 } from "@/lib/compositionEdit";
 import { useUndoStack } from "@/lib/useUndoStack";
-import { useCompositionControl, type ControlledCapture } from "@/components/composition/planner/useCompositionControl";
+import { settleCompositionEditor, useCompositionControl, type ControlledCapture } from "@/components/composition/planner/useCompositionControl";
+import { createPlannerSaveSession } from "@/components/composition/planner/plannerSaveSession";
+import { useT } from "@/lib/i18n";
 import { withCompositionChangeSource, type CompositionCapture } from "@/lib/compositionControl";
 import { isTypingTarget } from "@/lib/isTypingTarget";
 import { currentTutorialPage, reportTutorialPage } from "@/lib/tutorialStore";
@@ -145,7 +147,7 @@ export interface CompositionPlannerProps {
   composition?: CompositionState;
   /** 화면 비율. 안전틀을 그립니다 */
   aspect?: number;
-  onSave: (composition: CompositionState) => void;
+  onSave: (composition: CompositionState) => void | Promise<void>;
   /**
    * 화면을 찍어 컷으로 넘깁니다 — **두 장**입니다.
    *
@@ -153,7 +155,7 @@ export interface CompositionPlannerProps {
    * 배경만** 그린 그림입니다. 생성기에는 파노라마 원본이 아니라 이 plate 를 줘야 왜곡 없이
    * 그 컷의 배경이 됩니다().
    */
-  onCapture?: (shots: { guide: string; plate: string }) => void;
+  onCapture?: (shots: { guide: string; plate: string }) => void | Promise<void>;
   /**
    * 레퍼런스 영상을 저장했을 때 — 컷이 경로와 길이를 받아 둡니다.
    *
@@ -237,6 +239,7 @@ export default function CompositionPlanner({
   onSaveRoomPreset,
   onRemoveRoomPreset,
 }: CompositionPlannerProps) {
+  const t = useT();
   /*
     ── 열려 있는 동안은 «지금 화면» 이 구도잡기 ──────────────────────────
     
@@ -272,6 +275,14 @@ export default function CompositionPlanner({
     limit: 50,
   });
   const state = history.value;
+  const currentState = useRef(state);
+  currentState.current = state;
+  const saveCallbacks = useRef({ onSave, onControlCommit, onCapture });
+  saveCallbacks.current = { onSave, onControlCommit, onCapture };
+  const [saveSession] = useState(() => ({ current: createPlannerSaveSession(state) }));
+  const uiSaving = useRef(false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [cameraRestoreRequest, setCameraRestoreRequest] = useState(0);
   const setState = history.set;
   /** 되돌리기에 안 쌓는 변경 — «사람이 한 편집» 이 아닌 것(자동 키·방 자동 맞춤). */
   const setStateRaw = history.replace;
@@ -285,7 +296,9 @@ export default function CompositionPlanner({
   useEffect(() => {
     if (open) {
       // 창을 열 때는 기록까지 비웁니다 — 지난번 작업을 되돌릴 수 있으면 안 됩니다.
-      history.reset(normalizeComposition(composition));
+      const opened = normalizeComposition(composition);
+      history.reset(opened);
+      saveSession.current.reset(opened);
       /*
         «클릭을 기다리는 모드» 는 열 때마다 꺼 둡니다.
 
@@ -638,17 +651,6 @@ export default function CompositionPlanner({
     targetNames,
   });
 
-  /** 배치 그림과 배경 플레이트를 한 번에 찍어 컷으로 넘깁니다. 성공하면 true. */
-  const captureShots = () => {
-    const capture = captureRef.current;
-    if (!capture || !onCapture) return false;
-    const guide = capture();
-    const plate = capture({ backgroundOnly: true });
-    if (!guide || !plate) return false;
-    onCapture({ guide, plate });
-    return true;
-  };
-
   const freeView = !captureAspect;
   const captureFormat = captureFormatFor(captureAspect);
   const video = useReferenceVideo({
@@ -677,15 +679,85 @@ export default function CompositionPlanner({
       ),
   });
 
-  useCompositionControl({
+  const persist = async <T,>(saved: CompositionState, write: () => Promise<T>) => {
+    setSaveBusy(true);
+    try { return await saveSession.current.persist(saved, write); }
+    finally { if (!uiSaving.current) setSaveBusy(false); }
+  };
+  const control = useCompositionControl({
     open,
     identity: cutId && projectName ? { cutId, projectName, sceneTitle, cutOrder } : null,
     history,
     context: { characterIds: characters.map(item => item.id), imageIds: media.availableBackgrounds.map(item => item.id) },
     capture: () => captureRef.current,
     stopPlayback: () => { setPlaying(false); setPreviewing(false); },
-    commit: onControlCommit,
+    commit: onControlCommit
+      ? (saved, captures) => persist(saved, () => onControlCommit(saved, captures))
+      : undefined,
   });
+
+  const requestClose = () => {
+    if (uiSaving.current || saveSession.current.saving) return;
+    void saveSession.current.requestClose(
+      () => currentState.current,
+      () => confirmDialog({
+        title: t("저장하지 않은 구도 변경을 버릴까요?"),
+        description: t("마지막으로 저장한 뒤 바꾼 내용은 사라집니다."),
+        confirmLabel: t("변경 버리고 닫기"),
+        cancelLabel: t("계속 편집"),
+        tone: "danger",
+      }),
+      () => onOpenChange(false),
+    );
+  };
+  const saveAndClose = async () => {
+    if (uiSaving.current || saveSession.current.saving) return;
+    uiSaving.current = true;
+    setSaveBusy(true);
+    const opened = saveSession.current.generation;
+    let stateSaved = false;
+    try {
+      flushSync(() => { setPlaying(false); setPreviewing(false); });
+      await settleCompositionEditor();
+      const saved = currentState.current;
+      const stamp = JSON.stringify(saved);
+      // 캡처가 실패해도 작업한 구도 자체는 먼저 파일에 남깁니다. 확인을 받기 전에는 닫지 않습니다.
+      await persist(saved, async () => { await saveCallbacks.current.onSave(saved); });
+      stateSaved = true;
+      if (saveSession.current.generation !== opened) return;
+      if (JSON.stringify(currentState.current) !== stamp) {
+        toast.message(t("저장하는 동안 구도가 바뀌었습니다. 새 변경은 계속 편집할 수 있습니다."));
+        return;
+      }
+      if (saveCallbacks.current.onControlCommit || saveCallbacks.current.onCapture) {
+        const captures = await control.capture();
+        if (JSON.stringify(currentState.current) !== stamp) {
+          toast.message(t("저장하는 동안 구도가 바뀌었습니다. 새 변경은 계속 편집할 수 있습니다."));
+          return;
+        }
+        await persist(saved, async () => {
+          // 첫 저장이 동명 프로젝트의 폴더를 바꿀 수 있어, 이전 렌더의 경로를 쥔 콜백은 쓰지 않습니다.
+          const callbacks = saveCallbacks.current;
+          if (callbacks.onControlCommit) await callbacks.onControlCommit(saved, captures);
+          else await callbacks.onCapture?.(captures);
+        });
+      }
+      if (saveSession.current.generation !== opened) return;
+      if (saveSession.current.isDirty(currentState.current)) {
+        toast.message(t("저장하는 동안 구도가 바뀌었습니다. 새 변경은 계속 편집할 수 있습니다."));
+        return;
+      }
+      onOpenChange(false);
+      toast.success(t("구도를 저장하고 컷에 넘겼습니다."));
+    } catch (error) {
+      toast.error(t(stateSaved ? "구도는 저장했지만 미리보기 저장을 끝내지 못했습니다." : "구도를 저장하지 못했습니다."), {
+        description: t(error instanceof Error ? error.message : String(error)),
+      });
+    } finally {
+      uiSaving.current = false;
+      setSaveBusy(false);
+    }
+  };
 
   // ── 구도 요약 ─────────────────────────────────────────────────────────
   const summary = useMemo(
@@ -704,7 +776,7 @@ export default function CompositionPlanner({
   const sectionToggles = { openSections, toggleSection };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => next ? onOpenChange(true) : requestClose()}>
       <DialogContent
         tutorialHolds={HOLDS_PLANNER}
         showCloseButton={false}
@@ -722,7 +794,7 @@ export default function CompositionPlanner({
             summary={summary}
             onUndo={undo}
             onRedo={redo}
-            onClose={() => onOpenChange(false)}
+            onClose={requestClose}
           />
 
           <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -793,6 +865,7 @@ export default function CompositionPlanner({
                     playheadRef={playheadRef}
                     playhead={playhead}
                     previewing={previewing}
+                    cameraRestoreRequest={cameraRestoreRequest}
                     previewingRef={previewingRef}
                     // 배경 영상을 돌릴지 멈출지 — «미리보기» 와 달리 시계가 정말 도는 동안만 참입니다.
                     playingRef={playingRef}
@@ -915,7 +988,14 @@ export default function CompositionPlanner({
                   mark={history.mark}
                 />
                 {/* 저장해 둔 구도도 «화면을 보면서» 오가는 것이라 같은 줄에 둡니다. */}
-                <PlannerShotBar state={state} setState={setState} />
+                <PlannerShotBar state={state} setState={setState} onGoToShot={() => {
+                  // 저장 좌표가 같아도 화면은 타임라인의 다른 시점을 보고 있을 수 있습니다.
+                  previewingRef.current = false;
+                  playingRef.current = false;
+                  setPlaying(false);
+                  setPreviewing(false);
+                  setCameraRestoreRequest((request) => request + 1);
+                }} />
               </PlannerViewBar>
 
               {/*
@@ -1033,19 +1113,8 @@ export default function CompositionPlanner({
                 setPanelTab={setPanelTab}
                 characterCount={plannerCharacters.length}
                 setState={setState}
-                onSave={() => {
-                  /*
-                    저장하면서 **찍어서 함께 넘깁니다.**
-
-                    
-                    저장은 «이 구도로 하겠다» 는 뜻이니 그 그림이 컷에 붙는 것이 당연합니다.
-                    «구도 캡처» 는 창을 닫지 않고 지금 화면만 다시 넘기고 싶을 때 남겨 둡니다.
-                  */
-                  captureShots();
-                  onSave(state);
-                  onOpenChange(false);
-                  toast.success("구도를 저장하고 컷에 넘겼습니다.");
-                }}
+                saving={saveBusy}
+                onSave={() => void saveAndClose()}
               />
 
               {groundPlacing && (

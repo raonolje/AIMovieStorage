@@ -69,6 +69,8 @@ jobs:
           python src-tauri/resources/local/test_freeze_by_mask.py
           python src-tauri/resources/local/test_lora_shapes.py
           python src-tauri/resources/local/test_memory_cleanup.py
+          python src-tauri/resources/local/test_image_guidance.py
+          python src-tauri/resources/local/test_mocap_hands.py
 
   windows:
     needs: check

@@ -8,6 +8,7 @@ import { assetSrc } from "@/lib/mediaLibrary";
 import { sceneFolderName } from "@/lib/projectNames";
 import { storyboardCells } from "@/lib/storyboardSheet";
 import type { ProjectDraft, SceneVideoAsset } from "@/lib/projectTypes";
+import { getLocale, localeTag, useT } from "@/lib/i18n";
 
 /**
  * 4단계 — **확인**. 만든 것을 모아 보는 자리입니다.
@@ -40,6 +41,7 @@ export default function StepFinish({
   /** 여기서 등록한 영상이 그 장면에 붙습니다. */
   onChange: (updater: (current: ProjectDraft) => Partial<ProjectDraft>) => void;
 }) {
+  const t = useT();
   const { imageMarks } = useProjectMedia();
 
   /**
@@ -56,12 +58,12 @@ export default function StepFinish({
           씬 영상만이 아니라 **컷 영상도** 모읍니다. 컷 영상은 컷 카드 안에만 있어 전체를 훑어볼 자리가 없었습니다.
         */
         // 씬 영상은 위 선반이 보여 주므로, 여기서는 **컷 영상만** 모읍니다.
-        const cutVideos: { from: string; video: SceneVideoAsset }[] = cuts.flatMap((cut) =>
-          (cut.videos || []).map((video) => ({ from: `컷 ${cut.order}`, video })),
+        const cutVideos: { from: number; video: SceneVideoAsset }[] = cuts.flatMap((cut) =>
+          (cut.videos || []).map((video) => ({ from: cut.order, video })),
         );
         return {
           id: scene.id,
-          title: scene.title || `장면 ${index + 1}`,
+          title: scene.title || t("장면 {number}", { number: index + 1 }),
           // 폴더 이름은 화면 제목이 아니라 **규칙**을 따릅니다(`projectNames`).
           folder: sceneFolderName(scene.title, index),
           index,
@@ -73,7 +75,7 @@ export default function StepFinish({
           sceneVideoCount: (scene.videos || []).length,
         };
       }),
-    [draft.scenes, imageMarks],
+    [draft.scenes, imageMarks, t],
   );
 
   const counts = {
@@ -108,7 +110,7 @@ export default function StepFinish({
         <div className="fixed inset-0 z-[9999] hidden bg-white print:block">
           <img
             src={assetSrc(printPath) || undefined}
-            alt="스토리보드"
+            alt={t("스토리보드")}
             className="h-full w-full object-contain"
           />
         </div>
@@ -135,7 +137,7 @@ export default function StepFinish({
               <div className="flex items-center gap-1.5">
                 <item.icon className="h-3 w-3" style={{ color: "oklch(0.62 0.14 290)" }} />
                 <span className="text-[10px]" style={{ color: "oklch(0.52 0.01 265)" }}>
-                  {item.label}
+                  {t(item.label)}
                 </span>
               </div>
               <p className="mt-0.5 text-lg font-bold tabular-nums text-white">{item.value}</p>
@@ -158,7 +160,7 @@ export default function StepFinish({
             className="rounded-xl px-4 py-8 text-center text-xs"
             style={{ background: "oklch(0.12 0.008 265)", color: "oklch(0.48 0.01 265)" }}
           >
-            아직 장면이 없습니다. «씬 구성» 에서 장면과 컷을 만들어 주세요.
+            {t("아직 장면이 없습니다. «씬 구성» 에서 장면과 컷을 만들어 주세요.")}
           </p>
         ) : (
           scenes.map((scene) => (
@@ -184,12 +186,12 @@ export default function StepFinish({
                   style={{ color: "oklch(0.48 0.01 265)" }}
                 >
                   {scene.storyboardPath
-                    ? `컷 ${scene.cellCount}칸${
+                    ? `${t("컷 {count}칸", { count: scene.cellCount })}${
                         scene.storyboardAt
-                          ? ` · ${new Date(scene.storyboardAt).toLocaleString()}`
+                          ? ` · ${new Date(scene.storyboardAt).toLocaleString(localeTag(getLocale()))}`
                           : ""
                       }`
-                    : `컷 ${scene.cutCount}개 · 아직 시트를 굽지 않았습니다 — «씬 구성» 에서 만듭니다`}
+                    : t("컷 {count}개 · 아직 시트를 굽지 않았습니다 — «씬 구성» 에서 만듭니다", { count: scene.cutCount })}
                 </p>
                 {scene.storyboardPath && (
                   <button
@@ -199,7 +201,7 @@ export default function StepFinish({
                     className="flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10px] font-semibold"
                     style={{ background: "oklch(1 0 0 / 6%)", color: "oklch(0.72 0.14 200)" }}
                   >
-                    <Printer className="h-3 w-3" /> 인쇄
+                    <Printer className="h-3 w-3" /> {t("인쇄")}
                   </button>
                 )}
               </div>
@@ -208,7 +210,7 @@ export default function StepFinish({
                 /* 미리보기는 공용 부품이 맡습니다 — 씬 구성 탭과 같은 규칙(공통 규칙 1). */
                 <SheetPreview
                   path={scene.storyboardPath}
-                  alt={`${scene.title} 스토리보드`}
+                  alt={t("{title} 스토리보드", { title: scene.title })}
                   maxHeight={300}
                 />
               ) : (
@@ -216,7 +218,7 @@ export default function StepFinish({
                   className="rounded-md px-4 py-6 text-center text-[11px]"
                   style={{ background: "oklch(0.11 0.007 265)", color: "oklch(0.44 0.01 265)" }}
                 >
-                  «씬 구성» 탭의 그 장면 아래에서 «스토리보드 만들기» 를 누르면 여기 뜹니다.
+                  {t("«씬 구성» 탭의 그 장면 아래에서 «스토리보드 만들기» 를 누르면 여기 뜹니다.")}
                 </p>
               )}
 
@@ -253,7 +255,7 @@ export default function StepFinish({
                     className="text-[10px] font-semibold"
                     style={{ color: "oklch(0.52 0.01 265)" }}
                   >
-                    컷 영상 {scene.cutVideos.length}개
+                    {t("컷 영상 {count}개", { count: scene.cutVideos.length })}
                   </p>
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     {scene.cutVideos.map(({ from, video }) => (
@@ -273,7 +275,7 @@ export default function StepFinish({
                               color: "oklch(0.84 0.14 45)",
                             }}
                           >
-                            {from}
+                            {t("컷 {number}", { number: from })}
                           </span>
                           <span
                             className="min-w-0 flex-1 truncate text-[10px]"

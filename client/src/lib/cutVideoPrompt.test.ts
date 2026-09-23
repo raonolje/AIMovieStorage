@@ -21,6 +21,13 @@ describe("dedupePhrases", () => {
 });
 
 describe("buildCutVideoPrompt — 질감 한 줄", () => {
+  it("레퍼런스가 있을 때만 손·피부에 인형 색을 옮기지 말라고 두 언어에 적는다", () => {
+    const input = { title: "손 인사", description: "손을 흔든다", plannedSeconds: 4 };
+    const video = buildCutVideoPrompt({ ...input, hasRefVideo: true });
+    expect(video.ko).toContain("피부·손·의상에 옮기지 말고");
+    expect(video.en).toContain("Do not transfer grey or identification colors");
+    expect(buildCutVideoPrompt(input).en).not.toContain("Do not transfer grey");
+  });
   it("연출 토글과 자동 실사가 같은 구절을 들고 와도 영문에 한 번만 실린다", () => {
     const look = "shot on a 85mm lens, natural visible pores, fine film grain";
     const made = buildCutVideoPrompt({

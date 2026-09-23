@@ -9,6 +9,7 @@ model-specific prompts, while keeping characters, 3D blocking and generated asse
 **[Download for Windows](https://github.com/raonolje/AIMovieStorage/releases/latest)** · [Installation](#installation) ·
 [Local models](#local-models-and-seedvr2) · [Claude / OpenAI APIs](#claude-and-openai-api-connections) ·
 [MCP controller preview](docs/APP_CONTROL.md) ·
+[Hand tracking preview — development branch](docs/MOCAP_HANDS.md) ·
 [Feature details](#what-it-does) · [Build from source](#build-from-source) ·
 [Report an issue](https://github.com/raonolje/AIMovieStorage/issues)
 
@@ -270,6 +271,7 @@ For the same reason a few engines are not part of this build — `edition.json` 
 **[Windows 다운로드](https://github.com/raonolje/AIMovieStorage/releases/latest)** · [설치 안내](#설치-안내) ·
 [로컬 모델](#로컬-모델과-seedvr2) · [Claude / OpenAI API](#claudeopenai-api-연결) ·
 [MCP 조종기 미리보기](docs/APP_CONTROL.md) ·
+[손 추적 미리보기 — 개발 브랜치](docs/MOCAP_HANDS.md) ·
 [기능 자세히 보기](#무엇을-해-주는가) · [소스에서 실행](#소스에서-실행) ·
 [오류 제보](https://github.com/raonolje/AIMovieStorage/issues)
 

@@ -36,9 +36,9 @@ const BASE_NEGATIVE =
 /**
  * 네거티브 칸을 쓰는 엔진인가.
  *
- * **증류판에는 네거티브가 없습니다.** 미니맥스 H3 는 `negative_prompt` 라는 입력 자체가 없어
- * **오류를 내고**, Z-Image Turbo 도 8 스텝 증류판이라 guidance 1 에서 네거티브가 아무 일도
- * 하지 않습니다(시간만 두 배). 보내지 않습니다.
+ * 미니맥스 H3 는 `negative_prompt` 입력 자체가 없습니다. 여기서 쓰는 Krea 2 Turbo 와
+ * Z-Image Turbo 는 guidance 0 으로 생성하므로 네거티브를 보내지 않습니다.
+ * 워커도 같은 모델별 제약을 지킵니다 — MCP 요청은 이 튜닝 함수를 거치지 않기 때문입니다.
  */
 const USES_NEGATIVE: Record<LocalEngineId, boolean> = {
   minimaxh3: false,

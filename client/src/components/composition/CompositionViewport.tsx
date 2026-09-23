@@ -6,6 +6,7 @@ import { TransformControls } from "three/examples/jsm/controls/TransformControls
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OUTDOOR_EYE_HEIGHT } from "@/lib/unfoldPrompt";
 import { characterColorMap } from "@/lib/compositionColors";
+import { referenceMannequinMaterials } from "@/lib/referenceMannequin";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { toast } from "sonner";
@@ -218,6 +219,8 @@ export interface CompositionViewportProps {
    */
   playhead: number;
   previewing: boolean;
+  /** 같은 저장 구도를 다시 눌러도 타임라인 미리보기에서 그 자리로 돌아갑니다. */
+  cameraRestoreRequest?: number;
   onPreviewInterrupt?: () => void;
 
   onCharacterTransform: (
@@ -604,6 +607,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
     playingRef,
     playhead,
     previewing,
+    cameraRestoreRequest = 0,
   } = props;
 
   const hostRef = useRef<HTMLDivElement>(null);
@@ -1811,6 +1815,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
       aspect: number;
       hidden: THREE.Object3D[];
       shadowAuto: boolean;
+      bodyMaterials: ReturnType<typeof referenceMannequinMaterials>;
     } | null = null;
 
     let animationFrame = 0;
@@ -1987,6 +1992,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
           aspect: camera.aspect,
           hidden: [],
           shadowAuto: renderer.shadowMap.autoUpdate,
+          bodyMaterials: referenceMannequinMaterials(),
         };
         const helper = transform.getHelper();
         if (helper.visible) {
@@ -2030,6 +2036,8 @@ export default function CompositionViewport(props: CompositionViewportProps) {
           );
         applyMotionTime(time);
         applyGlbTime(time);
+        // 식별 색은 구도 이미지에만 남깁니다. 영상 모델이 피부·손에 그 색을 복사하지 않도록 합니다.
+        videoRenderState?.bodyMaterials.apply(ctx.characterRoots.values());
         // 영상은 미리보기 루프를 거치지 않습니다. 여기서도 배경을 카메라에
         // 붙이지 않으면 무빙이 있는 컷에서 배경만 제자리에 남아 미끄러집니다.
         // 배경 흐름도 같은 까닭 — 빠뜨리면 화면에서만 흐르고 영상에는 정지 배경이 굽힙니다.
@@ -2039,6 +2047,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
       },
       end: () => {
         if (!videoRenderState) return;
+        videoRenderState.bodyMaterials.restore();
         renderer.setPixelRatio(videoRenderState.pixelRatio);
         renderer.setSize(
           videoRenderState.size.x,
@@ -2071,6 +2080,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
 
     return () => {
       cancelAnimationFrame(animationFrame);
+      videoRenderState?.bodyMaterials.restore();
       observer.disconnect();
       window.removeEventListener("keydown", keyboard.onKeyDown);
       window.removeEventListener("keyup", keyboard.onKeyUp);
@@ -3118,7 +3128,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
   */
   useEffect(() => {
     const ctx = sceneRef.current;
-    if (!ctx || previewing) return;
+    if (!ctx || !previewing) return;
     ctx.showMovesAt?.(playhead);
     // playhead 는 부모가 멈춰 있을 때만 상태로 올려 줍니다(재생 중에는 ref 로만 돕니다).
   }, [playhead, previewing]);
@@ -3144,6 +3154,24 @@ export default function CompositionViewport(props: CompositionViewportProps) {
     ctx.showMovesAt?.(playhead);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moveEditKey, previewing]);
+
+  useEffect(() => {
+    const ctx = sceneRef.current;
+    if (!ctx || cameraRestoreRequest === 0) return;
+    const saved = handlersRef.current.composition.camera;
+    // 미리보기는 저장 좌표를 바꾸지 않습니다. 좌표가 같다는 이유로 재선택을 건너뛰면 화면만 딴 곳에 남습니다.
+    const damping = ctx.controls.enableDamping;
+    ctx.controls.enableDamping = false;
+    ctx.controls.update();
+    ctx.camera.position.set(saved.position.x, saved.position.y, saved.position.z);
+    ctx.controls.target.set(saved.target.x, saved.target.y, saved.target.z);
+    ctx.camera.fov = saved.fovDegrees;
+    ctx.camera.updateProjectionMatrix();
+    ctx.controls.update();
+    ctx.controls.enableDamping = damping;
+    ctx.orbitGlide = null;
+    lastCameraPoseRef.current = { position: { ...saved.position }, target: { ...saved.target }, fovScale: 1 };
+  }, [cameraRestoreRequest]);
 
   // ── 카메라 무빙 앵커 ──────────────────────────────────────────────────
   // 기즈모를 붙이려면 이 그룹을 나중에 다시 잡아야 해서 ctx 에 보관합니다.

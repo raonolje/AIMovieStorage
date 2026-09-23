@@ -3,7 +3,8 @@ import { HOLDS_PLANNER } from "@/lib/useTutorialPanel";
 import { aspectNumberOf } from "@/components/composition/planner/PlannerChrome";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CompositionControlError, registerCompositionOpener } from "@/lib/compositionControl";
-import { writeProjectAndConfirm } from "@/lib/projectWrite";
+import { cutCompositionPatch } from "@/lib/cutCompositionSave";
+import { projectFolderName } from "@/lib/localProjectStore";
 import {
   ChevronDown,
   ChevronRight,
@@ -249,7 +250,7 @@ export default function CutCard({
   /** 튜토리얼이 「이 컷을 펴 둬라」 고 고른 것. 접힌 컷은 머리줄만 보여 자리를 못 가리킵니다. */
   tutorialOpen?: boolean;
 }) {
-  const { projectId, projectName, sharedAssets } = useProjectMedia();
+  const { projectName, sharedAssets, commitProjectChange } = useProjectMedia();
   const t = useT();
   const [open, setOpen] = useState(false);
 
@@ -372,12 +373,12 @@ export default function CutCard({
    *
    * 컷을 지워도 남아야 하고 다른 컷에서 다시 쓰는 일이 잦아 `scene-cut` 갈래에 둡니다.
    */
-  const storeCapture = async (dataUrl: string | undefined, suffix: string) => {
-    if (!dataUrl || !projectName?.trim()) return undefined;
+  const storeCapture = async (dataUrl: string | undefined, suffix: string, targetProjectName = projectName) => {
+    if (!dataUrl || !targetProjectName?.trim()) return undefined;
     const blob = await (await fetch(dataUrl)).blob();
     const file = new File([blob], `컷${cut.order}_${suffix}.png`, { type: "image/png" });
     const saved = await saveProjectMediaAsset(file, {
-      projectName,
+      projectName: targetProjectName,
       assetType: "scene-cut",
       ownerName: sceneFolderName(sceneTitle, index),
       stem: `${cutStem(sceneTitle, index, cut.order)}_${suffix}`,
@@ -2147,26 +2148,18 @@ export default function CutCard({
       <CompositionPlanner
         cutId={cut.id}
         onControlCommit={async (composition, captures) => {
-          if (!projectId) throw new CompositionControlError("project_not_saved", "프로젝트를 먼저 저장해 주세요.");
+          if (!commitProjectChange) throw new CompositionControlError("project_not_saved", "프로젝트 저장이 준비되지 않았습니다.");
+          const owner = await commitProjectChange(current => cutCompositionPatch(current, cut.id, composition));
+          // 새 프로젝트와 이름이 같은 작품이 있으면 저장소가 폴더에 번호를 붙입니다. 확정된 폴더로 그림도 보냅니다.
+          const targetProjectName = projectFolderName(owner.projectId, projectName);
           const [guideImagePath, plateImagePath] = await Promise.all([
-            storeCapture(captures.guide, "구도"),
-            storeCapture(captures.plate, "배경"),
+            storeCapture(captures.guide, "구도", targetProjectName),
+            storeCapture(captures.plate, "배경", targetProjectName),
           ]);
           if (!guideImagePath || !plateImagePath) throw new CompositionControlError("capture_save_failed", "구도와 배경 그림을 프로젝트 폴더에 모두 저장하지 못했습니다.");
-          let cutMissing = false;
-          const result = await writeProjectAndConfirm(projectId, current => {
-            const latest = current.scenes.flatMap(scene => scene.cuts).find(item => item.id === cut.id);
-            // React 갱신 안에서 예외를 던지면 편집 화면 전체가 깨집니다. 컷은 건드리지 않고 호출자에게 알립니다.
-            if (!latest) { cutMissing = true; return {}; }
-            const patch = readCompositionIntoCut(composition, { cut: latest, characters: current.characters, backgrounds: current.backgrounds }).patch;
-            return {
-              scenes: current.scenes.map(scene => ({ ...scene, cuts: scene.cuts.map(item => item.id === cut.id ? {
-                ...item, ...patch, composition, guideImage: captures.guide, plateImage: captures.plate, guideImagePath, plateImagePath,
-              } : item) })),
-            };
-          });
-          if (cutMissing) throw new CompositionControlError("cut_not_found", "저장하는 동안 컷이 삭제되었습니다.", { guideImagePath, plateImagePath });
-          if (!result.persisted) throw new CompositionControlError("persist_failed", result.why ?? "구도를 프로젝트 파일에 저장하지 못했습니다.", { guideImagePath, plateImagePath });
+          await commitProjectChange(current => cutCompositionPatch(current, cut.id, composition, {
+            guideImage: captures.guide, plateImage: captures.plate, guideImagePath, plateImagePath,
+          }));
           return { guideImagePath, plateImagePath, persisted: true };
         }}
         open={planning}
@@ -2205,23 +2198,16 @@ export default function CutCard({
         roomPresets={roomPresets}
         onSaveRoomPreset={onSaveRoomPreset}
         onRemoveRoomPreset={onRemoveRoomPreset}
-        onSave={(composition: CompositionState) => {
+        onSave={async (composition: CompositionState) => {
           // 알림 문구는 «화면에 보이던 컷» 으로 만듭니다 — 사람이 방금 본 것과 같은 말이라야 읽힙니다.
           const { notice } = readCompositionIntoCut(composition, {
             cut,
             characters,
             backgrounds,
           });
-          // 실제로 실을 값은 «지금 컷»(current)에서 다시 계산합니다. 값으로 덮어쓰면
-          // 구도를 잡는 몇 분 사이에 도착한 프롬프트 답이 지워집니다.
-          patchCut((current) => ({
-            composition,
-            ...readCompositionIntoCut(composition, {
-              cut: current,
-              characters,
-              backgrounds,
-            }).patch,
-          }));
+          // 캡처보다 먼저 구도 원본을 파일에 확정합니다. 자동 저장 예약만으로는 닫아도 된다고 말할 수 없습니다.
+          if (!commitProjectChange) throw new CompositionControlError("project_not_saved", "프로젝트 저장이 준비되지 않았습니다.");
+          await commitProjectChange(current => cutCompositionPatch(current, cut.id, composition));
           if (notice) toast.message(notice);
         }}
         onCapture={({ guide, plate }) => {

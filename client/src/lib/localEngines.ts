@@ -935,6 +935,8 @@ export interface LocalRunOptions {
   motion_mask?: string;
   /** 모션 캡처 — 분석할 영상 경로와 구간(초). `fps` 는 위의 것을 초당 장 수로 씁니다. */
   video?: string;
+  /** SAM 3D Body의 손 전용 복원. 기본 켬이며 false면 몸만 분석합니다. */
+  hands?: boolean;
   start?: number;
   end?: number;
   /**

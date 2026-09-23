@@ -16,6 +16,8 @@
 - image 는 0~1(가로·세로), world 는 **미터 · 골반 가운데 원점 · x 오른쪽 · y 아래 · z 카메라에서 멀어지는 쪽**
   (OpenCV 카메라 방향 = MediaPipe world 와 같은 방향).
 - 사람 사이 잇기는 앱이 합니다. 여기서는 장마다 찾은 사람을 전부 적습니다.
+- 손 전용 결과가 있으면 사람의 hands.left/right 에 {image: 21점, world: 21점} 을 더합니다.
+  순서는 MediaPipe Hand(손목·엄지·검지·중지·약지·소지, 각 뿌리→끝)이며 원점·단위는 몸과 같습니다.
 """
 
 import json
@@ -169,6 +171,35 @@ def to_mediapipe(points3d, points2d, conf, width, height, unit=1.0):
             round(v, 3),
         ])
     return image, world
+
+
+def to_hand_landmarks(points3d, points2d, center, width, height, unit=1.0):
+    """손에 없는 점을 0 으로 채우면 손가락이 골반 쪽으로 접힙니다. 잘못된 손은 생략합니다."""
+    try:
+        if (len(points3d) != 21 or len(points2d) != 21 or width <= 0 or height <= 0
+                or not all(math.isfinite(v) for v in (width, height, unit))):
+            return None
+        origin = [float(center[i]) for i in range(3)]
+        if not all(math.isfinite(v) for v in origin):
+            return None
+        image, world = [], []
+        for p3, p2 in zip(points3d, points2d):
+            xyz = [float(p3[i]) for i in range(3)]
+            xy = [float(p2[i]) for i in range(2)]
+            if not all(math.isfinite(v) for v in xyz + xy):
+                return None
+            # SAM 결과에는 관절별 가림 확률이 없습니다. 몸과 같은 화면 안/밖 추정값이며,
+            # 화면 밖 점은 낮게 적어 프런트가 그 마디를 적용하지 않을 수 있게 합니다.
+            v = 0.9 if 0 <= xy[0] < width and 0 <= xy[1] < height else 0.3
+            normalized = [xy[0] / width, xy[1] / height]
+            centered = [(xyz[i] - origin[i]) * unit for i in range(3)]
+            if not all(math.isfinite(value) for value in normalized + centered):
+                return None
+            image.append([round(value, 5) for value in normalized] + [v])
+            world.append([round(value, 5) for value in centered] + [v])
+        return {"image": image, "world": world}
+    except (IndexError, TypeError, ValueError, OverflowError):
+        return None
 
 
 def write_result(output, engine, width, height, duration, fps, start, end, frames):

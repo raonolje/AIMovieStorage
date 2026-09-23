@@ -75,6 +75,7 @@ export function repairPerson(person: CapturedPerson, level: RepairLevel = "norma
     image: s.image.map((p) => ({ ...p })),
     world: s.world.map((p) => ({ ...p })),
     root: s.root ? { ...s.root } : undefined,
+    hands: s.hands ? structuredClone(s.hands) : undefined,
   }));
   const count = samples.length;
   const jointCount = samples[0].world.length;
@@ -107,6 +108,9 @@ export function repairPerson(person: CapturedPerson, level: RepairLevel = "norma
           [current.image[j], current.image[r]] = [current.image[r], current.image[j]];
           [current.world[j], current.world[r]] = [current.world[r], current.world[j]];
         });
+        if (pair.left.includes(LM.leftWrist) && current.hands) {
+          [current.hands.left, current.hands.right] = [current.hands.right, current.hands.left];
+        }
         swaps += 1;
       }
     }
@@ -166,7 +170,12 @@ export function repairPerson(person: CapturedPerson, level: RepairLevel = "norma
   samples.forEach((_, i) => {
     const mainBad = MAIN_JOINTS.filter((j) => bad[i][j]).length;
     if (frameBad[i] || TORSO.some((j) => bad[i][j]) || mainBad >= MAIN_JOINTS.length / 2) frameBad[i] = true;
-    if (frameBad[i]) bad[i].fill(true);
+    if (frameBad[i]) {
+      bad[i].fill(true);
+      // 몸 전체를 앞뒤 장으로 복원할 만큼 잘못 잡힌 순간의 손도 실측값으로 쓰지 않습니다.
+      // 손 자체를 지어내어 채우지 않고, 타임라인 적용 때 기존 손 편집을 유지합니다.
+      samples[i].hands = undefined;
+    }
   });
 
   // ── 채우기: 관절마다 앞뒤의 멀쩡한 장 사이를 잇습니다 ──

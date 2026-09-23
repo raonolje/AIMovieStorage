@@ -9,7 +9,7 @@ import * as THREE from "three";
 
 import { cameraMoveId, createCameraMove, CAMERA_KEY_CHANNELS, evaluateCameraMoves, evaluateEasing, keyDefines, moveEnd, SHOT_PRESETS, sortedMoves, type CameraMove, type CameraKeyChannel, type CameraPose, type EasingCurve, type ShotPreset } from "@/lib/cameraMoves";
 import { lerpVector, segmentAt, sortByTime } from "@/lib/keyframes";
-import { EDITABLE_BONES, mergeBonePose } from "@/lib/rig";
+import { EDITABLE_BONES, FINGER_BONE_RE, mergeBonePose } from "@/lib/rig";
 import { musicSectionId } from "@/lib/composition";
 import { CameraComposition, CompositionMusic, CompositionRender, CameraShot, CompositionState, MotionChannel, MotionKey, MotionTrack, Vector3Value } from "@/lib/composition";
 import { timelineOf } from "./core";
@@ -1389,11 +1389,11 @@ export function applyCapturedMotionIn(
   let end = 0;
   for (const item of placed) {
     if (!item.frames.length || !current.characters.some((c) => c.characterId === item.characterId)) continue;
-    const from = item.frames[0].time - 0.001;
-    const to = item.frames[item.frames.length - 1].time + 0.001;
+    // 바로 바깥의 수동 키까지 오차 범위로 지우면 짧은 손 동작이 함께 사라집니다.
+    const from = item.frames[0].time;
+    const to = item.frames[item.frames.length - 1].time;
     end = Math.max(end, to);
-    const write = (channel: MotionChannel, keyOf: (frame: (typeof item.frames)[number]) => MotionKey) => {
-      const keys = item.frames.map(keyOf);
+    const write = (channel: MotionChannel, keys: MotionKey[]) => {
       const found = tracks.find((t) => t.targetId === item.characterId && t.channel === channel);
       // 이름은 **덮어씁니다** — 다른 모션을 넣었으면 레이어에도 그 이름이 떠야 합니다.
       const mark = source ? { sourceId: source.id, sourceName: source.name } : {};
@@ -1410,11 +1410,48 @@ export function applyCapturedMotionIn(
         : [...tracks, { id: cameraMoveId(), targetId: item.characterId, channel, keys, ...mark }];
     };
     if (channels.position)
-      write("position", (frame) => ({ id: cameraMoveId(), time: frame.time, value: { ...frame.position } }));
+      write("position", item.frames.map((frame) => ({ id: cameraMoveId(), time: frame.time, value: { ...frame.position } })));
     if (channels.rotation)
-      write("rotation", (frame) => ({ id: cameraMoveId(), time: frame.time, value: { ...frame.rotation } }));
-    if (channels.pose)
-      write("pose", (frame) => ({ id: cameraMoveId(), time: frame.time, value: { x: 0, y: 0, z: 0 }, bones: { ...frame.bones } }));
+      write("rotation", item.frames.map((frame) => ({ id: cameraMoveId(), time: frame.time, value: { ...frame.rotation } })));
+    if (channels.pose) {
+      const oldPose = poseTrackOf(current, item.characterId);
+      const character = current.characters.find((c) => c.characterId === item.characterId)!;
+      const captured: MotionTrack = {
+        id: "capture", targetId: item.characterId, channel: "pose", easing: oldPose?.easing,
+        keys: item.frames.map((frame, index) => ({ id: `capture-${index}`, time: frame.time, value: { x: 0, y: 0, z: 0 }, bones: frame.bones })),
+      };
+      // 몇 분짜리 캡처를 원래 키 시각마다 다시 정렬·보간하지 않도록 직접 찾습니다.
+      const capturedAt = new Map(item.frames.map((frame) => [frame.time, frame.bones]));
+      const detectedFingersAt = (time: number) => {
+        const exact = capturedAt.get(time);
+        if (exact) return new Set(Object.keys(exact).filter((name) => FINGER_BONE_RE.test(name)));
+        const segment = segmentAt(captured.keys, time)!;
+        const a = segment.from.bones ?? {}, b = segment.to.bones ?? {};
+        const names = Object.keys(segment.t >= 1 ? b : a);
+        // 한쪽 장에서 못 읽은 마디는 보간으로 지어내지 않습니다. 정확히 검출한 키는 0도도 유효합니다.
+        return new Set(names.filter((name) => FINGER_BONE_RE.test(name) && (
+          segment.from === segment.to || segment.t <= 0 || segment.t >= 1 || name in b
+        )));
+      };
+      const times = new Set(item.frames.map((frame) => frame.time));
+      const oldFingerNames = new Set(oldPose?.keys.flatMap((key) => Object.keys(key.bones ?? {}).filter((name) => FINGER_BONE_RE.test(name))) ?? []);
+      for (const key of oldPose?.keys ?? []) {
+        if (key.time < from || key.time > to) continue;
+        const detected = detectedFingersAt(key.time);
+        // 캡처 시각만 남기면 그 사이의 수동 손 키가 소실됩니다. 0도로 돌아오는 키도 포함합니다.
+        if ([...oldFingerNames].some((name) => !detected.has(name))) times.add(key.time);
+      }
+      write("pose", [...times].sort((a, b) => a - b).map((time) => {
+        const previous = (oldPose ? evaluatePoseTrack(oldPose, time) : null) ?? character.bonePose ?? {};
+        const fingers = Object.fromEntries(Object.entries(previous).filter(([name]) => FINGER_BONE_RE.test(name)));
+        const pose = capturedAt.get(time) ?? evaluatePoseTrack(captured, time) ?? {};
+        const body = Object.fromEntries(Object.entries(pose).filter(([name]) => !FINGER_BONE_RE.test(name)));
+        const detected = Object.fromEntries([...detectedFingersAt(time)].map((name) => [name, pose[name] ?? { x: 0, y: 0, z: 0 }]));
+        // 시각과 그때의 값은 보존합니다. 완급은 몸·손이 공유하므로 서로 다른 원래 곡선까지
+        // 동시에 재현하는 것은 현재 저장 형식의 범위를 벗어납니다.
+        return { id: cameraMoveId(), time, value: { x: 0, y: 0, z: 0 }, bones: { ...body, ...fingers, ...detected } };
+      }));
+    }
   }
   const next = { ...current, motionTracks: tracks };
   return end > timelineOf(current).duration ? setTimelineIn(next, { duration: Math.ceil(end * 10) / 10 }) : next;

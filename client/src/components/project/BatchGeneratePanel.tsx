@@ -8,6 +8,7 @@ import {
 } from "@/lib/batchRun";
 import { stopProjectTasks, useTaskQueue } from "@/lib/taskQueue";
 import type { ProjectDraft } from "@/lib/projectTypes";
+import { useT } from "@/lib/i18n";
 
 /**
  * **한 번에 뽑기 — 진행 상황.**
@@ -39,6 +40,7 @@ export default function BatchGeneratePanel({
   projectId: string;
   draft: ProjectDraft;
 }) {
+  const t = useT();
   const tasks = useTaskQueue();
   const mine = tasks.filter(
     (task) => task.projectId === projectId && (task.status === "running" || task.status === "waiting"),
@@ -55,10 +57,10 @@ export default function BatchGeneratePanel({
 
   const run = async () => {
     const ok = await confirmDialog({
-      title: `아직 안 뽑은 ${left}개를 순서대로 뽑을까요?`,
+      title: t("아직 안 뽑은 {count}개를 순서대로 뽑을까요?", { count: left }),
       description:
-        "인물 시트 → 컷 그림 → 스토리보드 → 씬 영상 차례로 돕니다. 이미 그림이 붙은 컷과 영상이 있는 장면은 건너뜁니다. 무엇으로 뽑을지는 주제 설정의 «AI 로 일괄 생성» 에서 고른 것을 씁니다.",
-      confirmLabel: "줄에 세우기",
+        t("인물 시트 → 컷 그림 → 스토리보드 → 씬 영상 차례로 돕니다. 이미 그림이 붙은 컷과 영상이 있는 장면은 건너뜁니다. 무엇으로 뽑을지는 주제 설정의 «AI 로 일괄 생성» 에서 고른 것을 씁니다."),
+      confirmLabel: t("줄에 세우기"),
     });
     if (!ok) return;
     startProjectGeneration(projectId, draft);
@@ -71,13 +73,13 @@ export default function BatchGeneratePanel({
       style={{ background: "oklch(0.145 0.009 265)", border: "1px solid oklch(0.62 0.22 290 / 22%)" }}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <p className="shrink-0 text-sm font-semibold">한 번에 뽑기</p>
+        <p className="shrink-0 text-sm font-semibold">{t("한 번에 뽑기")}</p>
         <p className="min-w-0 flex-1 truncate text-[11px]" style={{ color: "oklch(0.48 0.01 265)" }}>
           {mine.length
-            ? `남은 일 ${mine.length}개`
+            ? t("남은 일 {count}개", { count: mine.length })
             : left
-              ? `아직 안 뽑은 것 ${left}개`
-              : "이 작품에서 뽑을 것이 더 없습니다"}
+              ? t("아직 안 뽑은 것 {count}개", { count: left })
+              : t("이 작품에서 뽑을 것이 더 없습니다")}
         </p>
         {mine.length > 0 && (
           <button
@@ -86,7 +88,7 @@ export default function BatchGeneratePanel({
             className="flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10px] font-semibold"
             style={{ background: "oklch(1 0 0 / 6%)", color: "oklch(0.76 0.16 25)" }}
           >
-            <Square className="h-3 w-3" /> 이 작품 것 모두 멈추기
+            <Square className="h-3 w-3" /> {t("이 작품 것 모두 멈추기")}
           </button>
         )}
         {/*
@@ -97,10 +99,10 @@ export default function BatchGeneratePanel({
           <button
             type="button"
             onClick={() => void run()}
-            title="이 초안 그대로 줄에 세웁니다. 무엇으로 뽑을지는 «AI 로 일괄 생성» 에서 고른 값을 씁니다"
+            title={t("이 초안 그대로 줄에 세웁니다. 무엇으로 뽑을지는 «AI 로 일괄 생성» 에서 고른 값을 씁니다")}
             className="flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-[10px] font-semibold text-white gradient-primary"
           >
-            <Play className="h-3 w-3" /> 지금 뽑기
+            <Play className="h-3 w-3" /> {t("지금 뽑기")}
           </button>
         )}
       </div>
@@ -108,24 +110,21 @@ export default function BatchGeneratePanel({
       {mine.length > 0 ? (
         <p className="flex items-center gap-1.5 text-[10px]" style={{ color: "oklch(0.72 0.14 290)" }}>
           <Loader2 className="h-3 w-3 animate-spin" />
-          {running ? `${running.label}${running.step ? ` · ${running.step}` : ""}` : "차례를 기다리는 중"}
+          {running ? `${running.label}${running.step ? ` · ${running.step}` : ""}` : t("차례를 기다리는 중")}
         </p>
       ) : (
         done > 0 && (
           <p className="flex items-center gap-1.5 text-[10px]" style={{ color: "oklch(0.72 0.14 160)" }}>
             <Check className="h-3 w-3" />
-            {done}개를 마쳤습니다
-            {failed ? ` · ${failed}개 실패(«작업» 서랍에서 다시 할 수 있습니다)` : ""}
+            {t("{count}개를 마쳤습니다", { count: done })}
+            {failed ? ` · ${t("{count}개 실패(«작업» 서랍에서 다시 할 수 있습니다)", { count: failed })}` : ""}
           </p>
         )
       )}
 
       <p className="text-[10px] leading-relaxed" style={{ color: "oklch(0.44 0.01 265)" }}>
-        <b>인물 시트 → 컷 그림 → 스토리보드 → 씬 영상</b> 차례로 돕니다 — 앞 걸음이 뽑아 놓은
-        그림이 다음 걸음의 레퍼런스가 됩니다. <b>무엇으로 뽑을지</b>는 주제 설정의{" "}
-        <b>«AI 로 일괄 생성»</b> 에서 고릅니다(거기서 «넣고 이미지·영상까지 바로 뽑기» 를 켜면
-        만들기 한 번으로 여기까지 저절로 옵니다). <b>«지금 뽑기»</b> 는 이미 만들어 둔 작품을
-        그 설정 그대로 다시 돌릴 때 씁니다. 진행은 위쪽 <b>«작업»</b> 서랍에서 봅니다.
+        <b>{t("인물 시트 → 컷 그림 → 스토리보드 → 씬 영상")}</b>{" "}
+        {t("차례로 돕니다 — 앞 걸음에서 만든 그림이 다음 걸음의 레퍼런스가 됩니다. 생성 도구는 주제 설정의 «AI 로 일괄 생성» 에서 고릅니다. «넣고 이미지·영상까지 바로 뽑기» 를 켜면 만들기 한 번으로 여기까지 이어집니다. «지금 뽑기» 는 기존 작품을 같은 설정으로 다시 돌립니다. 진행 상황은 위쪽 «작업» 서랍에서 확인하세요.")}
       </p>
     </section>
   );

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useT } from "@/lib/i18n";
 import type { Dispatch, SetStateAction } from "react";
 import {
   Box,
@@ -314,6 +315,7 @@ export function PlannerActionBar({
   characterCount,
   setState,
   onSave,
+  saving = false,
 }: {
   /** 배경을 붙였는지, 빈 방에서 구도만 잡는지 */
   backgroundOn: boolean;
@@ -329,7 +331,9 @@ export function PlannerActionBar({
   characterCount: number;
   setState: UpdateComposition;
   onSave: () => void;
+  saving?: boolean;
 }) {
+  const t = useT();
   return (
     /*
       껍데기는 클릭을 통과시킵니다(`pointer-events-none`).
@@ -451,10 +455,11 @@ export function PlannerActionBar({
         <button
           type="button"
           onClick={onSave}
+          disabled={saving}
           data-tour="planner-save"
           className="pointer-events-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold text-white gradient-primary"
         >
-          <Save className="h-3 w-3" /> 구도 저장
+          <Save className="h-3 w-3" /> {saving ? t("저장 중…") : t("구도 저장")}
         </button>
       </div>
 

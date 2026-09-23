@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { flushSync } from "react-dom";
 import type { CompositionState } from "@/lib/composition";
 import type { UndoHistory } from "@/lib/useUndoStack";
@@ -37,6 +37,30 @@ export function useCompositionControl(options: {
 }) {
   const current = useRef(options);
   current.current = options;
+  const captureCurrent = useCallback(async () => {
+    flushSync(() => current.current.stopPlayback());
+    await settleCompositionEditor();
+    let lastError: unknown;
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      if (!current.current.open)
+        throw new CompositionControlError("session_closed", "캡처 중 구도 창이 닫혔습니다.");
+      const capture = current.current.capture();
+      if (capture) {
+        try {
+          return {
+            guide: capture({ requireReady: true }),
+            plate: capture({ backgroundOnly: true, requireReady: true }),
+          };
+        } catch (error) { lastError = error; }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new CompositionControlError(
+      "assets_not_ready", "구도 자산을 다 읽지 못해 캡처하지 않았습니다.",
+      String(lastError ?? "3D 화면 준비 중"),
+    );
+  }, []);
   useLayoutEffect(() => {
     if (options.open && options.identity)
       observeCompositionSession(options.identity);
@@ -64,36 +88,7 @@ export function useCompositionControl(options: {
       },
       // 자동 키·방 규칙도 기존 effect 한 벌이 적용합니다. 적용된 판을 읽기 전에 React와 viewport가 따라올 틈을 줍니다.
       settle: settleCompositionEditor,
-      capture: async () => {
-        flushSync(() => current.current.stopPlayback());
-        await settleCompositionEditor();
-        let lastError: unknown;
-        const deadline = Date.now() + 5000;
-        while (Date.now() < deadline) {
-          if (!current.current.open)
-            throw new CompositionControlError(
-              "session_closed",
-              "캡처 중 구도 창이 닫혔습니다.",
-            );
-          const capture = current.current.capture();
-          if (capture) {
-            try {
-              return {
-                guide: capture({ requireReady: true }),
-                plate: capture({ backgroundOnly: true, requireReady: true }),
-              };
-            } catch (error) {
-              lastError = error;
-            }
-          }
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        throw new CompositionControlError(
-          "assets_not_ready",
-          "구도 자산을 다 읽지 못해 캡처하지 않았습니다.",
-          String(lastError ?? "3D 화면 준비 중"),
-        );
-      },
+      capture: captureCurrent,
       commit: async (state, captures) => {
         const commit = current.current.commit;
         if (!commit)
@@ -105,4 +100,5 @@ export function useCompositionControl(options: {
       },
     });
   }, [options.open, options.identity?.projectName, options.identity?.cutId]);
+  return { capture: captureCurrent };
 }

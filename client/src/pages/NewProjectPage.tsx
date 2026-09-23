@@ -28,6 +28,7 @@ import {
 } from "@/lib/localProjectStore";
 import { adoptBootstrapRun } from "@/lib/bootstrapStore";
 import { registerProjectTarget } from "@/lib/projectWrite";
+import { commitOpenProjectChange, type ProjectChangeCommit } from "@/lib/projectCommit";
 import { registerCompositionProjectPage } from "@/lib/compositionControl";
 import { withoutEmptyEraRanges } from "@/lib/projectContext";
 import { buildProjectMedia, pickProjectMediaInput, projectMediaDeps } from "@/lib/projectMedia";
@@ -109,6 +110,8 @@ export default function NewProjectPage() {
     navigate("/");
   };
   const [savedId, setSavedId] = useState<string | null>(projectId ?? null);
+  const savedIdRef = useRef(savedId);
+  const adoptSavedId = (id: string) => { savedIdRef.current = id; setSavedId(id); };
   /**
    * 여태 가 본 가장 먼 단계.
    *
@@ -145,7 +148,7 @@ export default function NewProjectPage() {
       if (project) {
         const opened = openFromDisk(project);
         setDraft(opened);
-        setSavedId(project.id);
+        adoptSavedId(project.id);
         setLoaded(true);
         // 이미 만든 프로젝트를 다시 여는 것이라 전 단계를 훑은 것으로 봅니다.
         setMaxStep(STEPS.length);
@@ -255,8 +258,12 @@ export default function NewProjectPage() {
   draftRef.current = draft;
 
   const bootstrapKey = savedId ?? "새 프로젝트";
+  const registeredTargetKey = useRef(bootstrapKey);
   useEffect(
-    () => registerProjectTarget(bootstrapKey, patch, () => draftRef.current),
+    () => {
+      registeredTargetKey.current = bootstrapKey;
+      return registerProjectTarget(bootstrapKey, patch, () => draftRef.current);
+    },
     [bootstrapKey], // eslint-disable-line react-hooks/exhaustive-deps
   );
   /*
@@ -300,6 +307,7 @@ export default function NewProjectPage() {
    * 묶여서 «저장했는데 옛 내용이 저장되는» 일이 생깁니다.
    */
   const commitRef = useRef(() => {});
+  const commitChangeRef = useRef<ProjectChangeCommit>(async () => { throw new Error("프로젝트 저장이 준비되지 않았습니다."); });
   /**
    * 저장 직전에 초안을 정리합니다.
    *
@@ -314,11 +322,13 @@ export default function NewProjectPage() {
    * 자동 저장과 단계 넘기기가 같이 씁니다 — 한쪽에만 두면 「다음」 이 도장을 새로 찍습니다.
    */
   const store = (value: ProjectDraft): LocalProject => {
-    if (value === lastDisk.current && savedId) {
-      const kept = getLocalProject(savedId);
+    if (value === lastDisk.current && savedIdRef.current) {
+      const kept = getLocalProject(savedIdRef.current);
       if (kept) return kept;
     }
-    return saveLocalProject(value, savedId ?? undefined);
+    const project = saveLocalProject(value, savedIdRef.current ?? undefined);
+    if (!savedIdRef.current) adoptSavedId(project.id);
+    return project;
   };
 
   /**
@@ -429,12 +439,21 @@ export default function NewProjectPage() {
       return null;
     }
     const project = store(target);
-    if (!savedId) setSavedId(project.id);
+    if (!savedIdRef.current) adoptSavedId(project.id);
     clearDraftSnapshot();
     syncFolders(target, project.id);
     return project;
   };
   commitRef.current = () => void commit();
+  commitChangeRef.current = async (updater) => {
+    const result = await commitOpenProjectChange({
+      targetKey: () => registeredTargetKey.current,
+      projectId: () => savedIdRef.current ?? undefined,
+      adoptId: adoptSavedId,
+    }, updater);
+    clearDraftSnapshot();
+    return result;
+  };
 
   /*
     ── 저장 단추를 누를 필요가 없습니다 ───────────────────────────────────
@@ -467,7 +486,7 @@ export default function NewProjectPage() {
     delay: 1500,
     save: (value) => {
       const project = store(value);
-      if (!savedId) setSavedId(project.id);
+      if (!savedIdRef.current) adoptSavedId(project.id);
       clearDraftSnapshot();
       syncFolders(value, project.id);
     },
@@ -509,6 +528,7 @@ export default function NewProjectPage() {
     () =>
       buildProjectMedia(mediaInput, {
         commitProject: () => commitRef.current(),
+        commitProjectChange: (updater) => commitChangeRef.current(updater),
         setImageMarks: (filePath: string, marks: ImageMark[]) =>
           setDraft((current) => ({
             ...current,

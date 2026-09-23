@@ -12,6 +12,8 @@ _engine = ImageEngine(
     pipeline_name="QwenImagePipeline",
     default_steps=30,
     default_guidance=4.0,
+    guidance_parameter="true_cfg_scale",
+    negative_guidance_threshold=1.0,
     bf16_gb=24.0,
     notes="글자·세는 지시에 강함. 20B라 처음 올릴 때 오래 걸립니다.",
 )

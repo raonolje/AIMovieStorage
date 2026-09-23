@@ -41,6 +41,8 @@ import {
   type RetargetRig,
 } from "@/lib/motionRetarget";
 import { mannequinBody } from "@/lib/rig";
+import { useT } from "@/lib/i18n";
+import { HAND_CONNECTIONS } from "@/lib/handCapture";
 
 /**
  * **영상에서 모션 가져오기** 창.
@@ -125,6 +127,7 @@ export function MotionCaptureDialog({
   } | null;
   onClose: () => void;
 }) {
+  const t = useT();
   // 걸음이 이 창 밖을 가리키면 물러납니다 — 규칙은 `useTutorialPanel` 한 곳.
   useTutorialPanel({ open: true, holds: HOLDS_MOCAP, onClose });
 
@@ -381,7 +384,7 @@ export function MotionCaptureDialog({
       const scale = Math.min(width / result.width, height / result.height);
       const offsetX = (width - result.width * scale) / 2;
       const offsetY = (height - result.height * scale) / 2;
-      const mirror = selectedRef.current?.mirror ?? false;
+      const mirror = result.mirrored ?? selectedRef.current?.mirror ?? false;
       const toX = (x: number) => offsetX + (mirror ? 1 - x : x) * result.width * scale;
       const toY = (y: number) => offsetY + y * result.height * scale;
       for (const person of result.persons) {
@@ -395,6 +398,15 @@ export function MotionCaptureDialog({
           ctx.moveTo(toX(sample.image[a].x), toY(sample.image[a].y));
           ctx.lineTo(toX(sample.image[b].x), toY(sample.image[b].y));
           ctx.stroke();
+        }
+        ctx.lineWidth = 1;
+        for (const hand of [sample.hands?.left, sample.hands?.right]) {
+          if (!hand) continue;
+          for (const [a, b] of HAND_CONNECTIONS) {
+            const from = hand.image[a], to = hand.image[b];
+            if (!from || !to || from.v <= 0.3 || to.v <= 0.3) continue;
+            ctx.beginPath(); ctx.moveTo(toX(from.x), toY(from.y)); ctx.lineTo(toX(to.x), toY(to.y)); ctx.stroke();
+          }
         }
         const headX = toX(sample.image[0].x);
         const headY = toY(Math.min(sample.image[0].y, sample.image[7].y, sample.image[8].y)) - 18;
@@ -962,6 +974,12 @@ export function MotionCaptureDialog({
                     (value) => patchSource(selected.id, (current) => ({ ...current, mirror: value })),
                     "연습실 거울을 찍은 영상처럼 좌우가 뒤집힌 영상 — 분석 전에 정하세요",
                   )}
+                  {selected.engine === "sam3dbody" && checkbox(
+                    t("손가락 함께 분석"),
+                    selected.hands !== false,
+                    value => { if (!busy(selected)) patchSource(selected.id, current => ({ ...current, hands: value })); },
+                    t("SAM 3D Body의 몸과 손 복원을 함께 실행합니다. 끄면 몸만 분석합니다."),
+                  )}
                   {/*
                     분석 중에도 아래 단추를 **누를 수 있습니다.** 누르면 줄에 서고,
                     저장소가 하나씩 돌려 끝나는 대로 프로젝트 폴더에 적습니다(`lib/mocapStore.ts`).
@@ -1007,6 +1025,19 @@ export function MotionCaptureDialog({
                           ? "다시 분석"
                           : "사람 찾기 · 관절 분석"}
                     </button>
+                  )}
+                  {(selected.raw || selected.resultPath) && (
+                    <>
+                      <button type="button" disabled={busy(selected) || !desktop || !selected.path}
+                        onClick={() => enqueueMocap(projectName, selected.id, "hands")}
+                        className="w-full rounded-md px-2 py-2 text-[10px] font-semibold disabled:opacity-40"
+                        style={{ background: "oklch(1 0 0 / 6%)", color: textColor(0.85) }}>
+                        {t("손가락 추가 추적 · MediaPipe")}
+                      </button>
+                      <p className="text-[9px] leading-relaxed" style={{ color: textColor(0.5) }}>
+                        {t("기존 몸 분석의 시각에 맞춰 손 21점을 보완합니다. 가려지거나 임자가 불분명한 손은 원래 값을 유지합니다. 완료 후 타임라인에 다시 넣어 주세요.")}
+                      </p>
+                    </>
                   )}
                 </section>
 

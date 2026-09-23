@@ -5,7 +5,7 @@
 분석할 수 있게 하자 전부 다 넣어」.
 
 뒤돈 자세·가림·특이한 자세에 가장 강하다고 발표된 모델입니다(3DPW MPJPE 54.8). 한 장씩 보는 모델이라 사람 잇기·떨림 보정은
-앱이 합니다(NLF 와 같은 길). 결과 70 점(MHR70) 중 MediaPipe 33 점에 해당하는 것을 골라 보냅니다.
+앱이 합니다(NLF 와 같은 길). 결과 70 점(MHR70)을 몸 33 점과 양손 각각 21 점으로 나눠 보냅니다.
 
 # 설치에서 뺀 것과 그 까닭
 
@@ -37,6 +37,13 @@ MHR_TO_MP = {
     "left_foot_index": 15, "left_heel": 17, "right_foot_index": 18, "right_heel": 20,
     "right_thumb": 21, "right_index": 25, "right_pinky": 37, "right_wrist": 41,
     "left_thumb": 42, "left_index": 46, "left_pinky": 58, "left_wrist": 62,
+}
+
+# 고정한 원본의 metadata/mhr70.py 는 각 손가락을 끝→뿌리로 적습니다. 앱과 MediaPipe Hand 는
+# 손목→엄지·검지·중지·약지·소지, 각 뿌리→끝이므로 묶음마다 뒤집어야 합니다.
+MHR_HANDS = {
+    "right": (41, 24, 23, 22, 21, 28, 27, 26, 25, 32, 31, 30, 29, 36, 35, 34, 33, 40, 39, 38, 37),
+    "left": (62, 45, 44, 43, 42, 49, 48, 47, 46, 53, 52, 51, 50, 57, 56, 55, 54, 61, 60, 59, 58),
 }
 
 _state = {"estimator": None, "detector": None, "device": "cpu"}
@@ -129,12 +136,54 @@ def _people_boxes(rgb, threshold):
     return boxes
 
 
+def _landmarks_of(person, width, height, include_hands=True):
+    """몸과 손은 같은 축·골반 원점을 씁니다. 고장 난 손은 몸 전체를 버리지 않고 생략합니다."""
+    import numpy as np
+
+    try:
+        k3 = np.asarray(person["pred_keypoints_3d"], dtype=np.float64)
+        k2 = np.asarray(person["pred_keypoints_2d"], dtype=np.float64)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if (k3.ndim != 2 or k2.ndim != 2 or k3.shape[1] != 3 or k2.shape[1] != 2
+            or min(len(k3), len(k2)) <= 62 or width <= 0 or height <= 0):
+        return None
+    valid = np.isfinite(k3[:63]).all(axis=1) & np.isfinite(k2[:63]).all(axis=1)
+    # 원점이 망가지면 모든 관절이 NaN 이 됩니다. 이 사람만 건너뛰고 다음 사람·장은 이어갑니다.
+    if not (valid[9] and valid[10]):
+        return None
+    # 몸에서 보던 축 보정을 손에도 똑같이 씁니다. 손만 따로 뒤집으면 손목에서 비틀립니다.
+    if valid[[0, 13, 14]].all():
+        down2d = (k2[13, 1] + k2[14, 1]) / 2 - k2[0, 1]
+        down3d = (k3[13, 1] + k3[14, 1]) / 2 - k3[0, 1]
+        if down2d * down3d < 0:
+            k3 = k3 * np.array([1.0, -1.0, -1.0])
+    p3 = {name: k3[i] for name, i in MHR_TO_MP.items() if valid[i]}
+    p2 = {name: k2[i] for name, i in MHR_TO_MP.items() if valid[i]}
+    conf = {
+        name: (0.9 if 0 <= k2[i, 0] < width and 0 <= k2[i, 1] < height else 0.3)
+        for name, i in MHR_TO_MP.items() if valid[i]
+    }
+    image, world = _mocap.to_mediapipe(p3, p2, conf, width, height, unit=1.0)
+    center = (k3[9] + k3[10]) / 2
+    hands = {}
+    for side, indices in (MHR_HANDS.items() if include_hands else ()):
+        hand = _mocap.to_hand_landmarks(k3[list(indices)], k2[list(indices)], center, width, height)
+        if hand is not None:
+            hands[side] = hand
+    result = {"image": image, "world": world}
+    if hands:
+        result["hands"] = hands
+    return result
+
+
 def generate(output, opts, report):
     import numpy as np
 
     video, width, height, duration, fps, start, end = _mocap.options_of(opts)
     times = _mocap.sample_times(start, end, fps)
     estimator = _state["estimator"]
+    include_hands = opts.get("hands") is not False
     threshold = float(opts.get("detector_threshold") or 0.5)
     progress = _mocap.Progress(report, len(times))
     frames_out = []
@@ -145,30 +194,17 @@ def generate(output, opts, report):
         people = []
         if found:
             bboxes = np.array([box for box, _ in found], dtype=np.float32)
-            outputs = estimator.process_one_image(rgb, bboxes=bboxes, inference_type="body")
+            # body 도 70 점을 내지만 손 전용 decoder 는 실행하지 않습니다. 손가락을 잇는
+            # 지금은 공식 full 경로로 몸과 손을 함께 추정합니다(별도 모델을 받는 과정은 없음).
+            outputs = estimator.process_one_image(rgb, bboxes=bboxes, inference_type="full" if include_hands else "body")
             for index, person in enumerate(outputs):
-                k3 = np.asarray(person["pred_keypoints_3d"], dtype=np.float64)
-                k2 = np.asarray(person["pred_keypoints_2d"], dtype=np.float64)
-                # 좌표 방향을 2D 와 견줘 맞춥니다 — 발목이 머리보다 화면 아래(2D y 가 큼)인데 3D y 는 반대면 y·z 를 뒤집습니다.
-                # 모델이 어떤 카메라 규약으로 내는지 판마다 달라질 수 있어, 추정하지 않고 장마다 확인합니다.
-                head, feet = 0, (13, 14)
-                down2d = (k2[feet[0], 1] + k2[feet[1], 1]) / 2 - k2[head, 1]
-                down3d = (k3[feet[0], 1] + k3[feet[1], 1]) / 2 - k3[head, 1]
-                if down2d * down3d < 0:
-                    k3 = k3 * np.array([1.0, -1.0, -1.0])
-                p3 = {name: k3[i] for name, i in MHR_TO_MP.items()}
-                p2 = {name: k2[i] for name, i in MHR_TO_MP.items()}
-                conf = {}
-                for name, i in MHR_TO_MP.items():
-                    x, y = k2[i]
-                    inside = 0 <= x < width and 0 <= y < height
-                    conf[name] = 0.9 if inside else 0.3
-                image, world = _mocap.to_mediapipe(p3, p2, conf, width, height, unit=1.0)
+                points = _landmarks_of(person, width, height, include_hands=include_hands)
+                if points is None:
+                    continue
                 people.append({
-                    "image": image,
-                    "world": world,
+                    **points,
                     "score": round(found[index][1] if index < len(found) else 0.9, 3),
-                    "look": [round(v, 4) for v in _mocap.look_of(image, rgb)],
+                    "look": [round(v, 4) for v in _mocap.look_of(points["image"], rgb)],
                 })
         frames_out.append({"t": t, "people": people})
         progress.step(len(frames_out))

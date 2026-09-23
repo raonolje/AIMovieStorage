@@ -175,10 +175,10 @@ export function buildCutVideoPrompt(
 
   if (input.hasRefVideo) {
     ko.push(
-      `첨부한 레퍼런스 영상의 카메라 움직임과 타이밍을 그대로 따르세요. ${seconds.toFixed(1)}초입니다. 영상 속 회색 인형은 자리와 동작만 알려 주는 것이니, 첨부한 인물 시트의 사람으로 바꿔 그리세요.`,
+      `첨부한 레퍼런스 영상의 카메라 움직임과 타이밍을 그대로 따르세요. ${seconds.toFixed(1)}초입니다. 영상 속 인형은 자리와 동작만 알려 주는 것이니, 첨부한 인물 시트의 사람으로 바꿔 그리세요. 인형의 회색 또는 식별 색을 피부·손·의상에 옮기지 말고, 색과 재질은 인물 시트를 따르세요.`,
     );
     en.push(
-      `Follow the camera motion and timing of the attached reference video exactly. It is ${seconds.toFixed(1)} seconds long. The grey mannequins in it only mark position and action - replace them with the people from the attached character sheets.`,
+      `Follow the camera motion and timing of the attached reference video exactly. It is ${seconds.toFixed(1)} seconds long. The mannequins only mark position and action; replace them with the people from the attached character sheets. Use the sheets for skin, hands, clothing colors and materials. Do not transfer grey or identification colors from the mannequins to the people.`,
     );
   } else if (camera) {
     ko.push(`카메라: ${camera.ko}`);

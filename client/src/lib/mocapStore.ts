@@ -5,6 +5,9 @@ import {
   assetSrc,
   importProjectMediaAsset,
   saveProjectMediaAsset,
+  queueMirrorWrite,
+  queueMirrorWriteAndConfirm,
+  registerMirrorSection,
 } from "@/lib/mediaLibrary";
 import { isDesktopApp } from "@/lib/llm";
 import { mediaOwnerName } from "@/lib/projectNames";
@@ -57,6 +60,8 @@ export interface MocapSource {
   engine: string;
   fps: number;
   mirror: boolean;
+  /** SAM 3D Body의 손 전용 복원을 함께 실행합니다. 옛 저장본도 기본은 켬입니다. */
+  hands?: boolean;
   clipStart: number;
   clipEnd: number;
   status: MocapStatus;
@@ -94,7 +99,12 @@ const STORAGE_KEY = "ai-video-storage.mocap.v1";
 /** 저장할 때 빼는 것들 — blob 주소는 앱을 닫으면 죽고, 결과는 파일로 남깁니다. */
 type Saved = Omit<MocapSource, "raw" | "result" | "blobUrl" | "previewUrl"> & {
   previewUrl?: string;
+  updatedAt?: number;
+  deleted?: boolean;
 };
+type SavedIndex = Record<string, Saved[]>;
+const MOCAP_MIRROR_SECTION = "mocap-sources";
+let savedIndex: SavedIndex | null = null;
 
 let store: Store = { byProject: {} };
 const listeners = new Set<() => void>();
@@ -107,40 +117,85 @@ function emit(project: string) {
   listeners.forEach((listener) => listener());
 }
 
-function persist() {
-  try {
-    const plain: Record<string, Saved[]> = {};
-    for (const [project, sources] of Object.entries(store.byProject)) {
-      plain[project] = sources
-        // 폴더에 저장된 영상만 남깁니다 — blob 만 있는 것은 다음에 열면 못 읽습니다.
-        .filter((source) => source.path)
-        .map(({ raw: _raw, result: _result, blobUrl: _blob, previewUrl: _preview, ...rest }) => ({
-          ...rest,
-          // 진행 중이던 것은 «안 한 것» 으로 적습니다 — 앱을 껐으면 그 분석은 끝난 게 아닙니다.
-          status: rest.status === "running" || rest.status === "queued" ? "idle" : rest.status,
-          percent: 0,
-        }));
-    }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(plain));
-  } catch {
-    // 저장에 실패해도 분석은 계속됩니다 — 기록이 없을 뿐입니다.
-  }
+function withoutStamp(value: Saved): string {
+  const { updatedAt: _stamp, ...rest } = value;
+  return JSON.stringify(rest);
 }
 
-function loadSaved(): Record<string, Saved[]> {
+/** 아직 열지 않은 작품도 보존합니다. 진행률은 파일에 쓰지 않아 프레임마다 디스크가 바쁘지 않습니다. */
+function persist() {
+  const previous = loadSaved(), plain: SavedIndex = { ...previous };
+  for (const [project, sources] of Object.entries(store.byProject)) {
+    const before = new Map((previous[project] ?? []).map(source => [source.id, source]));
+    const active = sources.filter(source => source.path).map(({ raw: _raw, result: _result, blobUrl: _blob, previewUrl: _preview, ...rest }): Saved => {
+      const prior = before.get(rest.id);
+      const busy = rest.status === "running" || rest.status === "queued";
+      const next: Saved = { ...rest, status: busy ? "idle" : rest.status, percent: 0, message: busy ? "" : rest.message };
+      delete next.updatedAt; delete next.deleted;
+      return { ...next, updatedAt: prior && withoutStamp(prior) === withoutStamp(next) ? prior.updatedAt : Math.max(Date.now(), (prior?.updatedAt ?? 0) + 1) };
+    });
+    const ids = new Set(active.map(source => source.id));
+    const removed = [...before.values()].filter(source => !ids.has(source.id)).map(source => source.deleted ? source : { ...source, deleted: true, updatedAt: Math.max(Date.now(), (source.updatedAt ?? 0) + 1) });
+    plain[project] = [...active, ...removed];
+  }
+  if (JSON.stringify(previous) === JSON.stringify(plain)) return;
+  savedIndex = plain;
+  try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(plain)); } catch { /* 파일 거울은 브라우저 용량과 무관하게 저장합니다. */ }
+  queueMirrorWrite(MOCAP_MIRROR_SECTION, plain);
+}
+
+function loadSaved(): SavedIndex {
+  if (savedIndex) return savedIndex;
   try {
     const text = window.localStorage.getItem(STORAGE_KEY);
-    return text ? (JSON.parse(text) as Record<string, Saved[]>) : {};
+    savedIndex = text ? (JSON.parse(text) as SavedIndex) : {};
   } catch {
-    return {};
+    savedIndex = {};
   }
+  return savedIndex!;
 }
+
+function mergeSaved(mine: SavedIndex, theirs: SavedIndex): SavedIndex {
+  const combined: SavedIndex = {};
+  for (const project of new Set([...Object.keys(mine), ...Object.keys(theirs)])) {
+    const rows = new Map((mine[project] ?? []).map(source => [source.id, source]));
+    for (const source of theirs[project] ?? []) {
+      const previous = rows.get(source.id);
+      if (!previous || (source.updatedAt ?? 0) >= (previous.updatedAt ?? 0)) rows.set(source.id, source);
+    }
+    combined[project] = [...rows.values()];
+  }
+  return combined;
+}
+
+registerMirrorSection<SavedIndex>(MOCAP_MIRROR_SECTION, {
+  read: () => {
+    if (savedIndex) return savedIndex;
+    try { const text = window.localStorage.getItem(STORAGE_KEY); return text ? JSON.parse(text) as SavedIndex : null; } catch { return null; }
+  },
+  write: value => {
+    savedIndex = value;
+    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value)); } catch { /* 읽은 파일 값은 메모리에 남깁니다. */ }
+    for (const project of Object.keys(store.byProject)) {
+      const current = store.byProject[project];
+      const restored = (value[project] ?? []).filter(source => !source.deleted).map(source => {
+        const live = current.find(item => item.id === source.id);
+        if (live?.status === "running" || live?.status === "queued") return live;
+        const sameResult = live?.resultPath === source.resultPath;
+        return { ...source, raw: sameResult ? live?.raw ?? null : null, result: sameResult ? live?.result ?? null : null, blobUrl: live?.blobUrl ?? null, previewUrl: source.path ? assetSrc(source.path) || "" : "" };
+      });
+      store.byProject[project] = [...restored, ...current.filter(source => !source.path)];
+      emit(project);
+    }
+  },
+  merge: mergeSaved,
+});
 
 /** 그 프로젝트의 목록. 없으면 저장해 둔 기록을 읽어 세웁니다. */
 export function mocapSourcesOf(project: string): MocapSource[] {
   if (!store.byProject[project]) {
     const saved = loadSaved()[project] ?? [];
-    store.byProject[project] = saved.map((entry) => ({
+    store.byProject[project] = saved.filter(entry => !entry.deleted).map((entry) => ({
       ...entry,
       raw: null,
       result: null,
@@ -168,6 +223,7 @@ export function patchMocapSource(
   id: string,
   patch: (current: MocapSource) => MocapSource,
 ) {
+  mocapSourcesOf(project);
   const list = store.byProject[project] ?? [];
   store.byProject[project] = list.map((item) => (item.id === id ? patch(item) : item));
   emit(project);
@@ -175,12 +231,14 @@ export function patchMocapSource(
 }
 
 export function addMocapSource(project: string, source: MocapSource) {
+  mocapSourcesOf(project);
   store.byProject[project] = [...(store.byProject[project] ?? []), source];
   emit(project);
   persist();
 }
 
 export function removeMocapSource(project: string, id: string) {
+  mocapSourcesOf(project);
   store.byProject[project] = (store.byProject[project] ?? []).filter((item) => item.id !== id);
   emit(project);
   persist();
@@ -282,7 +340,7 @@ export async function loadMocapResult(
 
 // ─── 줄 서서 하나씩 ──────────────────────────────────────────────────────
 
-const queue: { project: string; id: string }[] = [];
+const queue: { project: string; id: string; kind: "body" | "hands" }[] = [];
 let running: { project: string; id: string; abort: AbortController } | null = null;
 
 
@@ -291,15 +349,17 @@ let running: { project: string; id: string; abort: AbortController } | null = nu
  *
  *
  */
-export function enqueueMocap(project: string, id: string) {
+export function enqueueMocap(project: string, id: string, kind: "body" | "hands" = "body") {
+  mocapSourcesOf(project);
   const source = (store.byProject[project] ?? []).find((item) => item.id === id);
   if (!source || source.status === "queued" || source.status === "running") return;
-  queue.push({ project, id });
+  if (kind === "hands" && !source.raw && !source.resultPath) return;
+  queue.push({ project, id, kind });
   patchMocapSource(project, id, (current) => ({
     ...current,
     status: "queued",
     percent: 0,
-    message: "차례를 기다립니다…",
+    message: kind === "hands" ? "손가락 추가 추적 차례를 기다립니다…" : "차례를 기다립니다…",
   }));
   void pump();
 }
@@ -332,9 +392,23 @@ async function pump() {
     percent: 0,
     message: "분석을 시작합니다…",
   }));
+  let stagedRaw: CaptureResult | null = null;
   try {
-    const raw = await analyzeOne(next.project, source, abort.signal);
+    if (isDesktopApp() && !source.path) throw new Error("원본 영상을 먼저 파일로 저장해 주세요. 임시 영상만으로는 앱을 다시 켠 뒤 분석을 복원할 수 없습니다.");
+    const raw = next.kind === "hands"
+      ? await analyzeHands(next.project, source, abort.signal)
+      : await analyzeOne(next.project, source, abort.signal);
+    if (abort.signal.aborted) throw new DOMException("취소", "AbortError");
     const resultPath = await saveMocapResult(next.project, source, raw);
+    if (abort.signal.aborted) throw new DOMException("취소", "AbortError");
+    if (isDesktopApp() && !resultPath) throw new Error("분석 결과를 프로젝트 폴더에 저장하지 못했습니다. 이전 분석 결과는 유지합니다.");
+    // 결과 파일만 남고 목록이 옛 경로를 가리키면 재시작 뒤 새 분석이 사라집니다.
+    // 목록 파일까지 확인하는 동안에는 완료 표시를 하지 않습니다.
+    stagedRaw = raw;
+    patchMocapSource(next.project, next.id, current => ({ ...current, raw, result: repairedCapture(raw, current.repair), resultPath }));
+    // 브라우저 시연은 기존처럼 메모리에서만 분석합니다. 설치본은 목록 파일까지 확인합니다.
+    if (isDesktopApp()) await queueMirrorWriteAndConfirm(MOCAP_MIRROR_SECTION, loadSaved());
+    if (abort.signal.aborted) throw new DOMException("취소", "AbortError");
     patchMocapSource(next.project, next.id, (current) => ({
       ...current,
       raw,
@@ -343,7 +417,7 @@ async function pump() {
       status: "done",
       percent: 100,
       analyzedAt: new Date().toISOString(),
-      message: raw.persons.length
+      message: next.kind === "hands" ? "손가락 추가 추적을 마쳤습니다. 타임라인에 넣기를 눌러 적용하세요." : raw.persons.length
         ? `사람 ${raw.persons.length}명`
         : "사람을 찾지 못했습니다. 전신이 보이는 영상인지 확인해 주세요.",
     }));
@@ -355,6 +429,7 @@ async function pump() {
     const aborted = error instanceof DOMException && error.name === "AbortError";
     patchMocapSource(next.project, next.id, (current) => ({
       ...current,
+      ...(stagedRaw && current.raw === stagedRaw ? { raw: source.raw, result: repairedCapture(source.raw, current.repair), resultPath: source.resultPath } : {}),
       status: aborted ? "idle" : "error",
       percent: 0,
       message: aborted
@@ -366,6 +441,19 @@ async function pump() {
     running = null;
     void pump();
   }
+}
+
+/** 몸 분석과 같은 줄에서 돌아야 검출기 두 개가 동시에 GPU를 점유하지 않습니다. */
+async function analyzeHands(project: string, source: MocapSource, signal: AbortSignal): Promise<CaptureResult> {
+  const raw = source.raw ?? await loadMocapResult(project, source);
+  if (!raw?.persons.length) throw new Error("먼저 몸의 관절 분석을 완료해 주세요.");
+  const url = source.blobUrl || (source.path ? assetSrc(source.path) : "");
+  if (!url) throw new Error("손을 추적할 원본 영상을 찾지 못했습니다.");
+  const { captureVideoHands } = await import("./handCapture");
+  return captureVideoHands(url, raw, {
+    signal, mirrored: raw.mirrored ?? source.mirror,
+    onProgress: (done, total) => patchMocapSource(project, source.id, current => ({ ...current, percent: total ? done / total * 100 : 0, message: `손 추적 ${done} / ${total} 장` })),
+  });
 }
 
 /** 영상 하나를 분석합니다 — 앱 안 검출기(MediaPipe) 또는 로컬 엔진. */
@@ -433,7 +521,7 @@ async function analyzeOne(
     const run = await runLocal(
       source.engine as LocalEngineId,
       output,
-      { prompt: "", video: source.path, fps: source.fps, start: source.clipStart, end },
+      { prompt: "", video: source.path, fps: source.fps, start: source.clipStart, end, hands: source.hands !== false },
       {
         onProgress: (event) => report(event.percent ?? 0, event.message || "분석 중…"),
         // 3 분짜리 곡을 초당 30 장으로 여러 명 보면 한 시간을 넘길 수 있습니다.

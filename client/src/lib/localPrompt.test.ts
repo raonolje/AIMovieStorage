@@ -23,8 +23,11 @@ describe("tuneForLocal — @태그 걷어내기", () => {
   });
 
   it("네거티브를 안 받는 엔진에는 빈 문자열을 준다", () => {
-    const krea = tuneForLocal("krea2", { en: "a portrait", negativeEn: "blurry" });
-    expect(krea.negative).toBe("");
+    for (const engine of ["krea2", "zimage"] as const) {
+      const tuned = tuneForLocal(engine, { en: "a portrait --no text", negativeEn: "blurry" });
+      expect(tuned.negative).toBe("");
+      expect(tuned.prompt).not.toContain("--no");
+    }
     const qwen = tuneForLocal("qwenimage", { en: "a portrait", negativeEn: "blurry" });
     expect(qwen.negative).toContain("blurry");
   });

@@ -24,6 +24,7 @@ _engine = ImageEngine(
     pipeline_name="Krea2Pipeline",
     default_steps=8,
     default_guidance=0.0,
+    negative_guidance_threshold=None,
     bf16_gb=32.0,
     notes="8 스텝 증류판. 화풍 로라를 겹쳐 쓰는 자리. 스텝·guidance 를 올리지 마세요.",
 )

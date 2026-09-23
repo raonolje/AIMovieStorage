@@ -69,7 +69,7 @@ export function projectMediaDeps(input: ProjectMediaInput): unknown[] {
  */
 export function buildProjectMedia(
   input: ProjectMediaInput,
-  actions: Pick<ProjectMedia, "commitProject" | "setImageMarks" | "renamePaths">,
+  actions: Pick<ProjectMedia, "commitProject" | "commitProjectChange" | "setImageMarks" | "renamePaths">,
 ): ProjectMedia {
   return {
     // 제목이 아니라 **프로젝트 폴더 이름**입니다.
@@ -80,6 +80,7 @@ export function buildProjectMedia(
     projectContext: projectContextOf(input),
     sharedAssets: input.sharedAssets || [],
     commitProject: actions.commitProject,
+    commitProjectChange: actions.commitProjectChange,
     imageMarks: input.imageMarks || {},
     setImageMarks: actions.setImageMarks,
     renamePaths: actions.renamePaths,

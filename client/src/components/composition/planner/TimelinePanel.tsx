@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useT } from "@/lib/i18n";
 import { HOLDS_MOCAP } from "@/lib/useTutorialPanel";
 import { Eye, EyeOff, X } from "lucide-react";
 import {
@@ -90,6 +91,7 @@ export function TimelinePanel({
   openSections,
   toggleSection,
 }: TimelinePanelProps) {
+  const t = useT();
   const glbInputRef = useRef<HTMLInputElement>(null);
   /** 레퍼런스 영상을 몇 초씩 잘라 뽑을지. "whole" 이면 통째로. */
   const [split, setSplit] = useState<(typeof SPLIT_OPTIONS)[number]["id"] | "music">("whole");
@@ -633,6 +635,7 @@ export function TimelinePanel({
           카메라 무빙과 GLB 애니메이션이 이 시계를 함께 따릅니다. 미리보기
           중에는 화면을 돌리면 해제됩니다. 영상에는 격자·이름표·경로선·앵커가
           나오지 않습니다.
+          {" "}{t("레퍼런스 영상의 인물은 회색으로 출력합니다. 편집 화면의 식별 색은 유지됩니다.")}
         </p>
       </PanelSection>
     </>

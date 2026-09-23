@@ -2,6 +2,7 @@ import { createContext, useContext } from "react";
 import type { ImageMark } from "@/components/ImageMarkupEditor";
 import type { VisualAsset } from "@/lib/visualAsset";
 import type { ProjectContextSummary } from "@/lib/projectContext";
+import type { ProjectChangeCommit } from "@/lib/projectCommit";
 
 /**
  * 프로젝트 편집 화면 어디서나 꺼내 쓰는 것들.
@@ -27,6 +28,8 @@ export interface ProjectMedia {
    * 실수로 X 를 눌렀을 때 방금 넣은 이미지와 프롬프트가 날아가면 안 됩니다.
    */
   commitProject: () => void;
+  /** 구도처럼 «저장됨»을 표시할 편집은 현재 초안에 적용하고 파일 쓰기까지 기다립니다. */
+  commitProjectChange?: ProjectChangeCommit;
   /**
    * 그림마다 그려 둔 표시. 열쇠는 **파일 경로**입니다.
    *

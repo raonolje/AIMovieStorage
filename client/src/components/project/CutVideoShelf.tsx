@@ -11,6 +11,7 @@ import {
   saveProjectMediaAsset,
 } from "@/lib/mediaLibrary";
 import type { SceneVideoAsset } from "@/lib/projectTypes";
+import { useT } from "@/lib/i18n";
 
 /**
  * 컷에 붙은 영상들. 밖(마그니픽·Kling·Veo)에서 뽑아 온 mp4 를 두는 자리입니다.
@@ -42,6 +43,7 @@ export default function CutVideoShelf({
   /** 튜토리얼 말풍선이 잡을 `data-tour` 이름(`tutorials/ANCHORS.md`). */
   tour?: string;
 }) {
+  const t = useT();
   const { projectName } = useProjectMedia();
   const [busy, setBusy] = useState(false);
   const [dropping, setDropping] = useState(false);
@@ -49,7 +51,7 @@ export default function CutVideoShelf({
   const add = async (files: File[]) => {
     const movies = files.filter((file) => file.type.startsWith("video/"));
     if (!movies.length) {
-      toast.error("영상 파일이 아닙니다.");
+      toast.error(t("영상 파일이 아닙니다."));
       return;
     }
     setBusy(true);
@@ -77,8 +79,8 @@ export default function CutVideoShelf({
           다음에 열었을 때 «까만 칸» 만 남습니다 — 없느니만 못합니다.
         */
         if (!saved) {
-          toast.error(`${file.name} 을 폴더에 넣지 못했습니다.`, {
-            description: "설정에서 저장 폴더를 골랐는지 확인하세요.",
+          toast.error(t("{name} 을 폴더에 넣지 못했습니다.", { name: file.name }), {
+            description: t("설정에서 저장 폴더를 골랐는지 확인하세요."),
           });
           continue;
         }
@@ -92,8 +94,8 @@ export default function CutVideoShelf({
           },
         ]);
       }
-      toast.success(`영상 ${movies.length}개를 등록했습니다.`, {
-        description: "프로젝트 폴더로 옮기면서 «장면이름_001» 로 이름을 바꿨습니다.",
+      toast.success(t("영상 {count}개를 등록했습니다.", { count: movies.length }), {
+        description: t("프로젝트 폴더로 옮기면서 «장면이름_001» 로 이름을 바꿨습니다."),
       });
     } finally {
       setBusy(false);
@@ -133,18 +135,18 @@ export default function CutVideoShelf({
   const remove = async (video: SceneVideoAsset) => {
     // 화면에서 지우면 폴더의 원본도 지웁니다 (규칙 3).
     const ok = await confirmDialog({
-      title: `${video.name} 을 지울까요?`,
+      title: t("{name} 을 지울까요?", { name: video.name }),
       description: video.filePath
-        ? "저장 폴더의 원본 파일도 함께 지워집니다. 되돌릴 수 없습니다."
-        : "목록에서 빠집니다.",
-      confirmLabel: "지우기",
+        ? t("저장 폴더의 원본 파일도 함께 지워집니다. 되돌릴 수 없습니다.")
+        : t("목록에서 빠집니다."),
+      confirmLabel: t("지우기"),
       tone: "danger",
     });
     if (!ok) return;
     onChange((current) => current.filter((item) => item.id !== video.id));
     if (video.filePath) {
       const deleted = await deleteProjectMediaFile(projectName, video.filePath);
-      if (!deleted) toast.error("폴더의 파일은 지우지 못했습니다. 직접 지워 주세요.");
+      if (!deleted) toast.error(t("폴더의 파일은 지우지 못했습니다. 직접 지워 주세요."));
     }
   };
 
@@ -161,10 +163,10 @@ export default function CutVideoShelf({
       }}
     >
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-white">{label}</p>
+        <p className="text-xs font-semibold text-white">{t(label)}</p>
         <div className="flex items-center gap-2">
           <span className="text-[10px]" style={{ color: "oklch(0.48 0.01 265)" }}>
-            {videos.length}개 등록
+            {t("{count}개 등록", { count: videos.length })}
           </span>
           {canAdd && (
             <label
@@ -174,10 +176,10 @@ export default function CutVideoShelf({
                 color: "oklch(0.80 0.14 200)",
                 opacity: busy ? 0.5 : 1,
               }}
-              title="밖에서 뽑아 온 mp4 를 골라 넣습니다. 끌어다 놓아도 됩니다"
+              title={t("밖에서 뽑아 온 mp4 를 골라 넣습니다. 끌어다 놓아도 됩니다")}
             >
               <Upload className="mr-1 inline h-3 w-3" />
-              {busy ? "넣는 중…" : "영상 불러오기"}
+              {busy ? t("넣는 중…") : t("영상 불러오기")}
               <input
                 type="file"
                 accept="video/*"
@@ -196,7 +198,7 @@ export default function CutVideoShelf({
       </div>
       {canAdd && videos.length === 0 && (
         <p className="py-3 text-center text-[10px]" style={{ color: "oklch(0.46 0.01 265)" }}>
-          아직 없습니다 — <b>영상을 여기로 끌어다 놓거나</b> «영상 불러오기» 로 넣으세요.
+          {t("아직 없습니다 — 영상을 여기로 끌어다 놓거나 «영상 불러오기» 로 넣으세요.")}
         </p>
       )}
       <div className="flex flex-wrap gap-2">
@@ -224,7 +226,7 @@ export default function CutVideoShelf({
               {/* 대표는 늘 보입니다 — 어느 것이 그 장면인지가 이 선반에서 가장 중요한 표시입니다. */}
               <button
                 type="button"
-                title={video.isPrimary ? "대표에서 내립니다" : "이 영상을 대표로"}
+                title={video.isPrimary ? t("대표에서 내립니다") : t("이 영상을 대표로")}
                 onClick={() => setPrimary(video.id)}
                 className="rounded-full p-1"
                 style={{
@@ -241,7 +243,7 @@ export default function CutVideoShelf({
             <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
               <button
                 type="button"
-                title="큰 화면으로 보기"
+                title={t("큰 화면으로 보기")}
                 onClick={() => setBig(video)}
                 className="rounded-full p-1"
                 style={{ background: "oklch(0 0 0 / 72%)", color: "white" }}
@@ -251,7 +253,7 @@ export default function CutVideoShelf({
               {video.filePath && (
                 <button
                   type="button"
-                  title="폴더 열기"
+                  title={t("폴더 열기")}
                   onClick={() => void revealFile(video.filePath)}
                   className="rounded-full p-1"
                   style={{ background: "oklch(0 0 0 / 72%)", color: "white" }}
@@ -261,7 +263,7 @@ export default function CutVideoShelf({
               )}
               <button
                 type="button"
-                title="지우기"
+                title={t("지우기")}
                 onClick={() => void remove(video)}
                 className="rounded-full p-1"
                 style={{ background: "oklch(0 0 0 / 72%)", color: "oklch(0.78 0.16 25)" }}
@@ -310,7 +312,7 @@ export default function CutVideoShelf({
                 color: big.isPrimary ? "oklch(0.86 0.16 85)" : "oklch(0.70 0.01 265)",
               }}
             >
-              {big.isPrimary ? "대표에서 내리기" : "대표로 정하기"}
+              {big.isPrimary ? t("대표에서 내리기") : t("대표로 정하기")}
             </button>
             <button
               type="button"
@@ -318,7 +320,7 @@ export default function CutVideoShelf({
               className="rounded px-2 py-1 text-[10px]"
               style={{ background: "oklch(1 0 0 / 10%)", color: "oklch(0.70 0.01 265)" }}
             >
-              닫기
+              {t("닫기")}
             </button>
           </div>
         </div>

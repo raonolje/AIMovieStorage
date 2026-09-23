@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """그림 엔진 셋이 함께 쓰는 몸통 — diffusers 파이프라인 하나를 올리고 한 장 뽑습니다.
 
-세 엔진(Qwen-Image·FLUX.1 Krea·SD 3.5 Large)은 **모델 id 와 파이프라인 클래스만**
-다릅니다. 여기 한 군데에 몸통을 두는 까닭은 앱 규칙 1 과 같습니다 — 셋으로 흩어 두면
+세 엔진(Qwen-Image·Krea 2 Turbo·Z-Image Turbo)의 모델과 생성 규칙을 인자로 받습니다.
+여기 한 군데에 몸통을 두는 까닭은 앱 규칙 1 과 같습니다 — 셋으로 흩어 두면
 「로라를 여러 개 먹이기」 나 「시드를 돌려주기」 같은 규칙을 고칠 때 하나를 빠뜨립니다.
 
 로라를 여러 개 먹이는 법(diffusers 규약)
@@ -27,11 +27,17 @@ class ImageEngine(object):
         default_guidance,
         notes="",
         bf16_gb=24.0,
+        guidance_parameter="guidance_scale",
+        negative_guidance_threshold=None,
     ):
         self.repo = repo
         self.pipeline_name = pipeline_name
         self.default_steps = default_steps
         self.default_guidance = default_guidance
+        # 파이프라인 이름만으로는 증류판 여부를 모릅니다. None 은 네거티브를 쓰지 않는 모델,
+        # 숫자는 그보다 큰 guidance 에서 네거티브를 쓰는 모델입니다(Qwen 은 > 1).
+        self.guidance_parameter = guidance_parameter
+        self.negative_guidance_threshold = negative_guidance_threshold
         self.notes = notes
         # 이 모델을 bf16 그대로 올리는 데 필요한 VRAM(GB). 정밀도를 고르는 잣대입니다.
         self.bf16_gb = bf16_gb
@@ -148,7 +154,8 @@ class ImageEngine(object):
     def generate(self, output, opts, report):
         started = time.time()
         steps = int(opts.get("steps") or self.default_steps)
-        guidance = float(opts.get("guidance") or self.default_guidance)
+        requested_guidance = opts.get("guidance")
+        guidance = float(self.default_guidance if requested_guidance is None else requested_guidance)
         width = int(opts.get("width") or 1536)
         height = int(opts.get("height") or 864)
         seed = common.resolve_seed(opts)
@@ -161,12 +168,13 @@ class ImageEngine(object):
             "generator": common.generator(seed),
             "callback_on_step_end": common.step_reporter(report, steps),
         }
-        # 네거티브를 받지 않는 파이프라인이 있어 있을 때만 넣습니다.
+        # 0 을 생략하면 Krea2Pipeline 의 기본값 4.5 가 다시 켜집니다. 빈 네거티브만으로도
+        # CFG 가 돌기 때문에 네거티브를 거르는 것만으로는 증류판의 생성 조건을 지킬 수 없습니다.
+        kwargs[self.guidance_parameter] = guidance
         negative = (opts.get("negative") or "").strip()
-        if negative:
+        if self.negative_guidance_threshold is not None and guidance > self.negative_guidance_threshold:
+            # Qwen 은 빈 문자열도 필요합니다. None 으로 생략하면 요청한 CFG 자체가 꺼집니다.
             kwargs["negative_prompt"] = negative
-        if guidance > 0:
-            kwargs["true_cfg_scale" if self.pipeline_name.startswith("QwenImage") else "guidance_scale"] = guidance
 
         """
         **긴 프롬프트가 조용히 잘리던 것.**

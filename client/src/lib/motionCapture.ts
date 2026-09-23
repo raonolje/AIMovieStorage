@@ -21,6 +21,14 @@ export interface CapturePoint {
   v: number;
 }
 
+/** 손목 + 엄지부터 새끼까지 각 네 점. MediaPipe Hand Landmarker의 21점 순서입니다. */
+export interface CaptureHand {
+  image: CapturePoint[];
+  /** 몸과 같은 축입니다. 원점은 검출기마다 달라 방향 차이만 리타깃에 씁니다. */
+  world: CapturePoint[];
+}
+export interface CaptureHands { left?: CaptureHand; right?: CaptureHand }
+
 /** 한 사람의 한 순간. */
 export interface CaptureSample {
   /** 영상 안의 초. */
@@ -29,6 +37,8 @@ export interface CaptureSample {
   image: CapturePoint[];
   /** 33점 — 미터 좌표. */
   world: CapturePoint[];
+  /** 손을 실제로 찾은 쪽만 있습니다. 33점 몸 좌표로 손가락을 지어내지 않습니다. */
+  hands?: CaptureHands;
   /**
    * 엔진이 직접 복원한 **실제 이동 자리**(미터, 첫 장 카메라 좌표: x 오른쪽 · y 아래 · z 멀어지는 쪽).
    * GVHMR 처럼 카메라가 움직여도 땅 위 경로를 푸는 엔진만 줍니다. 있으면 리타깃이 화면 속 자리로 짐작하지 않고 이것을 씁니다.
@@ -56,6 +66,8 @@ export interface CaptureResult {
   end: number;
   /** 뽑은 검출기 id — `mediapipe` 또는 로컬 엔진 id. */
   engine: string;
+  /** 분석 때 적용한 좌우 반전. 나중에 손만 다시 읽을 때 같은 좌표계를 씁니다. */
+  mirrored?: boolean;
   persons: CapturedPerson[];
 }
 
@@ -213,6 +225,7 @@ interface Track {
 export interface FrameDetection {
   image: CapturePoint[];
   world: CapturePoint[];
+  hands?: CaptureHands;
   /** 0~1. 같은 사람을 두 번 잡았을 때 어느 쪽을 남길지. */
   score: number;
   /** 옷 색 여섯 숫자(`lookOf`). 모르면 빈 배열 — 그때는 자리만으로 잇습니다. */
@@ -349,13 +362,13 @@ export class PersonTracker {
       if (detection.look.length === track.look.length)
         track.look = track.look.map((value, i) => value * 0.9 + detection.look[i] * 0.1);
       track.lastTime = time;
-      track.samples.push({ time, image: detection.image, world: detection.world, root: detection.root });
+      track.samples.push({ time, image: detection.image, world: detection.world, root: detection.root, hands: detection.hands });
     }
     detections.forEach((detection, di) => {
       // 따라가던 자리에서 나온 결과가 짝을 못 찾았으면 새 사람으로 세우지 않습니다 — 대개 옆 사람을 잘못 본 것입니다.
       if (usedDetections.has(di) || (detection.from !== null && detection.from !== undefined)) return;
       this.active.push({
-        samples: [{ time, image: detection.image, world: detection.world, root: detection.root }],
+        samples: [{ time, image: detection.image, world: detection.world, root: detection.root, hands: detection.hands }],
         lastTime: time,
         anchor: detection.anchor,
         velocity: { x: 0, y: 0 },
@@ -584,6 +597,7 @@ export async function captureVideo(
     start,
     end,
     engine: "mediapipe",
+    mirrored: Boolean(options.mirror),
     persons: tracker.finish(options.fps, Math.max(1 / options.fps, end - start)),
   };
 }
@@ -610,13 +624,27 @@ export function assembleCapture(file: {
   mirror?: boolean;
   frames: {
     t: number;
-    people: { image: number[][]; world: number[][]; score?: number; look?: number[]; root?: number[] }[];
+    people: {
+      image: number[][]; world: number[][]; score?: number; look?: number[]; root?: number[];
+      hands?: { left?: { image: number[][]; world: number[][] }; right?: { image: number[][]; world: number[][] } };
+    }[];
   }[];
 }): CaptureResult {
   const aspect = file.width / Math.max(1, file.height);
   const tracker = new PersonTracker(aspect);
   const toImage = (rows: number[][]) => rows.map(([x, y, v]) => ({ x, y, z: 0, v: v ?? 1 }));
   const toWorld = (rows: number[][]) => rows.map(([x, y, z, v]) => ({ x, y, z, v: v ?? 1 }));
+  const readHand = (raw: { image: number[][]; world: number[][] } | undefined): CaptureHand | undefined => {
+    if (!raw || raw.image?.length !== 21 || raw.world?.length !== 21) return undefined;
+    if (!raw.image.every((p) => p.length >= 2 && p.slice(0, 3).every(Number.isFinite)) ||
+        !raw.world.every((p) => p.length >= 3 && p.slice(0, 4).every(Number.isFinite))) return undefined;
+    const image = toImage(raw.image);
+    const world = toWorld(raw.world);
+    return file.mirror ? {
+      image: image.map((p) => ({ ...p, x: 1 - p.x })),
+      world: world.map((p) => ({ ...p, x: -p.x })),
+    } : { image, world };
+  };
   for (const frame of file.frames) {
     tracker.retire(frame.t);
     tracker.update(
@@ -630,8 +658,11 @@ export function assembleCapture(file: {
             image = MIRROR_INDEX.map((j) => ({ ...image[j], x: 1 - image[j].x }));
             world = MIRROR_INDEX.map((j) => ({ ...world[j], x: -world[j].x }));
           }
-          const root = person.root?.length === 3 ? { x: person.root[0], y: person.root[1], z: person.root[2] } : undefined;
-          return { image, world, root, score: person.score ?? 1, look: person.look ?? [], from: null };
+          const root = person.root?.length === 3 ? { x: person.root[0] * (file.mirror ? -1 : 1), y: person.root[1], z: person.root[2] } : undefined;
+          const left = readHand(file.mirror ? person.hands?.right : person.hands?.left);
+          const right = readHand(file.mirror ? person.hands?.left : person.hands?.right);
+          const hands = left || right ? { left, right } : undefined;
+          return { image, world, root, hands, score: person.score ?? 1, look: person.look ?? [], from: null };
         }),
     );
   }
@@ -645,6 +676,7 @@ export function assembleCapture(file: {
     start,
     end,
     engine: file.engine ?? "",
+    mirrored: Boolean(file.mirror),
     persons: tracker.finish(file.fps, Math.max(1 / file.fps, end - start)),
   };
 }
@@ -732,7 +764,22 @@ export function smoothSamples(samples: CaptureSample[], level: SmoothingLevel = 
   return pieces.flatMap((piece) => {
     const image = filter(piece, (s) => s.image);
     const world = filter(piece, (s) => s.world);
-    return piece.map((sample, i) => ({ time: sample.time, image: image[i], world: world[i], root: sample.root }));
+    const output = piece.map((sample, i) => ({ ...sample, image: image[i], world: world[i], hands: sample.hands ? { ...sample.hands } : undefined }));
+    // 손은 미검출 구간을 넘어 섞지 않습니다. 몸만 보이는 장에 손 데이터를 만들어 넣지 않습니다.
+    for (const side of ["left", "right"] as const) {
+      let start = 0;
+      while (start < piece.length) {
+        if (!piece[start].hands?.[side]) { start += 1; continue; }
+        let end = start + 1;
+        while (end < piece.length && piece[end].hands?.[side]) end += 1;
+        const run = piece.slice(start, end);
+        const images = filter(run, (s) => s.hands![side]!.image);
+        const worlds = filter(run, (s) => s.hands![side]!.world);
+        for (let i = start; i < end; i += 1) output[i].hands![side] = { image: images[i - start], world: worlds[i - start] };
+        start = end;
+      }
+    }
+    return output;
   });
 }
 
