@@ -1,26 +1,27 @@
 import type { CompositionState } from "@/lib/composition";
+import { sameImmutableJson } from "@/lib/immutableJson";
 
 /** 되돌리기 기록 수가 아니라 실제 저장한 판과 견줍니다. 저장 뒤 undo하면 다시 미저장 상태입니다. */
 export function createPlannerSaveSession(initial: CompositionState) {
-  let baseline = JSON.stringify(initial);
+  let baseline = initial;
   let generation = 0;
   let saving = false;
   let asking = false;
   return {
     reset(value: CompositionState) {
-      baseline = JSON.stringify(value);
+      baseline = value;
       generation += 1;
       asking = false;
     },
     isDirty(value: CompositionState) {
-      return JSON.stringify(value) !== baseline;
+      return !sameImmutableJson(value, baseline);
     },
     get saving() { return saving; },
     get generation() { return generation; },
     async persist<T>(value: CompositionState, write: () => Promise<T>): Promise<T> {
       if (saving) throw new Error("구도를 저장하고 있습니다. 잠시 기다려 주세요.");
       const opened = generation;
-      const saved = JSON.stringify(value);
+      const saved = value;
       saving = true;
       try {
         const result = await write();
@@ -34,7 +35,7 @@ export function createPlannerSaveSession(initial: CompositionState) {
       const opened = generation;
       asking = true;
       try {
-        if (JSON.stringify(read()) !== baseline && !(await confirm())) return false;
+        if (!sameImmutableJson(read(), baseline) && !(await confirm())) return false;
         if (generation !== opened || saving) return false;
         close();
         return true;

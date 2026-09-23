@@ -3,6 +3,8 @@ import { toast } from "sonner";
 import { migrateProjectLayout, whenAppSettingsReady } from "@/lib/mediaLibrary";
 import { applyMovedPaths } from "@/lib/ownerFolders";
 import { PROJECT_SCHEMA_VERSION, migrateSavedProject, schemaVersionOf } from "@/lib/projectMigrate";
+import { sameImmutableJson } from "@/lib/immutableJson";
+import { createProjectSerializer } from "@/lib/projectSerialization";
 import {
   canUseProjectFiles,
   PROJECT_FILE_NAME,
@@ -81,6 +83,9 @@ function readLocalStorage(): LocalProject[] {
 function writeLocalStorage(projects: LocalProject[]) {
   if (typeof window === "undefined") return;
   try {
+    // 파일 이행 뒤에는 디스크가 본체입니다. 수백 MB 전체를 quota 실패 전에 복제하지 않습니다.
+    // 옛 거울은 삭제·요약 덮어쓰기하지 않아 최초 이행 입력과 브라우저 실행을 보존합니다.
+    if (canUseProjectFiles() && window.localStorage.getItem(MIGRATED_KEY)) return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
   } catch {
     // 용량 초과 등으로 실패해도 파일 저장이 본체이므로 넘어갑니다.
@@ -94,14 +99,7 @@ function makeId(): string {
   return globalThis.crypto?.randomUUID?.() || `project-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function toSerializableDraft(draft: DraftLike): Record<string, unknown> {
-  // File 객체와 blob URL 은 다음 실행에서 쓸 수 없으므로 저장하지 않습니다.
-  return JSON.parse(JSON.stringify(draft, (_key, value) => {
-    if (typeof File !== "undefined" && value instanceof File) return undefined;
-    if (typeof value === "string" && value.startsWith("blob:")) return undefined;
-    return value;
-  }));
-}
+const toSerializableDraft = createProjectSerializer();
 
 function folderFor(project: LocalProject) {
   return project.folder || toFolderName(project.title, project.id);
@@ -318,7 +316,8 @@ function persistToFile(
       const base = guard ? (diskVersion.get(latest.id) ?? guard.previous?.updatedAt) : undefined;
       const result = await writeDataFile(
         `${folderFor(latest)}/${PROJECT_FILE_NAME}`,
-        JSON.stringify(latest, null, 2),
+        // 큰 모캡의 들여쓰기는 IPC 문자열까지 부풀립니다. 스키마·CAS는 그대로 두고 공백만 뺍니다.
+        JSON.stringify(latest),
         base,
       );
       if (result.written) {
@@ -349,7 +348,7 @@ function persistToFile(
  * 프로젝트가 있으면 파일로 옮깁니다. 옮긴 뒤에도 localStorage 는 지우지 않습니다.
  * 잘 옮겨졌는지 확인하기 전에 원본을 없애면 되돌릴 수 없습니다.
  */
-export async function loadProjects(): Promise<LocalProject[]> {
+export async function loadProjects(options: { requiredProjectId?: string } = {}): Promise<LocalProject[]> {
   /*
     **저장 폴더가 정해진 뒤에 읽습니다.**
 
@@ -414,11 +413,20 @@ export async function loadProjects(): Promise<LocalProject[]> {
       .filter((project): project is LocalProject => project !== null);
   } catch (error) {
     console.warn("프로젝트 폴더를 읽지 못했습니다.", error);
+    // 직접 주소로 편집기를 열 때는 실패한 파일 대신 옛 브라우저 사본을 열면 안 됩니다.
+    // 그 사본이 실시간 편집 대상으로 등록되면 다음 자동 저장이 최신 파일을 덮을 수 있습니다.
+    if (options.requiredProjectId) throw error;
   }
   if (brokenFiles.length) {
     // 조용히 사라지면 「작품이 없어졌다」 로 보입니다. 무엇을 건너뛰었는지는 남겨 둡니다.
     console.warn(`읽지 못한 프로젝트 파일 ${brokenFiles.length}개:`, brokenFiles);
     lastBrokenProjectFiles = brokenFiles;
+  }
+
+  // 삭제·손상된 파일을 옛 localStorage에서 되살리지 않습니다. 예전 프로젝트의 최초
+  // 파일 이행은 프로젝트 목록의 기존 경로에서 하고, 직접 열기는 실제 파일을 요구합니다.
+  if (options.requiredProjectId && !fromFiles.some(project => project.id === options.requiredProjectId)) {
+    throw new Error("저장 폴더에서 그 프로젝트를 읽지 못했습니다.");
   }
 
   /*
@@ -473,13 +481,7 @@ export async function loadProjects(): Promise<LocalProject[]> {
   // 방금 읽은 판이 이 창의 기준입니다. 옮기며 쓴 것도 같은 도장을 그대로 썼습니다.
   cache.forEach(markReadFromDisk);
 
-  /*
-    브라우저 저장소를 폴더에 맞춥니다.
-
-    이게 없으면 폴더를 지워도 저장소에는 남고, 다음에 무엇이든 저장하는
-    순간 그 목록이 통째로 다시 쓰여 되살아납니다. 거울은 원본을 따라가야
-    합니다.
-  */
+  // 브라우저 전용/최초 이행 전만 거울을 씁니다. 파일 이행 뒤의 삭제·목록은 폴더가 결정합니다.
   writeLocalStorage(cache);
   return cache;
 }
@@ -675,10 +677,14 @@ export function brokenProjectFiles(): string[] {
  * `saveLocalProject`(결말을 안 기다림 — 편집 화면의 자동 저장)와
  * `saveLocalProjectAndConfirm`(결말까지 — 창 밖에서 닫힌 작품에 쓰는 길)이 **같은 이 몸통**을
  * 씁니다. 따로 두면 «비우기 막기» 나 «같으면 안 쓰기» 규칙 하나를 고칠 때 한쪽을 빠뜨립니다.
+ *
+ * 새 작품의 id를 곧바로 화면에 공유하면서 결말도 기다릴 때는 이 반환값의 project와
+ * persisted를 함께 씁니다. 저장 함수 두 개를 연달아 부르면 같은 큰 초안을 다시
+ * 직렬화·복제하게 됩니다. persisted는 이 호출이 올린 판의 실제 쓰기 결과입니다.
  */
-function stageLocalProject(
+export function stageLocalProject(
   draft: DraftLike,
-  id: string,
+  id = makeId(),
 ): { project: LocalProject; persisted: Promise<PersistOutcome> } {
   const now = new Date().toISOString();
   const scenes = draft.scenes || [];
@@ -735,7 +741,7 @@ function stageLocalProject(
     두 창이 서로를 되돌리는 핑퐁입니다(2026-09-21). 편집 화면의 객체 동일성 검사가 먼저
     막고, 이건 그 검사를 지나친 길(단계 넘기기·폴더 맞추기·창 밖 결과)의 보험입니다.
   */
-  if (previous && JSON.stringify(previous.draft) === JSON.stringify(serialized)) {
+  if (previous && sameImmutableJson(previous.draft, serialized)) {
     const pending = pendingPersists.get(previous);
     return {
       project: previous,

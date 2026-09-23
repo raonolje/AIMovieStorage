@@ -7,7 +7,20 @@ import os
 def validate_control_options(engine_id, opts, check_files=False):
     if not isinstance(opts, dict):
         raise ValueError("생성 옵션은 객체여야 합니다.")
+    if "ltx_quality" in opts:
+        if engine_id != "ltx25":
+            raise ValueError("LTX 품질 선택은 LTX 2.5에서만 사용할 수 있습니다.")
+        from engines._ltx_two_stage import quality_of
+        quality_of(opts)
     control = opts.get("control")
+    structure = opts.get("structure_control")
+    if structure is not None:
+        if engine_id != "ltx25":
+            raise ValueError("윤곽 구조 제어는 LTX 2.5에서만 지원합니다.")
+        if control is not None:
+            raise ValueError("포즈와 윤곽 구조 제어는 함께 사용할 수 없습니다. 하나를 해제하세요.")
+        from structure_control import validate_structure_control
+        validate_structure_control(structure, opts, check_files=check_files)
     if control is not None:
         if engine_id != "ltx25":
             raise ValueError("이 엔진은 모캡 뼈 프레임을 받지 않습니다. LTX 2.5를 고르거나 동작 기준을 해제하세요.")

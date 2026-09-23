@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { sameImmutableJson } from "./immutableJson";
 import * as edit from "@/lib/compositionEdit";
 import type { CompositionState, Vector3Value } from "@/lib/composition";
 import { SHOT_PRESETS } from "@/lib/cameraMoves";
@@ -1308,7 +1309,7 @@ export function reduceCompositionCommands(
   }
   // 내용이 같은 명령도 새 참조를 만들면 GLB가 다시 로드될 수 있습니다. 원래 판을 그대로 지킵니다.
   return {
-    state: JSON.stringify(state) === JSON.stringify(current) ? current : state,
+    state: sameImmutableJson(state, current) ? current : state,
     created,
   };
 }

@@ -17,6 +17,21 @@ describe("구도 창의 저장 확인과 닫기", () => {
   const initial = normalizeComposition();
   const edited = patchCameraIn(initial, { fovDegrees: 70 });
 
+  it("저장 기준은 불변 판을 보관하며 같은 큰 모캡 하위 트리를 다시 문자열로 만들지 않는다", async () => {
+    const shared = { get bones() { throw Error("공유 모캡을 읽었습니다"); } };
+    const first = { ...initial, motionTracks: [shared] } as unknown as typeof initial;
+    const session = createPlannerSaveSession(first);
+    const next = patchCameraIn(first, { fovDegrees: 75 });
+    expect(session.isDirty(first)).toBe(false);
+    expect(session.isDirty(next)).toBe(true);
+    await session.persist(next, async () => undefined);
+    expect(session.isDirty(next)).toBe(false);
+    expect(session.isDirty(first)).toBe(true);
+    const confirm = vi.fn(async () => false);
+    expect(await session.requestClose(() => next, confirm, vi.fn())).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
   it("아무것도 안 바꾼 창은 묻지 않고 닫고, 편집한 창은 취소하면 유지합니다", async () => {
     const session = createPlannerSaveSession(initial);
     const confirm = vi.fn(async () => false);

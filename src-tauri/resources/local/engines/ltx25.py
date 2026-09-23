@@ -17,8 +17,10 @@ import os
 import time
 
 import common
+from ._ltx_two_stage import quality_of, resolution_plan, load_upsampler, upscale_latents, run_two_stage
 
-_state = {"pipe": None, "mode": None, "loras": [], "plan": None, "pose": False, "repo": None}
+_state = {"pipe": None, "mode": None, "loras": [], "plan": None, "pose": False, "repo": None,
+          "quality": "single", "upsampler": None}
 
 """이 모델을 bf16 그대로 올리는 데 필요한 VRAM(GB) — 정밀도를 고르는 잣대."""
 BF16_GB = 48.0
@@ -62,19 +64,28 @@ def info(root):
 
 def _mode_of(opts):
     """어느 파이프라인이 필요한가 — 동작 기준이 있으면 InContext, 첫 장면이 있으면 I2V."""
-    if (opts.get("control") or {}).get("frames"):
+    if (opts.get("control") or {}).get("frames") or opts.get("structure_control") is not None:
         return "pose"
     return "i2v" if (opts.get("image") or "").strip() else "t2v"
 
 
 def load(root, opts):
+    quality = quality_of(opts)
+    if opts.get("structure_control") is not None:
+        from control_policy import validate_control_options
+        from structure_control import probe_structure_video
+        validate_control_options("ltx25", opts, check_files=True)
+        probe_structure_video(opts["structure_control"], opts)
     _require_image_codec(opts)
     mode = _mode_of(opts)
     repo = (os.environ.get("LTX25_REPO") or "").strip() or REPO
     # 정밀도를 **먼저** 셈합니다 — 이미 올라가 있어도 사람이 정밀도를 바꿨으면 다시 올려야
     # 합니다(로라만 다시 걸고 정밀도는 안 보던 자리). 판단은 `common.plan_precision` 한 곳.
     plan = common.plan_precision(BF16_GB, opts, loaded=_state["plan"])
-    if _state["pipe"] is not None and _state["mode"] == mode and _state.get("repo") == repo and not plan["reload"]:
+    if quality == "two-stage" and repo != REPO:
+        raise ValueError("2단계 정제는 검증된 LTX 2.5 distilled 저장소에서만 사용할 수 있습니다.")
+    if (_state["pipe"] is not None and _state["mode"] == mode and _state.get("repo") == repo
+            and _state.get("quality", "single") == quality and not plan["reload"]):
         _apply_loras(opts)
         return
     import diffusers
@@ -97,6 +108,8 @@ def load(root, opts):
     common.use_engine_cache(root)
     device, dtype = common.device_and_dtype()
     unload()
+    # 선택했을 때만 약 1GB 부품을 읽습니다. 설정/접근 권한 문제는 본체를 올리기 전에 알립니다.
+    upsampler = load_upsampler(dtype) if quality == "two-stage" else None
     """
     **`LTXPipeline` 은 LTX 1.x 것입니다.** 2.5 는 `LTX2*` 입니다 — 처음에 1.x 이름을 적어
     두었는데, diffusers 0.40 의 파이프라인 목록을 직접 열어 보고 알았습니다(2026-09-17).
@@ -110,7 +123,7 @@ def load(root, opts):
     """
     pipeline_class = getattr(
         diffusers,
-        {"pose": "LTX2InContextPipeline", "i2v": "LTX2ImageToVideoPipeline"}.get(
+        "LTX2InContextPipeline" if quality == "two-stage" else {"pose": "LTX2InContextPipeline", "i2v": "LTX2ImageToVideoPipeline"}.get(
             mode, "LTX2Pipeline"
         ),
     )
@@ -160,6 +173,8 @@ def load(root, opts):
     _state["mode"] = mode
     _state["repo"] = repo
     _state["plan"] = plan
+    _state["quality"] = quality
+    _state["upsampler"] = upsampler
     _state["loras"] = []
     _apply_loras(opts)
 
@@ -171,6 +186,8 @@ def unload():
     _state["plan"] = None
     _state["pose"] = False
     _state["repo"] = None
+    _state["quality"] = "single"
+    _state["upsampler"] = None
     common.free_vram()
 
 
@@ -258,7 +275,7 @@ def _attach_pose(pipe, opts):
     """포즈 IC-LoRA 를 얹습니다. 이미 얹혀 있으면 아무 일도 하지 않습니다."""
     if _state.get("pose"):
         return
-    common.log("몸 동작용 Union IC-LoRA 를 받습니다: {}".format(POSE_LORA_REPO))
+    common.log("구조 제어용 Union IC-LoRA 를 받습니다: {}".format(POSE_LORA_REPO))
     pipe.load_lora_weights(POSE_LORA_REPO, weight_name=POSE_LORA_FILE, adapter_name="pose")
     # 이미 활성화한 화풍 로라가 있어도 pose가 빠지지 않도록 이름과 세기를 함께 지정합니다.
     styles = _state["loras"]
@@ -292,6 +309,9 @@ def _fit32(value):
 
 
 def _output_size(opts):
+    if quality_of(opts) == "two-stage":
+        plan = resolution_plan(opts.get("width") or 1280, opts.get("height") or 704, _mode_of(opts) == "pose")
+        return plan["width"], plan["height"]
     # Union은 절반 크기도 VAE의 32배수여야 위치 좌표와 그림 크기가 어긋나지 않습니다.
     factor = POSE_REFERENCE_DOWNSCALE if _mode_of(opts) == "pose" else 1
     return tuple(_fit32(int(opts.get(key) or fallback) / factor) * factor
@@ -299,6 +319,7 @@ def _output_size(opts):
 
 
 def generate(output, opts, report):
+    quality = quality_of(opts)
     _require_image_codec(opts)
     # 마스크는 **모델을 부르기 전에** 봅니다 — 까닭은 `common.check_motion_mask`.
     common.check_motion_mask(opts)
@@ -315,8 +336,18 @@ def generate(output, opts, report):
         common.log("LTX 2.5 distilled 규약: 고정 {}단계 · CFG 1을 적용합니다.".format(steps))
     seed = common.resolve_seed(opts)
     width, height = _output_size(opts)
+    two_stage = None
+    if quality == "two-stage":
+        if _state.get("upsampler") is None:
+            raise RuntimeError("2단계 확대 부품이 준비되지 않았습니다. LTX 모델을 다시 올려 주세요.")
+        two_stage = resolution_plan(width, height, _mode_of(opts) == "pose")
+        common.log("LTX 2단계: {}×{} 생성 → {}×{} 최종 출력 · 8+3단계".format(
+            two_stage["stage1_width"], two_stage["stage1_height"], width, height))
+    stage_width = two_stage["stage1_width"] if two_stage else width
+    stage_height = two_stage["stage1_height"] if two_stage else height
     if _mode_of(opts) == "pose":
-        common.log("Union 참조 정렬을 위해 생성 크기를 64의 배수 {}×{}로 맞춥니다.".format(width, height))
+        common.log("Union 참조 정렬을 위해 최종 크기를 {}의 배수 {}×{}로 맞춥니다.".format(
+            128 if two_stage else 64, width, height))
 
     kwargs = {
         "prompt": opts.get("prompt") or "",
@@ -332,9 +363,10 @@ def generate(output, opts, report):
     if negative:
         kwargs["negative_prompt"] = negative
 
-    kwargs["width"] = width
-    kwargs["height"] = height
+    kwargs["width"] = stage_width
+    kwargs["height"] = stage_height
     first_frame = None
+    full_first_frame = None
     image_path = (opts.get("image") or "").strip()
     if image_path:
         from PIL import Image
@@ -342,10 +374,19 @@ def generate(output, opts, report):
         if not os.path.isfile(image_path):
             raise IOError("첫 장면 그림을 찾지 못했습니다: {}".format(image_path))
         with Image.open(image_path) as image:
-            first_frame = image.convert("RGB").resize((width, height))
+            full_first_frame = image.convert("RGB").resize((width, height))
+            first_frame = full_first_frame.resize((stage_width, stage_height)) if two_stage else full_first_frame
 
-    # ── 동작 기준(모캡에서 구운 뼈 그림) ──────────────────────────────
-    control = _pose_frames(opts, width, height, frames, fps)
+    # ── 구조 기준(모캡 뼈 그림 또는 카메라까지 렌더한 영상의 윤곽) ────────
+    structure_meta = None
+    if opts.get("structure_control") is not None:
+        from control_policy import validate_control_options
+        from structure_control import canny_reference_frames
+        validate_control_options("ltx25", opts, check_files=True)
+        control, structure_meta = canny_reference_frames(opts["structure_control"], opts,
+            stage_width, stage_height, frames, fps, POSE_REFERENCE_DOWNSCALE, report)
+    else:
+        control = _pose_frames(opts, stage_width, stage_height, frames, fps)
     if control:
         slot = _pose_kwarg(pipe)
         if slot != "reference_conditions":
@@ -362,7 +403,7 @@ def generate(output, opts, report):
         from diffusers.pipelines.ltx2 import LTX2ReferenceCondition
 
         _attach_pose(pipe, opts)
-        weight = float((opts.get("control") or {}).get("weight", 1.0))
+        weight = float((opts.get("structure_control") or opts.get("control") or {}).get("weight", 1.0))
         """
         뼈 그림은 **참조 조건**으로, 첫 장면은 **프레임 조건**으로 — 둘의 뜻이 다릅니다.
         `reference_conditions` 는 IC-LoRA 가 «따라 할 영상» 이고, `conditions` 는 «이
@@ -378,9 +419,22 @@ def generate(output, opts, report):
         common.log("동작 기준 {}장을 참조 조건으로 넘깁니다(세기 {}).".format(len(control), weight))
     elif first_frame is not None:
         # 동작 기준 없이 첫 장면만 — I2V 파이프라인은 `image` 로 받습니다.
-        kwargs["image"] = first_frame
+        if two_stage:
+            from diffusers.pipelines.ltx2 import LTX2VideoCondition
+            kwargs["conditions"] = [LTX2VideoCondition(frames=first_frame, index=0)]
+        else:
+            kwargs["image"] = first_frame
 
-    result = common.run_attention_safe(pipe, lambda: pipe(**kwargs))
+    if two_stage:
+        from diffusers.pipelines.ltx2 import LTX2VideoCondition
+        final_conditions = [LTX2VideoCondition(frames=full_first_frame, index=0)] if full_first_frame is not None else None
+        pipe.vae.enable_tiling()
+        result = run_two_stage(pipe, kwargs, two_stage,
+            lambda latents: upscale_latents(_state["upsampler"], latents),
+            lambda count, base, span: common.step_reporter(report, count, base, span),
+            lambda call: common.run_attention_safe(pipe, call), final_conditions)
+    else:
+        result = common.run_attention_safe(pipe, lambda: pipe(**kwargs))
     report(95, "mp4 로 내보내는 중")
     # 「여기만 움직인다」 흑백 마스크가 왔으면 검은 곳을 첫 장면에 묶습니다(`common.freeze_by_mask`).
     frames_out = common.freeze_by_mask(result.frames[0], opts.get("motion_mask"))
@@ -395,7 +449,15 @@ def generate(output, opts, report):
         "generate_seconds": round(time.time() - started, 2),
         "inference_steps": steps,
         "guidance_scale": sampling["guidance_scale"],
+        "ltx_quality": quality,
     }
     # 요청한 정밀도와 실제로 올라간 정밀도 — 한 곳에서 만듭니다.
     out.update(common.precision_fields(_state["plan"]))
+    if structure_meta is not None:
+        out["structure_control"] = structure_meta
+    if two_stage:
+        out["two_stage"] = dict(two_stage, stage1_steps=steps, stage2_steps=3,
+            requested_width=int(opts.get("width") or 1280), requested_height=int(opts.get("height") or 704),
+            adapters="stage1-only", reference_conditions="stage1-only", spatial_scale=2)
+        out["inference_steps"] = steps + 3
     return out

@@ -1,5 +1,5 @@
 import { canUseProjectFiles } from "./projectFiles";
-import { saveLocalProject, saveLocalProjectAndConfirm } from "./localProjectStore";
+import { stageLocalProject } from "./localProjectStore";
 import { writeProject } from "./projectWrite";
 import { whenAppSettingsReady } from "./mediaLibrary";
 import type { ProjectDraft } from "./projectTypes";
@@ -23,10 +23,11 @@ export async function commitOpenProjectChange(
   });
   if (!applied.draft) throw new Error(applied.why);
   // React가 저장 갱신을 계산하는 동안 자동 저장이 먼저 ID를 만들 수도 있으므로 지금 읽습니다.
-  const staged = saveLocalProject(applied.draft, owner.projectId());
-  owner.adoptId(staged.id);
-  const result = await saveLocalProjectAndConfirm(applied.draft, staged.id);
-  if (result.outcome !== "written" && result.outcome !== "same")
+  const staged = stageLocalProject(applied.draft, owner.projectId());
+  // 파일을 기다리는 동안 자동 저장·다른 편집이 새 id를 또 만들지 않도록 먼저 공유합니다.
+  owner.adoptId(staged.project.id);
+  const outcome = await staged.persisted;
+  if (outcome !== "written" && outcome !== "same")
     throw new Error("편집 내용은 화면에 있지만 프로젝트 파일 저장을 확인하지 못했습니다. 창을 닫지 말고 다시 저장해 주세요.");
-  return { projectId: staged.id, persisted: true };
+  return { projectId: staged.project.id, persisted: true };
 }

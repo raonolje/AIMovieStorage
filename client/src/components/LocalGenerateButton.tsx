@@ -20,9 +20,14 @@ import type { PoseFrameSet } from "@/lib/poseFrames";
 import { validateLocalControlOptions } from "@/lib/localControlCapabilities";
 import H3ReferenceRangePicker, { type H3ReferenceRange } from "@/components/H3ReferenceRangePicker";
 import { useT } from "@/lib/i18n";
+import H3GenerationOptions, { useH3GenerationOptions } from "@/components/H3GenerationOptions";
+import StructureControlPicker from "@/components/StructureControlPicker";
+import type { LocalStructureControl } from "@/lib/localStructureControl";
 
 /**
  * «로컬로 뽑기» — 이 컴퓨터의 모델로 그림·영상을 바로 만듭니다.
+ *
+ *
  *
  * 카드마다 프롬프트를 따로 쓰지 않습니다. **적어 둔 프롬프트를 그대로** 가져가되,
  * 보내는 순간에 마그니픽 전제(@칩·미드저니 매개변수)를 걷어냅니다(`tuneForLocal`).
@@ -95,13 +100,19 @@ export default function LocalGenerateButton({
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   /**
    * 모캡에서 구운 **동작 기준**. 영상에서만 씁니다.
+   *
+   *
    */
   const [pose, setPose] = useState<PoseFrameSet | null>(null);
+  const [structure, setStructure] = useState<LocalStructureControl | null>(null);
+  const [ltxQuality, setLtxQuality] = useState<"single" | "two-stage">("single");
   const videoReferences = (references ?? []).filter(item => item.kind === "video").map(item => item.path);
   const referenceKey = JSON.stringify(videoReferences);
   const [referenceSelection, setReferenceSelection] = useState<{ key: string; range: H3ReferenceRange } | null>(null);
   const referenceRange = referenceSelection?.key === referenceKey ? referenceSelection.range : "";
   const needsReferenceRange = kind === "video" && engine?.id === "minimaxh3" && videoReferences.length > 0;
+  const chosenLoras = engine ? lorasToRun(engine.id, picked[engine.id], loraFiles) : [];
+  const h3Options = useH3GenerationOptions(kind === "video" && engine?.id === "minimaxh3" && !!references?.length, chosenLoras, loraFiles);
 
   // 쓸 수 있는 엔진이 없으면 **아무것도 안 그립니다.** 설치는 설정에서 합니다 —
   // 카드마다 「설치하세요」 를 띄우면 화면이 안내문으로 뒤덮입니다.
@@ -120,10 +131,13 @@ export default function LocalGenerateButton({
       setStatus(event.message || "");
     }, engine.id);
     try {
+      if (structure && !videoReferences.includes(structure.path)) throw new Error(t("선택한 윤곽 기준 영상이 현재 레퍼런스 목록에 없습니다. 다시 선택하세요."));
       const checked = validateLocalControlOptions(engine.id, {
         control: kind === "video" && pose ? { kind: "pose", frames: pose.frames, fps: pose.fps } : undefined,
         references: engine.id === "minimaxh3" ? references : undefined,
         reference_video_range: needsReferenceRange ? referenceRange : undefined,
+        structure_control: structure,
+        seconds: structure?.durationSeconds ?? seconds ?? 5,
       });
       if (!checked.ok) throw new Error(checked.message);
       /*
@@ -192,7 +206,6 @@ export default function LocalGenerateButton({
         화면에는 「프롬프트에 넣어야 먹습니다」 라고 적어 두고 정작 보낼 때 버리고
         있었습니다(2026-09-18 점검). 로라를 켜도 그 말이 한 글자도 안 갔습니다.
       */
-      const chosenLoras = lorasToRun(engine.id, picked[engine.id], loraFiles);
       const withTriggers = withLoraTriggers(tuned.prompt, chosenLoras);
 
       const size = localSize(engine.id, aspect);
@@ -212,15 +225,18 @@ export default function LocalGenerateButton({
           ...size,
           ...(kind === "video"
             ? {
-                seconds: seconds ?? 5,
+                seconds: structure?.durationSeconds ?? seconds ?? 5,
                 fps: 16,
                 image: firstFrame,
                 references: engine.id === "minimaxh3" ? references : undefined,
                 reference_video_range: needsReferenceRange && referenceRange ? referenceRange : undefined,
                 // 그림 한 장에는 얼릴 구역이 없습니다 — 마스크는 영상에만 실립니다.
                 motion_mask: motionMask,
+                structure_control: structure ?? undefined,
+                ltx_quality: engine.id === "ltx25" ? ltxQuality : undefined,
               }
             : {}),
+          ...h3Options.options,
           loras: chosenLoras,
           // 뼈 그림은 **영상에만**. 그림 한 장에는 이을 동작이 없습니다.
           ...(kind === "video" && pose ? { control: { kind: "pose" as const, frames: pose.frames, fps: pose.fps } } : {}),
@@ -244,15 +260,20 @@ export default function LocalGenerateButton({
           ? (references?.length ?? 0) + (firstFrame ? 1 : 0)
           : engine.id === "minimaxh3"
             ? 0
-            : (references?.length ?? 0);
+            : (references ?? []).filter(item => item.path !== structure?.path).length;
       const referenceMeta = Array.isArray(result.meta?.reference_videos) ? result.meta.reference_videos : [];
       const referenceSummary = referenceMeta.filter((item): item is { conditioning_seconds: number } =>
         !!item && typeof item === "object" && typeof (item as { conditioning_seconds?: unknown }).conditioning_seconds === "number",
       ).map(item => t("H3 참조 입력 {seconds}초", { seconds: item.conditioning_seconds.toFixed(2) })).join(" · ");
+      const structureMeta = result.meta?.structure_control as { conditioning_seconds?: number } | undefined;
+      const structureSummary = typeof structureMeta?.conditioning_seconds === "number"
+        ? t("윤곽 기준 입력 {seconds}초", { seconds: structureMeta.conditioning_seconds.toFixed(3) }) : "";
       toast.success(`${engine.name} 으로 만들었습니다.`, {
         description:
           `${Math.round(result.seconds)}초 걸렸습니다` +
           (referenceSummary ? ` · ${referenceSummary}` : "") +
+          (structureSummary ? ` · ${structureSummary}` : "") +
+          (result.meta?.ltx_quality === "two-stage" ? ` · ${t("2단계 정제 결과 {width}×{height}", { width: String(result.meta.width), height: String(result.meta.height) })}` : "") +
           (result.meta?.precision ? ` · ${result.meta.precision} 적용` : "") +
           (tuned.usedKorean
             ? " · 영문 칸이 비어 한글로 보냈습니다(오픈 모델은 영어를 훨씬 잘 알아듣습니다)"
@@ -330,6 +351,19 @@ export default function LocalGenerateButton({
 
       {needsReferenceRange && <H3ReferenceRangePicker paths={videoReferences} value={referenceRange}
         onChange={range => setReferenceSelection({ key: referenceKey, range })} disabled={busy} />}
+      {kind === "video" && (engine.id === "ltx25" || structure) && <StructureControlPicker
+        paths={videoReferences} value={structure} onChange={setStructure} disabled={busy} seconds={seconds} />}
+      {kind === "video" && engine.id === "ltx25" && <label className="flex items-center gap-1 text-[10px]"
+        title={t("설정한 크기가 최종 출력입니다. 절반 크기로 생성한 뒤 2배 확대·3회 정제합니다. 윤곽·포즈 기준은 128픽셀, 그 외는 64픽셀 배수로 맞춥니다. 시간과 메모리가 늘 수 있습니다.")}>
+        <span>{t("LTX 품질")}</span>
+        <select value={ltxQuality} disabled={busy} onChange={event => setLtxQuality(event.target.value as "single" | "two-stage")}
+          aria-label={t("LTX 품질")} className="rounded-md border border-white/10 bg-black/20 px-1.5 py-1">
+          <option value="single">{t("1단계 (기본)")}</option>
+          <option value="two-stage">{t("2단계 고해상도 정제")}</option>
+        </select>
+      </label>}
+
+      <H3GenerationOptions value={h3Options} disabled={busy} />
 
       {/* 받아 둔 로라가 있을 때만 뜹니다. 없으면 이 줄 자체가 없습니다. */}
       <LoraPicker

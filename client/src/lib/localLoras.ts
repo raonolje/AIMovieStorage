@@ -60,11 +60,17 @@ function publish(next: LoraOnDisk[]) {
 // 카탈로그의 키가 아니라 «이 빌드에 실린» 목록입니다 — 공개판에서 빠진 엔진의 로라 폴더는 묻지 않습니다.
 const ENGINE_IDS = LOCAL_ENGINE_IDS;
 
+/** UI와 조종기가 같은 실제 폴더 목록을 읽습니다. 명령 경로에서는 읽기 오류를 숨기지 않습니다. */
+export async function readLoraFiles(): Promise<LoraOnDisk[]> {
+  if (!isDesktopApp()) throw new Error("로컬 로라 목록은 데스크톱 앱에서 읽을 수 있습니다.");
+  return invoke<LoraOnDisk[]>("lora_files", { engines: ENGINE_IDS });
+}
+
 /** 폴더를 다시 읽습니다. 받기·지우기 뒤에 부릅니다. */
 export async function refreshLoraFiles(): Promise<LoraOnDisk[]> {
   if (!isDesktopApp()) return files;
   try {
-    publish(await invoke<LoraOnDisk[]>("lora_files", { engines: ENGINE_IDS }));
+    publish(await readLoraFiles());
   } catch {
     publish([]);
   }

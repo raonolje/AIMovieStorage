@@ -902,6 +902,12 @@ export interface LocalRunOptions {
   references?: { kind: "image" | "video" | "audio"; path: string }[];
   /** H3 영상 레퍼런스가 있을 때 명시적으로 선택합니다. 원본 파일은 바꾸지 않습니다. */
   reference_video_range?: "first5s" | "full";
+  /** H3 Ref2VA 그림 전처리. match는 목표 면적으로 제한하며 영상 시각은 유지합니다. */
+  h3_reference_resize_mode?: "diffusers" | "match";
+  /** 검증한 제작자 프리셋만 명시적으로 적용합니다. 일반 로라에 자동 적용하지 않습니다. */
+  h3_lora_preset?: "lightx2v-ref2va-4step-v0.1";
+  /** 크기는 최종 출력 기준. 두 단계는 절반 생성→2배 확대→3회 정제입니다. */
+  ltx_quality?: "single" | "two-stage";
   /** 음악 가사. 비우면 연주곡(`[inst]`). */
   lyrics?: string;
   /** 여러 개를 겹쳐 먹입니다. */
@@ -915,6 +921,8 @@ export interface LocalRunOptions {
    * `weight` 는 얼마나 꽉 따를까(0~1.5). 1 이면 그대로, 낮추면 모델이 숨 쉴 틈이 생깁니다.
    */
   control?: { kind: "pose"; frames: string[]; fps?: number; weight?: number };
+  /** LTX Union용 영상 윤곽. 원본 시간 구간을 유지하며 포즈 입력과 함께 쓰지 않습니다. */
+  structure_control?: import("./localStructureControl").LocalStructureControl;
   /**
    * **«여기는 움직인다» 마스크** — 흰 구역만 움직이고 검은 구역은 첫 프레임 그대로 붙박입니다
    * (`lib/motionMask.ts` 가 굽고, 파일 이름은 «원본_움직임_NNN»).

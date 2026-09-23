@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { newProjectDraft, newCharacter, newScene, newCut, type ProjectDraft } from "@/lib/projectTypes";
-const state = vi.hoisted(() => ({ projects: new Map<string, ProjectDraft>(), run: vi.fn(), upscale: vi.fn(), persist: true, sources: vi.fn(), loadMocap: vi.fn(), bake: vi.fn() }));
+const state = vi.hoisted(() => ({ projects: new Map<string, ProjectDraft>(), run: vi.fn(), upscale: vi.fn(), persist: true, sources: vi.fn(), loadMocap: vi.fn(), bake: vi.fn(), loras: vi.fn() }));
+vi.mock("@/lib/controlLoras", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/controlLoras")>(), resolveControlLoras: state.loras }));
 vi.mock("@/lib/localEngines", () => ({ LOCAL_ENGINE_IDS: ["qwenimage", "wanvideo", "minimaxh3", "ltx25", "acestep"], LOCAL_ENGINE_CATALOG: { qwenimage: { kind: "image" }, wanvideo: { kind: "video" }, minimaxh3: { kind: "video" }, ltx25: { kind: "video" }, acestep: { kind: "music" } }, listLocalEngines: async () => [] }));
 vi.mock("@/lib/mocapStore", () => ({ mocapSourcesOf: state.sources, loadMocapResult: state.loadMocap }));
 vi.mock("@/lib/poseFrames", () => ({ bakePoseFrames: state.bake }));
@@ -43,6 +44,7 @@ beforeEach(() => {
   vi.stubGlobal("localStorage", memory());
   state.projects.clear(); state.persist = true;
   state.run.mockReset().mockResolvedValue({ path: "p/완성.png", name: "완성" });
+  state.loras.mockReset().mockResolvedValue([]);
   state.upscale.mockReset().mockResolvedValue({ path: "p/확대.png" });
   state.sources.mockReset().mockReturnValue([{ id: "pose", name: "동작", resultPath: "p/pose.json", mirror: true }]);
   state.loadMocap.mockReset().mockResolvedValue({ frames: [], mirrored: true });
@@ -51,6 +53,84 @@ beforeEach(() => {
 });
 
 describe("외부 생성의 저장·취소·재전송", () => {
+  it("LTX 두 단계는 최종 크기와 함께 명시 전달하고 다른 엔진에서는 거절한다", async () => {
+    const { q, media } = await prepare();
+    const options = { ...request.options, ltx_quality: "two-stage", width: 1920, height: 1080, fps: 24, seconds: 5 };
+    await expect(media.enqueueControlGeneration({ ...request, options })).rejects.toThrow("LTX 2.5");
+    await expect(media.enqueueControlGeneration({ ...request, engine: "ltx25", options: { ...options, ltx_quality: "silent-auto" } })).rejects.toThrow();
+    const accepted = await media.enqueueControlGeneration({ ...request, engine: "ltx25", options });
+    expect((await finish(q, accepted.jobId)).status).toBe("done");
+    expect(state.run).toHaveBeenCalledWith(expect.objectContaining({ opts: expect.objectContaining(options) }));
+  });
+
+  it("로라 ID만 저장하고 생성 직전 재검증한 경로·세기·트리거를 전달한다", async () => {
+    const { q, media } = await prepare();
+    const id = `lora-${"a".repeat(64)}`;
+    state.loras.mockResolvedValue([{ path: "managed/engine/style.safetensors", weight: 0.5, trigger: "style tag" }]);
+    const input = { ...request, loras: [{ id, weight: 0.5 }] };
+    const accepted = await media.enqueueControlGeneration(input);
+    const done = await finish(q, accepted.jobId);
+    expect(done.status).toBe("done");
+    expect(state.loras).toHaveBeenCalledTimes(2);
+    expect(state.run).toHaveBeenCalledWith(expect.objectContaining({ opts: expect.objectContaining({
+      prompt: `style tag, ${request.options.prompt}`, loras: [{ path: "managed/engine/style.safetensors", weight: 0.5, trigger: "style tag" }],
+    }) }));
+    expect(done.payload).toEqual(input);
+    expect(JSON.stringify(done.payload)).not.toContain("managed/");
+    expect(done.result?.data).toMatchObject({ loras: [{ id, weight: 0.5 }] });
+  });
+
+  it("접수 뒤 사라진 로라는 생성 직전 오류로 끝내며 GPU를 실행하지 않는다", async () => {
+    const { q, media } = await prepare();
+    state.loras.mockResolvedValueOnce([{ path: "managed/style.safetensors", weight: 1 }])
+      .mockRejectedValueOnce(new Error("로라 ID가 사라졌습니다."));
+    const accepted = await media.enqueueControlGeneration({ ...request, loras: [{ id: `lora-${"a".repeat(64)}`, weight: 1 }] });
+    expect((await finish(q, accepted.jobId)).status).toBe("failed");
+    expect(state.run).not.toHaveBeenCalled();
+  });
+
+  it("H3 프리셋의 workflow·세기·스텝 충돌을 거절하고 명시 옵션을 보존한다", async () => {
+    const { q, media } = await prepare();
+    const input = { ...request, engine: "minimaxh3", referenceAssetIds: ["img"],
+      loras: [{ id: `lora-${"a".repeat(64)}`, weight: 1 }],
+      options: { ...request.options, h3_lora_preset: "lightx2v-ref2va-4step-v0.1", h3_reference_resize_mode: "match", steps: 4 } };
+    for (const change of [{ engine: "wanvideo" }, { referenceAssetIds: [] }, { loras: [] },
+      { loras: [{ id: input.loras[0].id, weight: 0.5 }] }, { options: { ...input.options, steps: 30 } },
+      { options: { ...input.options, h3_reference_resize_mode: "diffusers" } }])
+      await expect(media.enqueueControlGeneration({ ...input, ...change })).rejects.toThrow("H3");
+    const accepted = await media.enqueueControlGeneration(input);
+    expect((await finish(q, accepted.jobId)).status).toBe("done");
+    expect(state.run).toHaveBeenCalledWith(expect.objectContaining({ opts: expect.objectContaining(input.options) }));
+  });
+
+  it("같은 프로젝트의 카메라 레퍼런스와 절대 구간을 윤곽 입력으로 보내고 실제 길이를 보존한다", async () => {
+    const { q, media } = await prepare();
+    draft().scenes[0].cuts[0].refVideoPath = "p/camera.mp4";
+    expect(media.listControlAssets("p")).toContainEqual(expect.objectContaining({ id: "k:refVideoPath", path: "p/camera.mp4", kind: "video" }));
+    const structureSource = { assetId: "k:refVideoPath", kind: "canny", sourceStartSeconds: 6, durationSeconds: 5, weight: 0 };
+    const meta = { structure_control: { conditioning_frames: 113, conditioning_seconds: 113 / 24, source_start_seconds: 6 } };
+    state.run.mockResolvedValue({ path: "p/완성.mp4", name: "완성", meta });
+    const accepted = await media.enqueueControlGeneration({ ...request, engine: "ltx25", imageAssetId: "img", structureSource, options: { ...request.options, fps: 24, seconds: 5 } });
+    const done = await finish(q, accepted.jobId);
+    expect(done.status).toBe("done");
+    expect(state.bake).not.toHaveBeenCalled();
+    expect(state.run).toHaveBeenCalledWith(expect.objectContaining({ opts: expect.objectContaining({ image: "p/원본.png", structure_control: { path: "p/camera.mp4", kind: "canny", sourceStartSeconds: 6, durationSeconds: 5, weight: 0 }, fps: 24, seconds: 5 }) }));
+    expect(done.result?.data).toMatchObject({ structureSource, meta, attached: true });
+  });
+
+  it("윤곽 입력은 임의 경로·다른 프로젝트·잘못된 종류·포즈 병용·미지원 엔진을 거절한다", async () => {
+    const { media } = await prepare();
+    draft().scenes[0].cuts[0].videos.push({ id: "camera", name: "구도", filePath: "p/camera.mp4", thumb: "", file: null });
+    const structureSource = { assetId: "camera", kind: "canny", durationSeconds: 5 };
+    const base = { ...request, engine: "ltx25", structureSource };
+    for (const patch of [{ assetId: "foreign" }, { assetId: "img" }, { path: "C:/outside.mp4" }, { kind: "depth" }, { weight: 1.1 }, { thresholds: { low: 200, high: 92 } }]) {
+      await expect(media.enqueueControlGeneration({ ...base, structureSource: { ...structureSource, ...patch } })).rejects.toThrow();
+    }
+    await expect(media.enqueueControlGeneration({ ...base, poseSource: { sourceId: "pose", personNumber: 1 } })).rejects.toThrow("함께");
+    await expect(media.enqueueControlGeneration({ ...base, engine: "wanvideo" })).rejects.toThrow("LTX 2.5");
+    await expect(media.enqueueControlGeneration({ ...base, options: { ...request.options, seconds: 6 } })).rejects.toThrow("생성 길이");
+    expect(state.run).not.toHaveBeenCalled();
+  });
   it.each(["mkv", "avi", "m4v"])("등록된 %s 영상도 앱과 같은 종류로 읽고 레퍼런스로 전달한다", async (extension) => {
     const { q, media } = await prepare();
     const filePath = `p/춤 원본.${extension}`;

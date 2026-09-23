@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CompositionState, MotionChannel } from "./composition";
 import type { ProjectDraft } from "./projectTypes";
 
@@ -34,6 +34,7 @@ beforeEach(() => {
     setItem: (key: string, value: string) => values.set(key, value),
   }, setTimeout, clearTimeout });
 });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 async function fixture(saved: boolean) {
   const { newProjectDraft, newScene, newCut } = await import("./projectTypes");
@@ -110,6 +111,96 @@ describe("구도 원본의 파일 저장", () => {
     expect(f.live().scenes[0].cuts[0].composition).toBe(f.composition);
     pending.resolve();
     expect(await saving).toMatchObject({ persisted: true });
+    f.unregister();
+  });
+
+  it("큰 초안은 최종 파일 본문만 한 번 직렬화하고 그 호출의 ack를 기다린다", async () => {
+    const f = await fixture(true), pending = gate();
+    port.write.mockImplementation(async (path: string, contents: string) => { await pending.promise; disk.set(path, contents); return { written: true }; });
+    // 파일 쓰기만 세면 같은 pending 쓰기 앞에서 반복된 초안/비교 직렬화를 놓칩니다.
+    const stringify = vi.spyOn(JSON, "stringify");
+    const saving = f.save();
+    await tick();
+    expect(stringify.mock.calls).toHaveLength(1);
+    expect(stringify.mock.calls[0][0]).toHaveProperty("draft");
+    pending.resolve();
+    expect(await saving).toMatchObject({ persisted: true });
+    expect(stringify.mock.calls).toHaveLength(1);
+    expect(port.write).toHaveBeenCalledOnce();
+    f.unregister();
+  });
+
+  it("첫 저장은 파일 ack 전에 id를 공유하고 실패 뒤 재시도에도 같은 id를 쓴다", async () => {
+    const f = await fixture(false), pending = gate();
+    port.write.mockImplementationOnce(async () => { await pending.promise; throw new Error("첫 파일 쓰기 실패"); });
+    const saving = f.save();
+    const rejected = expect(saving).rejects.toThrow("파일 저장을 확인하지 못했습니다");
+    await tick();
+    const firstId = f.id();
+    expect(firstId).toBeTruthy();
+    expect(f.store.getLocalProject(firstId!)?.id).toBe(firstId);
+    pending.resolve();
+    await rejected;
+    expect(f.live().scenes[0].cuts[0].composition).toBe(f.composition);
+    expect(disk.size).toBe(0);
+    expect(await f.save()).toEqual({ projectId: firstId, persisted: true });
+    expect(disk.size).toBe(1);
+    expect(f.store.listLocalProjects().map(item => item.id)).toEqual([firstId]);
+    f.unregister();
+  });
+
+  it("새 마법사의 동시 두 저장은 id를 복제하지 않고 서로 다른 최신 편집을 보존한다", async () => {
+    const f = await fixture(false), pending = gate();
+    port.write.mockImplementation(async (path: string, contents: string) => { await pending.promise; disk.set(path, contents); return { written: true }; });
+    const first = f.commit(() => ({ logline: "첫 편집" }));
+    const second = f.commit(() => ({ synopsis: "그다음 편집" }));
+    await tick();
+    const id = f.id();
+    expect(id).toBeTruthy();
+    pending.resolve();
+    expect(await first).toEqual({ projectId: id, persisted: true });
+    expect(await second).toEqual({ projectId: id, persisted: true });
+    expect(disk.size).toBe(1);
+    expect(JSON.parse([...disk.values()][0]).draft).toMatchObject({ logline: "첫 편집", synopsis: "그다음 편집" });
+    expect(f.store.listLocalProjects()).toHaveLength(1);
+    f.unregister();
+  });
+
+  it("ack를 기다리는 동안의 수동 편집과 자동 저장이 이전 저장 결과로 되돌아가지 않는다", async () => {
+    const f = await fixture(true), pending = gate();
+    port.write.mockImplementation(async (path: string, contents: string) => { await pending.promise; disk.set(path, contents); return { written: true }; });
+    const saving = f.save();
+    await tick();
+    f.setLive({ ...f.live(), logline: "쓰기 도중 사용자가 고침" });
+    const autosaving = f.store.saveLocalProjectAndConfirm(f.live(), f.id());
+    pending.resolve();
+    expect(await saving).toMatchObject({ persisted: true });
+    expect((await autosaving).outcome).toBe("written");
+    expect(f.live().logline).toBe("쓰기 도중 사용자가 고침");
+    expect(JSON.parse([...disk.values()][0]).draft.logline).toBe("쓰기 도중 사용자가 고침");
+    expect(f.live().scenes[0].cuts[0].composition).toBe(f.composition);
+    f.unregister();
+  });
+
+  it("이미 파일에 있는 같은 내용은 다시 쓰지 않고 성공으로 확인한다", async () => {
+    const f = await fixture(true);
+    await f.save();
+    port.write.mockClear();
+    expect(await f.save()).toEqual({ projectId: f.id(), persisted: true });
+    expect(port.write).not.toHaveBeenCalled();
+    f.unregister();
+  });
+
+  it.each(["blocked", "rejected"])("파일 쓰기 %s 결과를 성공 ack로 바꾸지 않는다", async outcome => {
+    const f = await fixture(true);
+    const oldDisk = [...disk.values()][0];
+    const newer = { ...JSON.parse(oldDisk), updatedAt: "2099-01-01", draft: { ...f.live(), logline: "다른 창의 편집" } };
+    if (outcome === "rejected") disk.set("큰 구도 저장 시험/project.json", JSON.stringify(newer));
+    port.write.mockResolvedValue({ written: false, current: outcome === "rejected" ? JSON.stringify(newer) : "{읽을 수 없음" });
+    await expect(f.save()).rejects.toThrow("파일 저장을 확인하지 못했습니다");
+    expect(f.live().scenes[0].cuts[0].composition).toBe(f.composition);
+    expect(f.store.getLocalProject(f.id()!)?.draft.logline).toBe(outcome === "rejected" ? "다른 창의 편집" : f.live().logline);
+    expect([...disk.values()][0]).toBe(outcome === "rejected" ? JSON.stringify(newer) : oldDisk);
     f.unregister();
   });
 

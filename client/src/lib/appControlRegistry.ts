@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { controlDetailSchema, projectControlValue } from "./controlProjection";
 import { EDITION } from "./edition";
+import { controlLorasListSchema, listControlLoras } from "./controlLoras";
 import { compositionApplyMocapSchema, applyCompositionMocap } from "./compositionMocapControl";
 import { compositionExportVideoSchema, enqueueCompositionVideoExport } from "./compositionVideoExport";
 import {
@@ -393,6 +394,13 @@ addControlTool(
   controlEngineCatalog,
 );
 addControlTool(
+  "loras_list",
+  "List actual downloaded safetensors LoRAs from engines included in this build. Returns opaque stable IDs, engine, name and size; no local paths. Folder membership is not verified base-model or workflow compatibility. Use IDs with media_generate.loras; no upload, download or arbitrary-path access.",
+  controlLorasListSchema,
+  true,
+  listControlLoras,
+);
+addControlTool(
   "assets_list",
   "List project asset IDs and file locations; use IDs as media inputs.",
   z.object({ projectId: id }).strict(),
@@ -417,7 +425,7 @@ addControlTool(
 );
 addControlTool(
   "media_generate",
-  "Queue local image/video generation and attach the new result to a target. Reuse operationId on retries; use a new ID only to intentionally generate again. No LLM API call. H3 video references require options.reference_video_range=first5s or full; long references can be expensive. Completion metadata includes decoded and effective conditioning lengths.",
+  "Queue local image/video generation and attach the new result to a target. Reuse operationId on retries; use a new ID only to intentionally generate again. No LLM API call. H3 video references require options.reference_video_range=first5s or full; long references can be expensive. LTX 2.5 structureSource selects a same-project composition reference video as a Canny guide for rendered camera and character outlines; cannot combine with poseSource and does not guarantee exact motion replication. Completion metadata records effective conditioning lengths.",
   generateMediaSchema,
   false,
   enqueueControlGeneration,

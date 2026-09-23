@@ -4,6 +4,7 @@ import type { CompositionVideoOptions, CompositionVideoControls, SavedReferenceV
 import { SHOT_PRESETS } from "@/lib/cameraMoves";
 import { EDITABLE_BONES } from "@/lib/rig";
 import { controlDetailSchema, projectControlValue, type ControlDetail } from "./controlProjection";
+import { copyJsonWithinLimit } from "./immutableJson";
 import {
   CompositionControlError,
   compositionCommandsSchema,
@@ -29,6 +30,7 @@ export interface CompositionCapture {
   plate: string;
 }
 export interface CompositionSessionPort {
+  /** history와 같은 불변 판입니다. 편집은 apply의 함수형 갱신으로 새 참조를 만듭니다. */
   read: () => {
     state: CompositionState;
     canUndo: boolean;
@@ -42,6 +44,7 @@ export interface CompositionSessionPort {
   capture: () => Promise<CompositionCapture>;
   exportVideo?: (options: CompositionVideoOptions, controls: CompositionVideoControls) => Promise<SavedReferenceVideo>;
   commit: (
+    /** 저장 포트도 이 판을 읽기만 합니다. 저장 중 새 편집은 새 객체로 남습니다. */
     state: CompositionState,
     captures: CompositionCapture,
   ) => Promise<unknown>;
@@ -51,7 +54,6 @@ interface Session {
   identity: CompositionIdentity;
   port: CompositionSessionPort;
   revision: number;
-  stamp: string;
   busy: boolean;
   previous: CompositionState;
   changes: CompositionChange[];
@@ -74,7 +76,6 @@ const projectPages = new Map<
   { targets: () => CompositionIdentity[]; prepare: (cutId: string) => void }
 >();
 let serial = 0;
-const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const keyOf = (target: CompositionIdentity) =>
   JSON.stringify([target.projectName, target.cutId]);
 const sessionIdSchema = z.string().min(1).max(300);
@@ -133,7 +134,7 @@ function difference(
   path = "",
   result: CompositionChange["changes"] = [],
 ): CompositionChange["changes"] {
-  if (JSON.stringify(before) === JSON.stringify(after)) return result;
+  if (before === after) return result;
   if (result.length >= 100) return result;
   if (
     before &&
@@ -146,6 +147,7 @@ function difference(
       ...Object.keys(before),
       ...Object.keys(after),
     ])) {
+      if (result.length >= 100) break;
       difference(
         (before as Record<string, unknown>)[key],
         (after as Record<string, unknown>)[key],
@@ -158,20 +160,20 @@ function difference(
 }
 function reconcile(session: Session) {
   const value = session.port.read();
-  const stamp = JSON.stringify(value.state);
-  if (stamp !== session.stamp) {
+  if (value.state !== session.previous) {
     const changes = difference(session.previous, value.state);
-    const large = JSON.stringify(changes).length > 200_000;
-    session.stamp = stamp;
+    // 입력은 history의 불변 판입니다. 구도 전체 사본을 하나 더 보관하지 않습니다.
+    session.previous = value.state;
+    if (!changes.length) return value;
+    const copied = copyJsonWithinLimit(changes, 200_000);
     session.revision += 1;
     session.changes.push({
       revision: session.revision,
       source: session.source ?? "editor",
       changedPaths: changes.map((item) => item.path),
-      changes: large ? [] : clone(changes),
-      truncated: large || changes.length >= 100,
+      changes: copied.value ?? [],
+      truncated: copied.exceeded || changes.length >= 100,
     });
-    session.previous = clone(value.state);
     if (session.changes.length > 200) session.changes.shift();
   }
   return value;
@@ -229,8 +231,7 @@ export function registerCompositionSession(
     port,
     sessionId,
     revision: 0,
-    stamp: JSON.stringify(initial),
-    previous: clone(initial),
+    previous: initial,
     changes: [],
     busy: false,
   };
@@ -575,7 +576,8 @@ export async function commitComposition(input: unknown) {
     guard(session, request.expectedRevision);
     const captures = await session.port.capture();
     guard(session, request.expectedRevision);
-    const state = clone(session.port.read().state);
+    // UI 저장과 같은 불변 판을 전달합니다. 전체 모캡을 JSON 왕복 복제하면 저장 직전 메모리가 급증합니다.
+    const state = session.port.read().state;
     const result = await session.port.commit(state, captures);
     // 저장 도중 사람이 더 편집할 수 있습니다. 저장한 판과 현재 판을 구분해 성공을 과장하지 않습니다.
     const after = snapshot(session, request.detail);

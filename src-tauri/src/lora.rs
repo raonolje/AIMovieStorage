@@ -115,6 +115,55 @@ pub fn lora_files(app: AppHandle, engines: Vec<String>) -> Res<Vec<LoraFile>> {
     Ok(out)
 }
 
+/// 프리셋의 허용 해시는 Python 워커와 같은 자료를 읽습니다.
+fn h3_preset_for_hash(hash: &str) -> Res<Option<String>> {
+    let preset: Value = serde_json::from_str(include_str!("../resources/local/h3-ref2va-preset.json"))
+        .map_err(|e| err("프리셋 규약을 읽지 못했습니다", e))?;
+    Ok((preset["sha256"].as_str() == Some(hash)).then(|| preset["id"].as_str().unwrap_or("").to_owned()))
+}
+
+fn selected_lora_path(dir: &Path, name: &str) -> Res<PathBuf> {
+    if name.is_empty() || name.contains(['/', '\\', ':', '\0']) || !name.ends_with(".safetensors") {
+        return Err("로라 폴더 안의 safetensors 파일만 확인할 수 있습니다.".into());
+    }
+    let base = fs::canonicalize(dir).map_err(|e| err("로라 폴더를 읽지 못했습니다", e))?;
+    let path = fs::canonicalize(base.join(name)).map_err(|e| err("로라 파일을 찾지 못했습니다", e))?;
+    if path.parent() != Some(base.as_path()) || !path.is_file() {
+        return Err("로라 폴더 밖의 파일은 확인할 수 없습니다.".into());
+    }
+    Ok(path)
+}
+
+fn hash_selected_lora(path: &Path) -> Res<String> {
+    use std::io::Read;
+    use sha2::{Digest, Sha256};
+    let mut file = fs::File::open(path).map_err(|e| err("로라를 읽지 못했습니다", e))?;
+    let before = file.metadata().map_err(|e| err("로라 정보를 읽지 못했습니다", e))?;
+    if before.len() == 0 { return Err("로라 파일이 비어 있습니다.".into()); }
+    let mut hash = Sha256::new();
+    let mut buffer = vec![0u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer).map_err(|e| err("로라 검증에 실패했습니다", e))?;
+        if count == 0 { break; }
+        hash.update(&buffer[..count]);
+    }
+    let after = fs::metadata(path).map_err(|e| err("로라가 변경되었습니다", e))?;
+    if before.len() != after.len() || before.modified().ok() != after.modified().ok() {
+        return Err("검증 중 로라가 바뀌었습니다. 다시 선택해 주세요.".into());
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
+/// 선택한 H3 파일 한 개만 비동기로 검사합니다. 실행 직전에는 워커가 다시 검사합니다.
+#[tauri::command]
+pub async fn lora_verify_h3_preset(app: AppHandle, file_name: String) -> Res<Option<String>> {
+    let dir = lora_dir(&app, "minimaxh3")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = selected_lora_path(&dir, &file_name)?;
+        h3_preset_for_hash(&hash_selected_lora(&path)?)
+    }).await.map_err(|e| err("로라 검증 작업에 실패했습니다", e))?
+}
+
 #[tauri::command]
 pub fn lora_delete(app: AppHandle, engine: String, file_name: String) -> Res<()> {
     let dir = lora_dir(&app, &engine)?;
@@ -937,5 +986,30 @@ mod advised_weight_tests {
         assert_eq!(advised_weight("weight 0.001"), None);
         assert_eq!(advised_weight("<p>no numbers here</p>"), None);
         assert_eq!(advised_weight("strength of this lora is truly amazing, v2"), None);
+    }
+}
+
+#[cfg(test)]
+mod h3_preset_tests {
+    use super::*;
+    #[test]
+    fn only_manifest_hash_enables_the_preset() {
+        let manifest: Value = serde_json::from_str(include_str!("../resources/local/h3-ref2va-preset.json")).unwrap();
+        assert_eq!(h3_preset_for_hash(manifest["sha256"].as_str().unwrap()).unwrap().as_deref(), manifest["id"].as_str());
+        assert_eq!(h3_preset_for_hash("old-fl2va-artifact").unwrap(), None);
+    }
+    #[test]
+    fn selected_file_is_streamed_and_cannot_escape_engine_folder() {
+        let dir = std::env::temp_dir().join(format!("h3-preset-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("선택.safetensors");
+        fs::write(&path, b"abc").unwrap();
+        let selected = selected_lora_path(&dir, "선택.safetensors").unwrap();
+        assert_eq!(hash_selected_lora(&selected).unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        for name in ["../선택.safetensors", "..\\선택.safetensors", "C:outside.safetensors", "wrong.bin", ""] {
+            assert!(selected_lora_path(&dir, name).is_err());
+        }
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(dir).unwrap();
     }
 }

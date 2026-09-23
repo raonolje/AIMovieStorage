@@ -130,6 +130,7 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
     const mocap = await import("./controlMocap");
     const applyMocap = await import("./compositionMocapControl");
     const exportVideo = await import("./compositionVideoExport");
+    const loras = await import("./controlLoras");
     for (const [name, schema] of [
       ["project_create", project.projectCreateSchema], ["project_update", project.projectUpdateSchema],
       ["composition_apply", composition.compositionApplyRequestSchema], ["composition_commit", composition.compositionSessionRequestSchema],
@@ -138,6 +139,7 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
       ["mocap_result", mocap.mocapResultSchema],
       ["composition_apply_mocap", applyMocap.compositionApplyMocapSchema],
       ["composition_export_video", exportVideo.compositionExportVideoSchema],
+      ["loras_list", loras.controlLorasListSchema],
     ] as const) {
       expect(tools.find(tool => tool.name === name)?.inputSchema).toEqual(z.toJSONSchema(schema));
     }
@@ -146,6 +148,9 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
     expect(tools.every(tool => !("call" in tool))).toBe(true);
     expect(tools.find(tool => tool.name === "project_update")?.inputSchema.required).toContain("expectedRevision");
     expect(tools.find(tool => tool.name === "composition_apply")?.inputSchema.required).toContain("expectedRevision");
+    expect(tools.find(tool => tool.name === "loras_list")?.annotations.readOnlyHint).toBe(true);
+    expectFailure(await call("loras_list", { engine: "anima" }), "invalid_request");
+    expectFailure(await call("loras_list", { path: "C:/outside" }), "invalid_request");
   });
 
   it("리비전 없는 쓰기와 잘못된 입력 형식은 실행 전에 명시적 오류로 돌려준다", async () => {

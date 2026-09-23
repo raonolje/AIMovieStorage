@@ -21,6 +21,8 @@ imageio==2.37.0
 imageio-ffmpeg==0.6.0
 # I2V는 첫 장면을 학습 규약의 H.264 CRF로 재압축합니다. imageio만 있으면 이 단계가 실패합니다.
 av==15.1.0
+# Union 윤곽 주석기는 공식 워크플로의 Canny(92/200)를 CPU에서 재현합니다.
+opencv-python-headless==4.12.0.88
 ftfy==6.3.1
 
 # GPU 가 작을 때 **정말로 줄여서** 올리려고. int8·nf4 둘 다 이 패키지가 합니다.

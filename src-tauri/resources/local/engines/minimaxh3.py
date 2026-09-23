@@ -36,8 +36,10 @@ import os
 import time
 
 import common
+from engines._h3_lora_contract import generation_contract, lora_load_kwargs, require_reference_resize_support
 
-_state = {"pipe": None, "manager": None, "workflow": None, "loras": [], "plan": None}
+_state = {"pipe": None, "manager": None, "workflow": None, "loras": [], "plan": None,
+          "scheduler_shifts": None}
 
 #: 24 fps · 5~15초. `17n+5` 로 스냅한 뒤의 실제 범위입니다(n=7 → 124, n=20 → 345).
 MIN_FRAMES = 124
@@ -111,8 +113,27 @@ def _place_resident_rotary_buffer(transformer, device):
     transformer.rope.to(device=device)
 
 
+def _transformer_name(workflow):
+    # Ref2VA는 파일 폴더뿐 아니라 실행 부품 이름도 다릅니다. transformer에 넣으면
+    # load_components가 별도 transformer_ref를 다시 받아 정밀도·장치·로라 설정을 잃습니다.
+    return "transformer_ref" if workflow == "ref2va" else "transformer"
+
+
+def _active_transformer(pipe, workflow):
+    return getattr(pipe, _transformer_name(workflow))
+
+
+def _configure_reference_processor(pipe, workflow):
+    # Qwen3-VL 5.17의 기본값은 짧은 영상에도 전체 픽셀 예산을 써 버립니다.
+    # 공식 qwen-vl-utils와 같은 프레임당 토큰 상한을 켭니다. 프레임 수·시각은 유지합니다.
+    if workflow == "ref2va":
+        pipe.processor.video_processor.cap_pixels_per_frame = True
+
+
 def load(root, opts):
     workflow = _pick_workflow(opts)
+    # 프리셋/파일/워크플로가 맞지 않으면 큰 모델을 올리기 전에 거절합니다.
+    generation_contract(opts, workflow)
     # 정밀도를 **먼저** 셈합니다 — 이미 올라가 있어도 사람이 정밀도를 바꿨으면 다시 올려야
     # 합니다(로라만 다시 걸고 정밀도는 안 보던 자리). 판단은 `common.plan_precision` 한 곳.
     plan = common.plan_precision(BF16_GB, opts, loaded=_state["plan"], supported=SUPPORTED)
@@ -127,7 +148,11 @@ def load(root, opts):
     unload()
 
     manager = ComponentsManager()
-    pipe = ModularPipeline.from_pretrained(REPO, components_manager=manager)
+    if workflow == "ref2va":
+        from engines._h3_reference_resize import reference_pipeline
+        pipe = reference_pipeline(REPO, manager)
+    else:
+        pipe = ModularPipeline.from_pretrained(REPO, components_manager=manager)
 
     vram = plan["vram"]
     common.log("MiniMax-H3 {} 워크플로를 올립니다.".format(workflow))
@@ -148,7 +173,7 @@ def load(root, opts):
         from transformers import TorchAoConfig as TransformersTorchAoConfig
         from torchao.quantization import Int8WeightOnlyConfig
 
-        subfolder = "transformer_ref" if workflow == "ref2va" else "transformer"
+        subfolder = _transformer_name(workflow)
         """
         **큰 카드는 처음부터 GPU 로 흘려 넣습니다.**
 
@@ -173,8 +198,8 @@ def load(root, opts):
         `device_map` 으로 GPU 에 바로 실어 로딩 때 램이 부풀지 않게 합니다.
         """
         place = {"device_map": "cuda"} if big else {}
-        pipe.update_components(
-            transformer=MiniMaxH3Transformer3DModel.from_pretrained(
+        components = {
+            subfolder: MiniMaxH3Transformer3DModel.from_pretrained(
                 REPO,
                 subfolder=subfolder,
                 dtype=torch.bfloat16,
@@ -192,7 +217,7 @@ def load(root, opts):
                 # 그런 카드로는 애초에 여기까지 오지도 못했으니까요.
                 **place,
             ),
-            text_encoder=Qwen3VLForConditionalGeneration.from_pretrained(
+            "text_encoder": Qwen3VLForConditionalGeneration.from_pretrained(
                 REPO,
                 subfolder="text_encoder",
                 dtype=torch.bfloat16,
@@ -207,9 +232,11 @@ def load(root, opts):
                 ),
                 **({} if big else place),
             ),
-        )
+        }
+        pipe.update_components(**components)
         pipe.load_components(workflow=workflow, dtype=torch.bfloat16)
-        pipe.transformer.requires_grad_(False)
+        transformer = _active_transformer(pipe, workflow)
+        transformer.requires_grad_(False)
         pipe.text_encoder.requires_grad_(False)
 
         """
@@ -226,7 +253,7 @@ def load(root, opts):
         """
         if big:
             # 트랜스포머는 `device_map` 으로 이미 GPU 에 있습니다. 조건화기만 흘려 보냅니다.
-            _place_resident_rotary_buffer(pipe.transformer, torch.device("cuda"))
+            _place_resident_rotary_buffer(transformer, torch.device("cuda"))
             apply_group_offloading(
                 pipe.text_encoder.model,
                 offload_type="leaf_level",
@@ -241,7 +268,7 @@ def load(root, opts):
                 offload_device=torch.device("cpu"),
                 use_stream=vram >= 20,
             )
-            pipe.transformer.enable_group_offload(
+            transformer.enable_group_offload(
                 offload_type="block_level", num_blocks_per_group=1, **offload
             )
             apply_group_offloading(pipe.text_encoder.model, offload_type="leaf_level", **offload)
@@ -254,12 +281,14 @@ def load(root, opts):
         pipe.load_components(workflow=workflow, dtype=torch.bfloat16)
         manager.enable_auto_cpu_offload(device="cuda", memory_reserve_margin="12GB")
 
+    _configure_reference_processor(pipe, workflow)
     # 어텐션을 빠른 것으로 — 되는 것이 없으면 기본값 그대로 갑니다.
-    common.use_fast_attention(getattr(pipe, "transformer", None))
+    common.use_fast_attention(_active_transformer(pipe, workflow))
     _state["pipe"] = pipe
     _state["manager"] = manager
     _state["workflow"] = workflow
     _state["plan"] = plan
+    _state["scheduler_shifts"] = (pipe.scheduler.shift, pipe.audio_scheduler.shift)
     _state["loras"] = []
     _apply_loras(opts)
 
@@ -270,21 +299,23 @@ def unload():
     _state["workflow"] = None
     _state["loras"] = []
     _state["plan"] = None
+    _state["scheduler_shifts"] = None
     common.free_vram()
 
 
 def _apply_loras(opts):
     """`opts.loras = [{"path": …, "weight": 0.8}, …]` — 여러 개를 한꺼번에(멀티 로라)."""
     pipe = _state["pipe"]
+    transformer = _active_transformer(pipe, _state["workflow"])
     wanted = [item for item in (opts.get("loras") or []) if item.get("path")]
     signature = [(item["path"], float(item.get("weight", 1.0))) for item in wanted]
     if signature == _state["loras"]:
         return
 
     for method in ("unload_lora", "unload_lora_weights", "disable_lora"):
-        if hasattr(pipe.transformer, method):
+        if hasattr(transformer, method):
             try:
-                getattr(pipe.transformer, method)()
+                getattr(transformer, method)()
                 break
             except Exception as error:
                 common.log("로라를 떼지 못했습니다(무시): {}".format(error))
@@ -295,32 +326,45 @@ def _apply_loras(opts):
         if not os.path.isfile(path):
             raise IOError("로라 파일을 찾지 못했습니다: {}".format(path))
         common.guard_lora_family(path)
-        state_dict, hit = common.prepare_lora(pipe.transformer, path)
+        state_dict, hit = common.prepare_lora(transformer, path)
         if not hit:
-            raise common.lora_mismatch(pipe.transformer, state_dict, path)
+            raise common.lora_mismatch(transformer, state_dict, path)
         name = "lora{}".format(index)
-        pipe.transformer.load_lora_adapter(
+        transformer.load_lora_adapter(
             state_dict,
             prefix=None,
             adapter_name=name,
-            # 알파는 **넘기지 않습니다.** 키를 이미 이 모델의 이름으로 맞췄기 때문에
-            # `prefix=None` 으로 가는데, diffusers 는 그때 알파를 받으면 거절합니다
-            # («network_alphas cannot be None when prefix is None» — 조건이 뒤집혀 보이지만
-            # 뜻은 «앞머리를 안 줄 거면 알파도 주지 마라» 입니다). 랭크는 키마다 텐서 모양에
-            # 들어 있어 peft 가 스스로 읽습니다.
+            # prefix=None에서는 network_alphas 대신 PEFT metadata로 파일의 알파를
+            # 보존합니다. 알파가 없는 일반 로라의 기존 추론/사용자 세기는 유지합니다.
+            **lora_load_kwargs(path, state_dict),
         )
         common.log("로라 «{}» — 맞는 자리 {}곳.".format(os.path.basename(path), hit))
         names.append(name)
         weights.append(float(item.get("weight", 1.0)))
     if names:
         try:
-            pipe.transformer.set_adapters(names, weights)
-            got = common.check_loras(pipe.transformer, wanted, os.path.basename(wanted[0]["path"]))
+            transformer.set_adapters(names, weights)
+            got = common.check_loras(transformer, wanted, os.path.basename(wanted[0]["path"]))
             common.log("로라 {}개를 먹였습니다.".format(got))
         except Exception as error:
             # 겹쳐 켜기가 안 되는 판이면 마지막 것만 살아 있습니다 — 조용히 넘기지 않습니다.
             common.log("로라를 겹쳐 켜지 못했습니다(마지막 것만 듣습니다): {}".format(error))
     _state["loras"] = signature
+
+
+def _configure_generation(pipe, contract, steps):
+    """프리셋을 끈 재사용 요청에도 원래 스케줄러를 복원합니다."""
+    baseline = _state["scheduler_shifts"]
+    if baseline is None:
+        baseline = (pipe.scheduler.shift, pipe.audio_scheduler.shift)
+        _state["scheduler_shifts"] = baseline
+    video_shift = contract.get("video_shift", baseline[0])
+    audio_shift = contract.get("audio_shift", baseline[1])
+    pipe.scheduler.set_shift(video_shift)
+    pipe.audio_scheduler.set_shift(audio_shift)
+    if _state["workflow"] == "ref2va":
+        require_reference_resize_support(contract, [item.name for item in pipe.blocks.inputs])
+    return contract.get("num_inference_steps", steps)
 
 
 def _references(opts, generated_frames):
@@ -373,8 +417,9 @@ def generate(output, opts, report):
     started = time.time()
     pipe = _state["pipe"]
     workflow = _state["workflow"]
+    contract = generation_contract(opts, workflow)
     frames = _snap_frames(opts.get("seconds") or 5.0)
-    steps = int(opts.get("steps") or 30)
+    steps = _configure_generation(pipe, contract, int(opts.get("steps") or 30))
     seed = common.resolve_seed(opts)
 
     kwargs = {
@@ -393,6 +438,7 @@ def generate(output, opts, report):
 
     video_metadata = []
     if workflow == "ref2va":
+        kwargs["reference_resize_mode"] = contract["reference_resize_mode"]
         kwargs["references"], video_metadata = _references(opts, frames)
         for reference in video_metadata:
             report(9, "영상 레퍼런스 {} · 입력 {:.2f}초 · H3 조건 {:.2f}초".format(
@@ -428,10 +474,18 @@ def generate(output, opts, report):
         "fps": FPS,
         "seconds_video": round(frames / float(FPS), 2),
         "workflow": workflow,
+        "transformer_component": _transformer_name(workflow),
         "seed": seed,
         "has_audio": True,
         "generate_seconds": round(time.time() - started, 2),
         "reference_videos": video_metadata,
+        "reference_video_token_cap": pipe.processor.video_processor.max_video_tokens if workflow == "ref2va" else None,
+        "h3_lora_preset": contract["id"],
+        "reference_resize_mode": contract["reference_resize_mode"] if workflow == "ref2va" else None,
+        "scheduler_grid_points": steps,
+        "model_evaluations": len(pipe.scheduler.timesteps),
+        "video_shift": pipe.scheduler.shift,
+        "audio_shift": pipe.audio_scheduler.shift,
     }
     # 요청한 정밀도와 실제로 올라간 정밀도 — 한 곳에서 만듭니다.
     out.update(common.precision_fields(_state["plan"]))

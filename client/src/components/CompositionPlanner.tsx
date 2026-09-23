@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
+import { sameImmutableJson } from "@/lib/immutableJson";
 import {
   Dialog,
   DialogContent,
@@ -721,18 +722,17 @@ export default function CompositionPlanner({
       flushSync(() => { setPlaying(false); setPreviewing(false); });
       await settleCompositionEditor();
       const saved = currentState.current;
-      const stamp = JSON.stringify(saved);
       // 캡처가 실패해도 작업한 구도 자체는 먼저 파일에 남깁니다. 확인을 받기 전에는 닫지 않습니다.
       await persist(saved, async () => { await saveCallbacks.current.onSave(saved); });
       stateSaved = true;
       if (saveSession.current.generation !== opened) return;
-      if (JSON.stringify(currentState.current) !== stamp) {
+      if (!sameImmutableJson(currentState.current, saved)) {
         toast.message(t("저장하는 동안 구도가 바뀌었습니다. 새 변경은 계속 편집할 수 있습니다."));
         return;
       }
       if (saveCallbacks.current.onControlCommit || saveCallbacks.current.onCapture) {
         const captures = await control.capture();
-        if (JSON.stringify(currentState.current) !== stamp) {
+        if (!sameImmutableJson(currentState.current, saved)) {
           toast.message(t("저장하는 동안 구도가 바뀌었습니다. 새 변경은 계속 편집할 수 있습니다."));
           return;
         }

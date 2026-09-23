@@ -58,17 +58,21 @@ jobs:
       # 모델이 필요 없어 몇 초면 끝납니다.
       - name: 움직임 구역 · 로라 모양
         run: |
-          python -m pip install --quiet numpy pillow
+          python -m pip install --quiet numpy==2.2.6 pillow av==15.1.0 opencv-python-headless==4.12.0.88
           python src-tauri/resources/local/test_freeze_by_mask.py
           python src-tauri/resources/local/test_lora_shapes.py
           python src-tauri/resources/local/test_memory_cleanup.py
           python src-tauri/resources/local/test_image_guidance.py
           python src-tauri/resources/local/test_mocap_hands.py
           python src-tauri/resources/local/test_control_policy.py
+          python src-tauri/resources/local/test_structure_control.py
+          python src-tauri/resources/local/test_ltx_two_stage.py
           python src-tauri/resources/local/test_krea_quantization.py
           python src-tauri/resources/local/test_h3_reference_range.py
           # H3 전용 패키지/CUDA가 없으면 실제 장치 시험은 건너뛰고 호출 계약을 검사합니다.
           python src-tauri/resources/local/test_h3_device_placement.py
+          python src-tauri/resources/local/test_h3_lora_contract.py
+          python src-tauri/resources/local/test_h3_reference_resize.py
           python src-tauri/resources/local/test_cache_paths.py
           python src-tauri/resources/local/test_wan_dimensions.py
 

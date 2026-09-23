@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { validateLocalControlOptions } from "./localControlCapabilities";
+import { structureSourceSchema } from "./localStructureControl";
+import { controlLoraSelectionSchema, resolveControlLoras } from "./controlLoras";
+import { withLoraTriggers } from "./localLoras";
 import { mocapSourcesOf, loadMocapResult } from "./mocapStore";
 import { bakePoseFrames } from "./poseFrames";
 import {
@@ -48,10 +51,13 @@ const optionsSchema = z
     height: z.number().int().min(64).max(4096).optional(),
     seed: z.number().int().min(0).max(2147483647).optional(),
     steps: z.number().int().min(1).max(100).optional(),
+    ltx_quality: z.enum(["single", "two-stage"]).optional().describe("LTX 2.5 only. Default single preserves the current 8-step path. two-stage generates at half the requested final width/height, spatially upsamples 2x, then refines 3 steps with LoRAs/references disabled. Final dimensions align to 128 pixels with Union, otherwise 64; actual sizes and 8+3 steps are returned in meta.two_stage. FPS/frame count are unchanged."),
     guidance: z.number().min(0).max(30).optional(),
     seconds: z.number().min(1).max(60).optional(),
     fps: z.number().int().min(1).max(60).optional(),
     reference_video_range: z.enum(["first5s", "full"]).optional().describe("Required for H3 video reference assets: first5s decodes at most the first 5 seconds; full preserves the whole source input. H3 still limits conditioning to the generated duration. Completion meta.reference_videos records actual decoded and conditioning lengths."),
+    h3_reference_resize_mode: z.enum(["diffusers", "match"]).optional().describe("H3 Ref2VA only: diffusers keeps the original 2048-pixel image short edge; match caps image area to the output canvas without upscaling, then aligns to 32 pixels. Video timing is unchanged."),
+    h3_lora_preset: z.literal("lightx2v-ref2va-4step-v0.1").optional().describe("Explicit verified Ref2VA v0.1 Turbo only: one LoRA, weight 1, steps omitted or 4. Worker verifies the artifact SHA before model loading; uses 5 scheduler grid points for 4 evaluations, shifts 12/3 and match image resizing. Listing a file is not proof of compatibility."),
     precision: z.enum(["auto", "bf16", "int8", "int4"]).optional(),
   })
   .strict();
@@ -69,6 +75,8 @@ export const generateMediaSchema = z
     imageAssetId: id.optional(),
     motionMaskAssetId: id.optional(),
     referenceAssetIds: z.array(id).max(12).optional(),
+    loras: controlLoraSelectionSchema.optional().describe("Select explicit IDs from loras_list for this engine. Omitted/empty means no LoRA; UI defaults are not implicitly enabled. Arbitrary paths are not accepted. Files are rechecked immediately before generation."),
+    structureSource: structureSourceSchema.optional().describe("LTX 2.5 Union Canny guide from a video asset in this project. Uses absolute source time and resamples to output FPS without time stretching or end padding. Cannot combine with poseSource. durationSeconds is required and must cover options.seconds; source bounds are checked before model load."),
     poseSource: z.object({
       sourceId: id,
       personNumber: z.number().int().positive(),
@@ -285,8 +293,23 @@ function validateGeneration(raw: unknown) {
     if (asset.kind === "other")
       throw new Error("이 에셋은 생성 레퍼런스로 쓸 수 없습니다.");
   });
+  if (input.options.h3_reference_resize_mode !== undefined || input.options.h3_lora_preset !== undefined) {
+    if (input.engine !== "minimaxh3" || !referenceAssets?.some(asset => asset.kind === "image" || asset.kind === "video"))
+      throw new Error("H3 참조 전처리와 터보 프리셋은 그림 또는 영상 레퍼런스가 있는 Ref2VA에서만 사용할 수 있습니다.");
+    if (input.options.h3_lora_preset && (input.loras?.length !== 1 || input.loras[0].weight !== 1
+      || (input.options.steps !== undefined && input.options.steps !== 4)
+      || (input.options.h3_reference_resize_mode !== undefined && input.options.h3_reference_resize_mode !== "match")))
+      throw new Error("H3 Ref2VA 터보 프리셋은 로라 한 개·세기 1·steps 생략 또는 4·match 전처리가 필요합니다.");
+  }
+  if (input.options.ltx_quality !== undefined && input.engine !== "ltx25")
+    throw new Error("LTX 품질 선택은 LTX 2.5에서만 사용할 수 있습니다.");
   const controlCheck = validateLocalControlOptions(input.engine, {
     ...(input.poseSource ? { control: { kind: "pose", frames: ["형식 확인"], fps: input.options.fps ?? 24 } } : {}),
+    ...(input.structureSource ? { structure_control: (() => {
+      const { assetId, ...settings } = input.structureSource;
+      return { ...settings, path: assetOf(input.projectId, assetId, "video").path };
+    })() } : {}),
+    seconds: input.options.seconds,
     references: referenceAssets,
     reference_video_range: input.options.reference_video_range,
   });
@@ -299,6 +322,7 @@ function validateGeneration(raw: unknown) {
 }
 export async function enqueueControlGeneration(raw: unknown) {
   const { input, draft } = validateGeneration(raw);
+  await resolveControlLoras(input.engine, input.loras);
   return enqueueTaskOperation({
     lane: "media",
     kind: "control.generate",
@@ -343,6 +367,10 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
     });
   let control;
   let poseSource: Record<string, unknown> | undefined;
+  const structureControl = input.structureSource ? (() => {
+    const { assetId, ...settings } = input.structureSource;
+    return { ...settings, path: assetOf(input.projectId, assetId, "video").path };
+  })() : undefined;
   if (input.poseSource) {
     const folder = projectFolderName(input.projectId, draft.title);
     const source = mocapSourcesOf(folder).find(item => item.id === input.poseSource!.sourceId)!;
@@ -362,6 +390,9 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
       mirrored: result.mirrored, sampling: "nearest-in-range" };
     setTaskResult(task.id, { data: { poseSource } });
   }
+  // 기다리는 동안 삭제/교체된 파일을 캐시된 경로로 실행하지 않습니다.
+  const loras = await resolveControlLoras(input.engine, input.loras);
+  if (isStopping(task.id)) return { data: { attached: false, cancelled: true } };
   const made = await runLocalToProject({
     engine: input.engine,
     kind,
@@ -371,7 +402,10 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
     assetType: kind === "video" ? "scene-video" : target.assetType,
     opts: {
       ...input.options,
+      prompt: withLoraTriggers(input.options.prompt, loras),
+      loras,
       control,
+      structure_control: structureControl,
       references,
       image: input.imageAssetId
         ? assetOf(input.projectId, input.imageAssetId, "image").path
@@ -383,9 +417,10 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
     onProgress: (step) => report({ step }),
   });
   // 붙이기가 실패하거나 취소되어도 만들어진 파일의 위치를 잃지 않습니다.
-  setTaskResult(task.id, { paths: [made.path], data: poseSource ? { poseSource } : undefined });
+  const controlSources = { ...(poseSource ? { poseSource } : {}), ...(input.structureSource ? { structureSource: input.structureSource } : {}), ...(input.loras ? { loras: input.loras } : {}) };
+  setTaskResult(task.id, { paths: [made.path], data: { ...controlSources, meta: made.meta } });
   if (isStopping(task.id))
-    return { paths: [made.path], data: { attached: false, cancelled: true, ...(poseSource ? { poseSource } : {}) } };
+    return { paths: [made.path], data: { attached: false, cancelled: true, ...controlSources } };
   const assetId = await attach(
     input.projectId,
     input.target,
@@ -393,7 +428,7 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
     made.name,
     kind === "video",
   );
-  return { paths: [made.path], assetIds: [assetId], data: { attached: true, seconds: made.seconds, meta: made.meta, ...(poseSource ? { poseSource } : {}) } };
+  return { paths: [made.path], assetIds: [assetId], data: { attached: true, seconds: made.seconds, meta: made.meta, ...controlSources } };
 });
 registerTaskRunner("control.upscale", async (raw, report, task) => {
   if (isStopping(task.id)) return;

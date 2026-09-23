@@ -57,7 +57,11 @@ describe("프로젝트 대화 조종", () => {
     const changed = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [{ type: "cut.update", sceneId: "s", id: "k", fields: { promptEn: "new prompt" } }] });
     expect(changed.projection.detail).toBe("summary");
     expect(current().scenes[0].cuts[0].composition?.motionTracks?.[0].keys).toHaveLength(1983);
-    current().scenes[0].cuts[0].composition!.motionTracks![4].keys[1982].value.x = 7;
+    // 실제 구도·컷 저장처럼 바뀐 경로를 새 객체로 올립니다. 이전 판의 모캡은 불변입니다.
+    state.projects.get("p")!.draft = { ...current(), scenes: current().scenes.map(scene => ({ ...scene, cuts: scene.cuts.map(cut => ({ ...cut,
+      composition: { ...cut.composition!, motionTracks: cut.composition!.motionTracks!.map((track, index) => index !== 4 ? track : { ...track,
+        keys: track.keys.map((key, index) => index !== 1982 ? key : { ...key, value: { ...key.value, x: 7 } }) }) },
+    })) })) };
     await expect(api.updateProjectControl({ projectId: "p", expectedRevision: changed.revision, commands: [{ type: "project.update", fields: { title: "오래된 요청" } }] })).rejects.toMatchObject({ code: "revision_conflict" });
     const changes = await api.getProjectChanges({ projectId: "p", sinceRevision: "previous-session" });
     expect(changes.fullSnapshotRequired).toBe(true);
@@ -197,8 +201,8 @@ describe("프로젝트 대화 조종", () => {
     const api = await import("@/lib/projectControl");
     current().characters = [{ ...newCharacter(), id: "c1", name: "처음" }, { ...newCharacter(), id: "c2", name: "둘째" }];
     const first = await api.getProjectSnapshot("p");
-    current().characters.reverse();
-    current().characters.find((item) => item.id === "c1")!.description = "수동 편집";
+    state.projects.get("p")!.draft = { ...current(), characters: [...current().characters].reverse().map(item =>
+      item.id === "c1" ? { ...item, description: "수동 편집" } : item) };
     const changes = await api.getProjectChanges({ projectId: "p", sinceRevision: first.revision });
     expect(changes.changes).toContainEqual(expect.objectContaining({ path: "/characters/c1/description", after: "수동 편집" }));
   });
@@ -220,5 +224,61 @@ describe("프로젝트 대화 조종", () => {
     const first = await api.getProjectSnapshot("p");
     await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [{ type: "cut.update", sceneId: "s", id: "k", fields: { promptEn: "new prompt" } }] });
     expect(current().scenes[0].cuts[0]).toMatchObject({ guideImagePath: "p/guide.png", videos: cut.videos, promptEn: "new prompt" });
+  });
+
+  it("5인 공유 모캡은 요약 조회·텍스트 편집·변경 대기에서 관절값을 다시 복제하거나 읽지 않는다", async () => {
+    const api = await import("./projectControl");
+    let keyReads = 0;
+    const keys = Array.from({ length: 1936 }, (_, frame) => ({ id: `key-${frame}`, time: frame / 30,
+      get value() { keyReads += 1; return { x: frame, y: 0, z: 0 }; },
+      bones: Object.fromEntries(Array.from({ length: 60 }, (_, bone) => [`bone-${bone}`, { x: .1, y: .2, z: .3 }])),
+    }));
+    const composition = { ...normalizeComposition(), motionTracks: Array.from({ length: 5 }, (_, actor) => ({
+      id: `track-${actor}`, targetId: `actor-${actor}`, channel: "pose" as const, keys,
+    })) };
+    current().scenes = [{ ...newScene(), id: "s", cuts: [{ ...newCut(1), id: "k", composition }] }];
+    const first = await api.getProjectSnapshot("p", "summary");
+    const again = await api.getProjectSnapshot("p", "summary");
+    expect(again.revision).toBe(first.revision);
+    const updated = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision,
+      commands: [{ type: "cut.update", sceneId: "s", id: "k", fields: { promptEn: "카메라 프롬프트 수정" } }] });
+    expect(current().scenes[0].cuts[0].composition).toBe(composition);
+    const changes = await api.getProjectChanges({ projectId: "p", sinceRevision: first.revision });
+    expect(changes.changes).toContainEqual(expect.objectContaining({ path: "/scenes/s/cuts/k/promptEn", after: "카메라 프롬프트 수정", source: "controller" }));
+    expect(await api.getProjectChanges({ projectId: "p", sinceRevision: updated.revision })).toMatchObject({ changes: [] });
+    expect(keyReads).toBe(0);
+    // 조종기 응답을 수정해도 앱 상태와 다음 리비전은 오염되지 않습니다.
+    updated.draft.title = "호출자가 응답 사본을 수정";
+    expect(current().title).toBe("작품");
+    expect((await api.getProjectSnapshot("p", "summary")).revision).toBe(updated.revision);
+  });
+
+  it("새 root와 컷 경로를 반환하는 실제 편집 형태의 변경은 공유 모캡을 보존하며 오래된 요청을 막는다", async () => {
+    const api = await import("./projectControl");
+    const { cutCompositionPatch } = await import("./cutCompositionSave");
+    const composition = normalizeComposition();
+    current().scenes = [{ ...newScene(), id: "s", cuts: [{ ...newCut(1), id: "k", composition }] }];
+    const first = await api.getProjectSnapshot("p", "summary");
+    const moved = { ...composition, camera: { ...composition.camera, fovDegrees: 42 } };
+    const before = current();
+    state.projects.get("p")!.draft = { ...before, ...cutCompositionPatch(before, "k", moved) };
+    expect(before.scenes[0].cuts[0].composition).toBe(composition);
+    const changes = await api.getProjectChanges({ projectId: "p", sinceRevision: first.revision });
+    expect(changes.changes).toContainEqual(expect.objectContaining({ path: "/scenes/s/cuts/k/composition/camera/fovDegrees", after: 42, source: "app" }));
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [{ type: "project.update", fields: { title: "낡은 요청" } }] })).rejects.toMatchObject({ code: "revision_conflict" });
+  });
+
+  it("한 판의 변경 로그 크기와 64판의 이력 한도를 넘으면 전체 재조회를 요구한다", async () => {
+    const api = await import("./projectControl");
+    current().characters = Array.from({ length: 40 }, (_, index) => ({ ...newCharacter(), id: `c${index}`, name: `인물${index}`, description: "a".repeat(3000) }));
+    const first = await api.getProjectSnapshot("p", "summary");
+    state.projects.get("p")!.draft = { ...current(), characters: current().characters.map(item => ({ ...item, description: "b".repeat(3000) })) };
+    const large = await api.getProjectChanges({ projectId: "p", sinceRevision: first.revision });
+    expect(large).toMatchObject({ fullSnapshotRequired: true, changes: [], snapshot: { projection: { detail: "summary" } } });
+    for (let index = 0; index < 65; index += 1) {
+      state.projects.get("p")!.draft = { ...current(), title: `제목${index}` };
+      await api.getProjectSnapshot("p", "summary");
+    }
+    expect(await api.getProjectChanges({ projectId: "p", sinceRevision: large.revision })).toMatchObject({ fullSnapshotRequired: true });
   });
 });

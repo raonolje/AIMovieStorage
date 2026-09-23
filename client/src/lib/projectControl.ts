@@ -1,4 +1,5 @@
 import { diffControlValues } from "./controlChanges";
+import { copyJsonWithinLimit, sameImmutableJson } from "./immutableJson";
 import { controlDetailSchema, projectControlValue, type ControlDetail } from "./controlProjection";
 import { z } from "zod";
 import { loadProjects, listLocalProjects, getLocalProject, saveLocalProjectAndConfirm } from "@/lib/localProjectStore";
@@ -44,7 +45,6 @@ function parse<T>(schema: z.ZodType<T>, input: unknown): T {
   if (!parsed.success) throw new ProjectControlError("invalid_request", "프로젝트 요청 형식이 맞지 않습니다.", parsed.error.issues);
   return parsed.data;
 }
-const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 let ready: Promise<unknown> | null = null;
 const ensureReady = () => ready ??= loadProjects();
 const sessionId = uid();
@@ -52,6 +52,7 @@ let revisionNumber = 0;
 const nextRevision = () => `${sessionId}:${++revisionNumber}`;
 const HISTORY_LIMIT = 64;
 const DIFF_LIMIT = 200;
+const HISTORY_ENTRY_SIZE = 200_000;
 export interface ProjectChange {
   revision: string;
   source: "app" | "controller";
@@ -69,14 +70,17 @@ let navigation: ((projectId: string) => void) | null = null;
 
 /** 앱 변경은 수동 편집과 자동 결과를 포함합니다. 키 입력마다의 행위 로그나 작성자 추정은 하지 않습니다. */
 function observe(projectId: string, draft: ProjectDraft, source: "app" | "controller" = "app"): Observation {
-  const copy = clone(draft);
+  // 화면의 patch·컷/구도 저장은 바뀐 경로를 새 객체로 만듭니다. 전체 모캡을 복제하면
+  // 요약 조회만으로도 수백 MB 문자열·사본이 생깁니다. 큰 불변 가지는 공유하되 루트는
+  // 얕게 남겨 같은 루트 객체의 제목/배열 교체도 다음 조회에서 놓치지 않습니다.
+  const copy = { ...draft };
   const previous = observations.get(projectId);
   if (!previous) {
     const made = { draft: copy, revision: nextRevision(), history: [] };
     observations.set(projectId, made);
     return made;
   }
-  if (JSON.stringify(previous.draft) === JSON.stringify(copy)) return previous;
+  if (sameImmutableJson(previous.draft, copy)) return previous;
   const revision = nextRevision();
   const pending = pendingControllerEdits.get(projectId);
   const attributePending = source === "app" && pending?.applied && !pending.observed;
@@ -84,12 +88,16 @@ function observe(projectId: string, draft: ProjectDraft, source: "app" | "contro
     // 파일 쓰기를 기다리는 동안 UI 수정과 조회가 들어올 수 있습니다. 실제 최신 판에서
     // 그 요청과 일치하는 변경만 구분하며, 저장 완료 후 옛 판을 재관찰해 되감지 않습니다.
     const controllerChange = attributePending && pending.changes.some((expected) =>
-      expected.path === change.path && JSON.stringify(expected.before) === JSON.stringify(change.before)
-      && JSON.stringify(expected.after) === JSON.stringify(change.after));
+      expected.path === change.path && sameImmutableJson(expected.before, change.before)
+      && sameImmutableJson(expected.after, change.after));
     return { ...change, revision, source: controllerChange ? "controller" as const : source };
   });
   if (attributePending) pending.observed = true;
-  const next = { draft: copy, revision, history: [...previous.history, { from: previous.revision, to: revision, changes, truncated: changes.length >= DIFF_LIMIT || changes.some((change) => change.truncated) }].slice(-HISTORY_LIMIT) };
+  // 200개 항목 각각이 작아도 64판을 쌓으면 다시 커집니다. 기록 전체의 상한도 두고
+  // 넘친 판은 전체 상태 재조회를 요구합니다. 실제 초안과 충돌 검사는 줄이지 않습니다.
+  const bounded = copyJsonWithinLimit(changes, HISTORY_ENTRY_SIZE);
+  const next = { draft: copy, revision, history: [...previous.history, { from: previous.revision, to: revision,
+    changes: bounded.value ?? [], truncated: bounded.exceeded || changes.length >= DIFF_LIMIT || changes.some((change) => change.truncated) }].slice(-HISTORY_LIMIT) };
   observations.set(projectId, next);
   return next;
 }
@@ -177,13 +185,12 @@ export async function updateProjectControl(input: unknown) {
     if (request.expectedRevision !== state.revision) throw new ProjectControlError("revision_conflict", "그 사이 프로젝트가 바뀌었습니다. 변경 내역을 읽은 뒤 다시 적용해 주세요.", { expectedRevision: request.expectedRevision, actualRevision: state.revision });
     const commands = request.commands.map((command) => command.type !== "project.update" && command.type.endsWith(".add") && !command.id ? { ...command, id: uid() } : command);
     const preview = applyProjectCommands(state.draft, commands);
-    const stamp = JSON.stringify(state.draft);
     const pending: PendingControllerEdit = { applied: false, observed: false, changes: diffControlValues(state.draft, preview) };
     pendingControllerEdits.set(request.projectId, pending);
     let conflicted = false;
     const outcome = await writeProjectAndConfirm(request.projectId, (current) => {
       // React 계산 중 예외를 던지면 편집 화면 전체가 닫힙니다. 아무것도 바꾸지 않고 호출자에게 충돌을 알립니다.
-      if (JSON.stringify(clone(current)) !== stamp) { conflicted = true; return {}; }
+      if (!sameImmutableJson(current, state.draft)) { conflicted = true; return {}; }
       pending.applied = true;
       return preview;
     });

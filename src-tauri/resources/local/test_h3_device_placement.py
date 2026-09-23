@@ -4,12 +4,29 @@ import types
 import unittest
 from unittest.mock import Mock
 
-from engines.minimaxh3 import _place_resident_rotary_buffer
+from engines.minimaxh3 import _place_resident_rotary_buffer, _active_transformer, _transformer_name, _configure_reference_processor
 
 HAS_PACKAGES = all(importlib.util.find_spec(name) for name in ("torch", "diffusers"))
 
 
 class ResidentPlacementContractTests(unittest.TestCase):
+    @unittest.skipUnless(importlib.util.find_spec("transformers"), "실제 H3 엔진 환경에서 전처리기를 확인합니다.")
+    def test_reference_processor_caps_short_video_without_touching_other_workflows(self):
+        from transformers import Qwen3VLVideoProcessor
+        # H3 체크포인트의 video_preprocessor_config.json과 같은 설정입니다.
+        # 클래스 기본 크기는 더 작아 토큰 상한의 효과를 재현하지 못합니다.
+        processor = Qwen3VLVideoProcessor(
+            size={"longest_edge": 25165824, "shortest_edge": 4096},
+            patch_size=16, merge_size=2,
+        )
+        before = processor.get_num_of_video_patches(12, 768, 1344)
+        pipe = types.SimpleNamespace(processor=types.SimpleNamespace(video_processor=processor))
+        _configure_reference_processor(pipe, "ref2va")
+        after = processor.get_num_of_video_patches(12, 768, 1344)
+        self.assertLess(after, before)
+        self.assertLessEqual(after / processor.merge_size**2, 6 * processor.max_video_tokens)
+        _configure_reference_processor(types.SimpleNamespace(), "fl2va")
+
     def test_moves_only_rotary_module_without_casting_quantized_weights(self):
         rope = types.SimpleNamespace(to=Mock())
         quantized_weight = object()
@@ -54,6 +71,31 @@ class ResidentRotaryBufferTests(unittest.TestCase):
             torch.testing.assert_close(cpu, gpu.cpu())
         self.assertEqual(self.rope.inv_freq.dtype, torch.float32)
         self.assertNotIn("inv_freq", self.rope.state_dict())
+
+    def test_reference_workflow_selects_the_component_used_by_real_denoiser(self):
+        from diffusers.modular_pipelines.minimax_h3.denoise import MiniMaxH3LoopDenoiser, MiniMaxH3Ref2VALoopDenoiser
+        pipe = types.SimpleNamespace(transformer=object(), transformer_ref=object())
+        for workflow, denoiser in (("t2va", MiniMaxH3LoopDenoiser()),
+                                   ("fl2va", MiniMaxH3LoopDenoiser()),
+                                   ("ref2va", MiniMaxH3Ref2VALoopDenoiser())):
+            with self.subTest(workflow=workflow):
+                self.assertEqual(_transformer_name(workflow), denoiser.transformer_name)
+                self.assertIs(_active_transformer(pipe, workflow), getattr(pipe, denoiser.transformer_name))
+
+    def test_cuda_reference_rotary_is_placed_without_touching_other_partition(self):
+        torch = self.torch
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA가 있는 H3 엔진 환경에서 실행합니다.")
+        from diffusers.models.transformers.transformer_minimax_h3 import MiniMaxH3RotaryPosEmbed
+        plain = types.SimpleNamespace(rope=MiniMaxH3RotaryPosEmbed(rope_freq_dim=4))
+        pipe = types.SimpleNamespace(transformer=plain, transformer_ref=self.transformer)
+        positions = torch.arange(18).reshape(6, 3).float()
+        expected = self.rope(positions)
+        _place_resident_rotary_buffer(_active_transformer(pipe, "ref2va"), torch.device("cuda"))
+        actual = pipe.transformer_ref.rope(positions.cuda())
+        for cpu, gpu in zip(expected, actual):
+            torch.testing.assert_close(cpu, gpu.cpu())
+        self.assertEqual(plain.rope.inv_freq.device.type, "cpu")
 
 
 if __name__ == "__main__":

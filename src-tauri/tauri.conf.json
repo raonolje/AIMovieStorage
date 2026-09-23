@@ -54,6 +54,7 @@
       "resources/upscale/engines/*/requirements.txt",
       "resources/upscale/engines/*/manifest.json",
       "resources/local/*.py",
+      "resources/local/h3-ref2va-preset.json",
       "resources/local/engines/*.py",
       "resources/local/engines/*/requirements.txt",
       "resources/local/engines/*/manifest.json"

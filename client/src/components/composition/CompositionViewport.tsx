@@ -9,6 +9,7 @@ import { characterColorMap } from "@/lib/compositionColors";
 import { referenceMannequinMaterials } from "@/lib/referenceMannequin";
 import { shadowsOf } from "@/lib/compositionShadows";
 import { createGroundShadows } from "./viewport/groundShadows";
+import { applyMotionThenCameraAt, objectBoundsAnchor } from "./viewport/timelineFrame";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { toast } from "sonner";
@@ -1401,14 +1402,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
       const node =
         ctx.characterRoots.get(targetId) ?? ctx.objectRoots.get(targetId);
       if (!node) return source === move ? null : { ...source.anchor };
-      const box = new THREE.Box3().setFromObject(node);
-      if (box.isEmpty()) return { ...source.anchor };
-      const ratio = source.anchorRatio ?? 0.73;
-      return {
-        x: (box.min.x + box.max.x) / 2,
-        y: box.min.y + (box.max.y - box.min.y) * ratio,
-        z: (box.min.z + box.max.z) / 2,
-      };
+      return objectBoundsAnchor(node, source.anchorRatio ?? 0.73) ?? { ...source.anchor };
     };
 
     /*
@@ -1477,7 +1471,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
     };
     ctx.showMovesAt = showMovesAt;
 
-    const applyCameraMove = () => {
+    const applyCameraMove = (time = playheadRef.current) => {
       if (!previewingRef.current) return;
       const list = cameraMovesRef.current;
       if (!list.length) return;
@@ -1485,7 +1479,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
         evaluateCameraMoves(
           baseCameraRef.current,
           list,
-          playheadRef.current,
+          time,
           resolveAnchor,
           resolveShot,
         ),
@@ -1832,8 +1826,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
       orbit.advanceGlide();
       orbit.applyFeel();
       // 트랙은 재생 중이 아니어도 맞춥니다 — 키 사이를 오가며 값을 고쳐야 하니까요.
-      applyMotionTime();
-      applyCameraMove();
+      applyMotionThenCameraAt(playheadRef.current, applyMotionTime, applyCameraMove);
       applyGlbTime();
       // 배경도 트랙과 같은 규칙 — 멈춰 있어도 그 시각의 자리로. 눈금을 끌면 배경이 따라 흐릅니다.
       applyBackgroundDrift();
@@ -1906,8 +1899,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
       if (options?.requireReady) {
         if (videoRenderState) throw new Error("레퍼런스 영상 렌더가 끝나야 구도를 캡처할 수 있습니다.");
         // Codex/Claude가 앞에 있으면 rAF가 멈출 수 있습니다. 평소 재생 루프의 같은 계산을 직접 적용합니다.
-        applyMotionTime();
-        applyCameraMove();
+        applyMotionThenCameraAt(playheadRef.current, applyMotionTime, applyCameraMove);
         applyGlbTime();
         applyBackgroundDrift();
         applyBackgroundVideo();
@@ -2015,18 +2007,9 @@ export default function CompositionViewport(props: CompositionViewportProps) {
         await seekRoomVideoTime(entries, time);
       },
       drawAt: (time) => {
-        const list = cameraMovesRef.current;
-        if (list.length)
-          applyCameraPose(
-            evaluateCameraMoves(
-              baseCameraRef.current,
-              list,
-              time,
-              resolveAnchor,
-              resolveShot,
-            ),
-          );
-        applyMotionTime(time);
+        // 재생 화면과 같은 시각의 몸 경계를 보고 따라갑니다. 먼저 카메라를 풀면
+        // anchorTargetId가 직전 렌더 프레임(첫 장은 편집 중이던 시각)을 바라봅니다.
+        applyMotionThenCameraAt(time, applyMotionTime, showMovesAt);
         applyGlbTime(time);
         // 식별 색은 구도 이미지에만 남깁니다. 영상 모델이 피부·손에 그 색을 복사하지 않도록 합니다.
         videoRenderState?.bodyMaterials.apply(ctx.characterRoots.values());

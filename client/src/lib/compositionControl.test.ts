@@ -32,6 +32,7 @@ const identity = { projectName: "시험 프로젝트", cutId: "cut" };
 const cleanups: (() => void)[] = [];
 afterEach(() => {
   cleanups.splice(0).forEach((cleanup) => cleanup());
+  vi.restoreAllMocks();
 });
 function fixture(initial = normalizeComposition()) {
   let state = initial;
@@ -82,6 +83,58 @@ function fixture(initial = normalizeComposition()) {
 }
 
 describe("구도 명령 관문", () => {
+  it("카메라 편집·재조회·저장은 공유 모캡 관절을 복제하거나 직렬화하지 않는다", async () => {
+    const keys = Array.from({ length: 1200 }, (_, index) => ({
+      id: `key-${index}`, time: index / 30, value: { x: 0, y: 0, z: 0 },
+      get bones() { throw Error("바뀌지 않은 모캡 관절을 다시 읽었습니다"); },
+    }));
+    const state = { ...normalizeComposition(), motionTracks: [{ id: "dance", targetId: "person", channel: "pose" as const, keys }] };
+    const f = fixture(state);
+    const changed = await applyCompositionCommands({ sessionId: f.sessionId, expectedRevision: 0,
+      commands: [{ op: "camera.set", fovDegrees: 55 }] });
+    expect(changed.revision).toBe(1);
+    observeCompositionSession(identity);
+    observeCompositionSession(identity);
+    expect(getCompositionSession(f.sessionId, "summary").revision).toBe(1);
+    const committed = await commitComposition({ sessionId: f.sessionId, expectedRevision: 1 });
+    expect(committed.persistedLatest).toBe(true);
+    expect(f.commit.mock.calls[0][0]).toBe(f.state());
+    expect(f.state().motionTracks![0].keys).toBe(keys);
+    expect(getCompositionChanges({ sessionId: f.sessionId, sinceRevision: 0 }).changes[0].changedPaths).toEqual(["/camera/fovDegrees"]);
+    const undone = await undoComposition({ sessionId: f.sessionId, expectedRevision: 1 });
+    expect(undone.revision).toBe(2);
+    expect(f.state()).toBe(state);
+    await expect(commitComposition({ sessionId: f.sessionId, expectedRevision: 1 })).rejects.toMatchObject({ code: "revision_conflict" });
+  });
+
+  it("대량 모캡 추가 이력은 크기를 제한하고 작은 뒤 편집의 판을 계속 구분한다", () => {
+    const f = fixture();
+    const bones = Object.fromEntries(Array.from({ length: 60 }, (_, index) => [`bone-${index}`, { x: 0.1, y: 0.2, z: 0.3 }]));
+    f.user(current => ({ ...current, motionTracks: [{ id: "dance", targetId: "person", channel: "pose",
+      keys: Array.from({ length: 1600 }, (_, index) => ({ id: `pose-${index}`, time: index / 30, value: { x: 0, y: 0, z: 0 }, bones })),
+    }] }));
+    const first = getCompositionChanges({ sessionId: f.sessionId, sinceRevision: 0 });
+    expect(first.revision).toBe(1);
+    expect(first.fullSnapshotRequired).toBe(true);
+    expect(first.changes[0]).toMatchObject({ changedPaths: ["/motionTracks/0"], changes: [], truncated: true });
+    f.user(current => ({ ...current, showFloor: !current.showFloor }));
+    const next = getCompositionChanges({ sessionId: f.sessionId, sinceRevision: 1 });
+    expect(next.revision).toBe(2);
+    expect(next.fullSnapshotRequired).toBe(false);
+    expect(next.changes[0].changedPaths).toEqual(["/showFloor"]);
+  });
+
+  it("새 객체가 같은 내용을 담으면 판을 올리지 않고 로그 응답은 편집 원본과 분리한다", () => {
+    const f = fixture();
+    f.user(current => ({ ...current, camera: { ...current.camera } }));
+    expect(getCompositionSession(f.sessionId, "summary").revision).toBe(0);
+    f.user(current => ({ ...current, camera: { ...current.camera, fovDegrees: 77 } }));
+    const changes = getCompositionChanges({ sessionId: f.sessionId, sinceRevision: 0, detail: "full" });
+    changes.changes[0].changes[0].after = 99;
+    expect(getCompositionChanges({ sessionId: f.sessionId, sinceRevision: 0, detail: "full" }).changes[0].changes[0].after).toBe(77);
+    expect(f.state().camera.fovDegrees).toBe(77);
+  });
+
   it("큰 모캡 구도는 기본 요약으로 열고 내부 조회는 원래 키를 보존합니다", async () => {
     const original = addMannequinIn(normalizeComposition(), "female", "performer");
     const keys = Array.from({ length: 2400 }, (_, index) => ({

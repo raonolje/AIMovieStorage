@@ -11,6 +11,7 @@ import StepBasics from "@/components/project/StepBasics";
 import StepCharacters from "@/components/project/StepCharacters";
 import StepScenes from "@/components/project/StepScenes";
 import StepFinish from "@/components/project/StepFinish";
+import ProjectEditorLoadGate from "@/components/project/ProjectEditorLoadGate";
 import { ConfirmDialogHost } from "@/components/ConfirmDialog";
 import { ProjectMediaContext, type ProjectMedia } from "@/components/project/ProjectMediaContext";
 import {
@@ -87,13 +88,30 @@ const STEPS = [
 ];
 
 export default function NewProjectPage() {
-  const t = useT();
-  const [, navigate] = useLocation();
   const [, params] = useRoute("/project/:id");
   const projectId = params?.id;
+  // 최신 파일이 오기 전에는 편집·자동 저장·외부 조종 대상 어느 것도 등록하지 않습니다.
+  // 경로가 바뀌면 이전 편집기를 먼저 닫고 새 작품의 로딩 경계를 따로 만듭니다.
+  return projectId
+    ? <ProjectEditorLoadGate key={projectId} projectId={projectId}>{project => <ProjectEditor initialProject={project} />}</ProjectEditorLoadGate>
+    : <ProjectEditor key="new-project" />;
+}
 
-  const [draft, setDraft] = useState<ProjectDraft>(newProjectDraft);
-  const [step, setStep] = useState(1);
+function draftFromDisk(project: LocalProject): ProjectDraft {
+  return settleLoading({ ...newProjectDraft(), ...(project.draft as Partial<ProjectDraft>) });
+}
+
+function ProjectEditor({ initialProject }: { initialProject?: LocalProject }) {
+  const t = useT();
+  const [, navigate] = useLocation();
+  const projectId = initialProject?.id;
+  const [draft, setDraft] = useState<ProjectDraft>(() => initialProject ? draftFromDisk(initialProject) : newProjectDraft());
+  const [step, setStep] = useState(() => {
+    if (!initialProject) return 1;
+    // 채운 단계의 다음 자리에서 이어갑니다. 이후 목록 갱신은 사용자의 현재 단계를 바꾸지 않습니다.
+    const filled = STEPS.map(item => item.id).filter(id => stepFilled(draft, id));
+    return Math.min((filled.length ? Math.max(...filled) : 0) + 1, STEPS.length);
+  });
   const [controlCutRequest, setControlCutRequest] = useState<{ cutId: string } | null>(null);
 
   /**
@@ -118,10 +136,8 @@ export default function NewProjectPage() {
    * 연결선을 여기까지 칠합니다. `step` 만 보면 3단계까지 갔다가 1단계로
    * 돌아왔을 때 선이 도로 꺼져서, 어디까지 훑었는지 알 수 없습니다.
    */
-  const [maxStep, setMaxStep] = useState(1);
+  const [maxStep, setMaxStep] = useState(initialProject ? STEPS.length : 1);
   const [recovered, setRecovered] = useState<string | null>(null);
-  /** 파일에서 다 읽었는가. 이게 참이 되기 전에는 저장이 나가면 안 됩니다 */
-  const [loaded, setLoaded] = useState(false);
   /**
    * **디스크에서 막 읽은 초안. 이 객체는 절대 되쓰지 않습니다.**
    *
@@ -130,49 +146,17 @@ export default function NewProjectPage() {
    * 편집이 «디스크가 다르다» 로 버려집니다. 두 창이 번갈아 서로를 되돌리는 핑퐁이 됩니다.
    * 열기만 해도 한 번 쓰던 것(자동 저장의 «두 번째 변화»)도 같은 검사로 막힙니다.
    */
-  const lastDisk = useRef<ProjectDraft | null>(null);
+  const lastDisk = useRef<ProjectDraft | null>(initialProject ? draft : null);
   /** 디스크에서 온 초안을 화면 모양으로 — 여는 길과 되읽는 길이 **같은** 정리를 거쳐야 합니다. */
   const openFromDisk = (project: LocalProject): ProjectDraft => {
-    const opened = settleLoading({
-      ...newProjectDraft(),
-      ...(project.draft as Partial<ProjectDraft>),
-    });
+    const opened = draftFromDisk(project);
     lastDisk.current = opened;
     return opened;
   };
 
   // ── 불러오기 ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (projectId) {
-      const project = getLocalProject(projectId);
-      if (project) {
-        const opened = openFromDisk(project);
-        setDraft(opened);
-        adoptSavedId(project.id);
-        setLoaded(true);
-        // 이미 만든 프로젝트를 다시 여는 것이라 전 단계를 훑은 것으로 봅니다.
-        setMaxStep(STEPS.length);
-
-        /*
-          **작업 중이던 단계에서 시작합니다.** (지시 166)
-
-          예전에는 늘 1단계였습니다. 캐릭터를 만들다 닫고 다시 열면 주제
-          설정부터 다시 지나가야 했어요. 「이 버튼 누르면 작업하고 있는
-          페이지로 넘어가서 시작해야할 것 같아」 라고 하신 것입니다.
-
-          채운 단계 중 **마지막 다음**이 이어서 할 자리입니다. 다 채웠으면
-          마지막 단계(확인)를 엽니다. 프로그래스 바로 아무 단계나 갈 수
-          있으니 이건 첫 화면을 정할 뿐입니다.
-        */
-        const filled = STEPS.map((item) => item.id).filter((id) => stepFilled(opened, id));
-        const last = filled.length ? Math.max(...filled) : 0;
-        setStep(Math.min(last + 1, STEPS.length));
-        return;
-      }
-      toast.error("그 프로젝트를 찾지 못했습니다.");
-      navigate("/");
-      return;
-    }
+    if (projectId) return;
 
     // 새로 만드는 중이면 자동 저장해 둔 것이 있는지 봅니다.
     const snapshot = readDraftSnapshot<ProjectDraft>();
@@ -472,15 +456,14 @@ export default function NewProjectPage() {
     /*
       **불러오기가 끝나기 전에는 절대 저장하지 않습니다.**
 
-      기존 프로젝트를 열면 첫 그림은 «빈 초안» 입니다. 파일에서 읽어 채우는
-      것은 그다음이에요. 그 사이에 저장이 나가면 인물·배경·씬이 0 인 값이
-      파일을 덮어씁니다.
+      기존 프로젝트는 바깥 로딩 경계가 파일을 읽은 뒤에만 이 편집기를 엽니다.
+      빈 초안이나 낡은 localStorage를 먼저 등록하면 최신 파일을 덮을 수 있습니다.
 
       2026-09-04 에 실제로 그렇게 「수화의 숲」 의 내용이 통째로 비었습니다.
       그림 파일은 폴더에 남았지만 그것을 묶고 있던 프로젝트 파일이 비어서
       화면에서는 사라진 것과 같았습니다.
     */
-    enabled: Boolean(draft.title.trim()) && (!projectId || loaded),
+    enabled: Boolean(draft.title.trim()),
     // 1.5초를 두는 이유는 제목입니다. 글자마다 저장하면 「수」 로 폴더가
     // 만들어지고, 폴더 이름은 한 번 정해지면 안 바뀝니다.
     delay: 1500,
@@ -541,7 +524,7 @@ export default function NewProjectPage() {
   );
 
   useEffect(() => {
-    if (!media.projectName || (projectId && !loaded)) return;
+    if (!media.projectName) return;
     return registerCompositionProjectPage(media.projectName, () => draftRef.current.scenes.flatMap(scene => scene.cuts.map(cut => ({
       projectName: media.projectName, cutId: cut.id, sceneTitle: scene.title, cutOrder: cut.order,
     }))), cutId => {
@@ -549,7 +532,7 @@ export default function NewProjectPage() {
       setStep(3);
       setMaxStep(current => Math.max(current, 3));
     });
-  }, [media.projectName, projectId, loaded]);
+  }, [media.projectName]);
 
   const current = STEPS.find((item) => item.id === step) || STEPS[0];
 

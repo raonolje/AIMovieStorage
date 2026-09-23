@@ -158,6 +158,28 @@ afterEach(() => {
 });
 
 describe("배포 판과 실제 산출물", () => {
+  it.each(["private", "public"])("%s 설치 리소스와 무설치본에 H3 공통 JSON을 포함합니다", (edition) => {
+    const resource = "resources/local/h3-ref2va-preset.json";
+    // 실제 설정을 먼저 확인해야 fixture만 통과하고 설치본에서는 빠지는 회귀를 잡습니다.
+    expect(bundleResources(ROOT, edition).kept).toContain(resource);
+    const bytes = readFileSync(join(ROOT, "src-tauri", resource));
+    const preset = JSON.parse(bytes.toString("utf8"));
+    expect(preset.id).toBe("lightx2v-ref2va-4step-v0.1");
+    expect(preset.sha256).toMatch(/^[a-f0-9]{64}$/);
+    const root = fixture("h3-json-");
+    const confPath = join(root, "src-tauri/tauri.conf.json");
+    const conf = JSON.parse(readFileSync(confPath, "utf8"));
+    conf.bundle.resources.push(resource);
+    put(confPath, JSON.stringify(conf));
+    put(join(root, "src-tauri", resource), bytes.toString("utf8"));
+    const layout = built(root, edition);
+    const stage = join(layout.releaseDir, "portable-stage-test");
+    mkdirSync(stage);
+    stagePortable(layout, stage);
+    expect(readFileSync(join(stage, resource))).toEqual(bytes);
+    expect(readBuildManifest(layout).resources.some((item: { path: string }) => item.path === resource)).toBe(true);
+  });
+
   it("같은 버전과 target 기준 폴더여도 판마다 빌드 폴더와 이름이 다릅니다", () => {
     const root = fixture();
     const privateBuild = buildLayout(root, "private");

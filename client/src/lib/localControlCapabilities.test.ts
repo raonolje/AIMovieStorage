@@ -20,6 +20,17 @@ describe("로컬 동작 제어 입력", () => {
   it("포즈 없는 기존 요청은 그대로 허용한다", () => {
     expect(validateLocalControlOptions("wanvideo", {})).toEqual({ ok: true });
   });
+  it("LTX 윤곽 입력의 범위·세기와 포즈 동시 선택을 검증한다", () => {
+    const structure_control = { kind: "canny", path: "camera.mp4", sourceStartSeconds: 6, durationSeconds: 5, weight: 0 };
+    expect(localControlCapabilities("ltx25").structureVideo).toBe(true);
+    expect(validateLocalControlOptions("ltx25", { structure_control, seconds: 5 })).toEqual({ ok: true });
+    expect(validateLocalControlOptions("wanvideo", { structure_control })).toMatchObject({ ok: false, code: "unsupported_control" });
+    expect(validateLocalControlOptions("ltx25", { structure_control, control: pose })).toMatchObject({ ok: false, code: "unsupported_control" });
+    for (const extra of [{ weight: 1.1 }, { durationSeconds: 0 }, { sourceStartSeconds: -1 }, { thresholds: { low: 200, high: 92 } }]) {
+      expect(validateLocalControlOptions("ltx25", { structure_control: { ...structure_control, ...extra } })).toMatchObject({ ok: false, code: "invalid_control" });
+    }
+    expect(validateLocalControlOptions("ltx25", { structure_control, seconds: 6 })).toMatchObject({ ok: false, code: "invalid_control" });
+  });
   it("영상 참조를 모션 컨트롤인 것처럼 Wan/LTX에 넘기지 않는다", () => {
     const references = [{ kind: "video", path: "dance.mp4" }];
     expect(validateLocalControlOptions("ltx25", { references })).toMatchObject({ ok: false, code: "unsupported_reference" });
