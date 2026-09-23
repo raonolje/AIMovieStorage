@@ -482,8 +482,6 @@
   "«축: 수평» 은 사람 주위를 돌고, «수직» 은 위아래로 넘어가며, «나선» 은 둘 다. «앵커 보기» 를 켜면 앵커가 화면 한가운데로 오고, 끄면 잡아 둔 구도를 지킨 채 움직입니다. «앵커 표시» 는 3D 의 십자. «손떨림» 은 0% 삼각대 · 12% 어깨 · 25% 손으로 든 다큐 · 50% 뛰면서 · 80% 흔들어 찍는 액션.": "«Axis: horizontal» circles the person, «vertical» goes over the top, «spiral» does both. «Look at anchor» on brings the anchor to the screen center; off keeps your framing while moving. «Show anchor» is the cross in 3D. «Handheld shake»: 0% tripod · 12% shoulder · 25% handheld documentary · 50% running · 80% shaken action.",
   "타임라인 · 키 · 재생": "Timeline · Keys · Playback",
   "화면 아래 무빙 타임라인 — 접기, 길이·fps, 재생, 클립 손잡이, 키, 속도 그래프, 인물·방 레이어.": "The move timeline at the bottom — collapsing, length and fps, playback, clip handles, keys, speed graph, character and room layers.",
-  "접기 · 펴기 (Ctrl+Space)": "Collapse · Expand (Ctrl+Space)",
-  "판이 3D 화면의 절반을 덮을 때 «접기» 로 아래로 내립니다. 접어도 «재생» 단추와 시각은 남습니다. 접힘 상태는 이 컴퓨터에 기억됩니다.": "When the panel covers half the 3D view, «Collapse» drops it down. Collapsed, the «Play» button and time readout remain. The collapsed state is remembered on this computer.",
   "총 길이 · 프레임 수 · 배율": "Total length · Frame rate · Zoom",
   "왼쪽 칸의 초를 누르면 «타임라인 총 길이» 를, «24f» 를 누르면 «프레임 수»(실사 24 · 방송 30 · 게임 60)를 입력합니다. 줄여도 클립은 안 지워지고 밖으로 밀려나 안 보일 뿐입니다. 배율은 + / − 키나 배율 단추로 — 모캡 키가 따닥따닥 들어갔을 때 옆으로 늘려 집습니다.": "Click the seconds in the left field to enter «Timeline total length»; click «24f» to enter the «Frame rate» (film 24 · broadcast 30 · games 60). Shortening doesn't delete clips — they're pushed out of view. Zoom with the + / − keys or the zoom buttons — when mocap keys are packed tight, stretch it out to grab them.",
   "재생 · 스페이스 · 스크럽": "Play · Space · Scrub",
@@ -1648,5 +1646,9 @@
   "바닥": "Floor",
   "무엇으로 두를까": "Environment shape",
   "돔 (파노라마 한 장)": "Dome (one panorama)",
-  "방형 (6면 세트)": "Box (six-face set)"
+  "방형 (6면 세트)": "Box (six-face set)",
+  "타임라인 높이 조절": "Resize timeline height",
+  "위아래로 끌어 타임라인 높이 조절 · 방향키 ↑↓, Home 최소, End 최대": "Drag up or down to resize the timeline · ↑↓ arrows, Home minimum, End maximum",
+  "높이 조절 · 접기 · 펴기": "Resize, collapse and expand",
+  "펼친 타임라인의 위쪽 손잡이를 위아래로 끌어 높이를 조절합니다. 트랙이 많으면 판 안에서 스크롤합니다. «접기» 또는 Ctrl+Space로 접어도 재생 단추와 시각은 남고, 다시 펴면 마지막 높이를 유지합니다.": "Drag the top handle of the expanded timeline up or down to resize it. Scroll inside the pane when there are many tracks. Collapse it with Collapse or Ctrl+Space; the playback button and time remain visible. Expanding it restores your last height."
 }

@@ -800,7 +800,7 @@ export default function CompositionPlanner({
 
           <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_320px]">
             {/* ── 3D 화면 ───────────────────────────────────────────── */}
-            <div className="relative flex min-h-0 items-center justify-center p-4">
+            <div data-composition-stage className="relative flex min-h-0 items-center justify-center p-4">
               <div
                 className="relative max-h-full max-w-full"
                 style={{

@@ -4,6 +4,7 @@ import { isTypingTarget } from "@/lib/isTypingTarget";
 import TimelineMusicRow from "@/components/composition/planner/TimelineMusicRow";
 import { CameraPathWarnings } from "./CameraPathWarnings";
 import { TimelineRoomRows } from "./TimelineRoomRows";
+import { TimelineResizePane } from "./TimelineResizePane";
 import { ANCHOR_SPOTS, CAMERA_KEY_ROWS, GUTTER, gutterStyle, HANDHELD_PRESETS, MOTION_CHANNELS, TIMELINE_FIELD, TimelineSelect, amountHintOf, amountUnitOf, timelineFieldStyle } from "./timelineParts";
 import { toast } from "sonner";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Crosshair, Eye, EyeOff, Pause, Play, X } from "lucide-react";
@@ -879,7 +880,7 @@ export function PlannerMoveTimeline({
   }
 
   return shell(
-    <div
+    <TimelineResizePane
       /*
         재생 중에 타임라인 **어디를 눌러도** 멈춥니다. 
         눈금자를 눌러 옮기거나 키를 잡는 것은 «여기서 고치겠다» 는 뜻인데, 재생이 계속 머리를
@@ -1091,6 +1092,7 @@ export function PlannerMoveTimeline({
         </div>
       )}
 
+      <div className="composition-scroll h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
       <CameraPathWarnings state={state} duration={duration} onSeek={onSeek} onSelectMove={setSelectedId} />
       <div className="mb-1 flex items-center gap-2">
         <span
@@ -2080,16 +2082,11 @@ export function PlannerMoveTimeline({
       {/*
         클립 줄 — 하나씩 아래로 쌓입니다.
 
-        **높이를 묶지 않습니다.** 예전에는 클립이 늘면 판이 3D 화면을 밀어 올려서 96px 칸에
-        가두고 스크롤을 뒀습니다(위 가장자리를 끌어 늘리기). 인물·방 레이어가 이 목록에 들어오자
-        그 좁은 칸 안에서 레이어를 스크롤하며 작업하게 됐습니다 —  길이는 이제 «접기»(Ctrl+Space) 가 맡습니다.
-
-        창보다 커지는 극단적인 경우에만 판이 머리말을 넘지 않게 창 높이의 70% 에서 멈춥니다.
+        
+        줄 개수와 판 높이를 분리하고 바깥의 한 스크롤에서 움직입니다. 이 목록까지 별도 높이로
+        자르면 세로 스크롤이 두 개 생기므로 접기·높이 조절은 판 전체가 맡습니다.
       */}
-      <div
-        className="composition-scroll mt-1 space-y-1 overflow-y-auto pr-0.5"
-        style={{ maxHeight: "70vh" }}
-      >
+      <div className="mt-1 space-y-1 pr-0.5">
         {moves.length === 0 && (
           <p
             className="py-1 text-[9px] leading-relaxed"
@@ -2941,7 +2938,8 @@ export function PlannerMoveTimeline({
       </div>
       </div>
       </div>
-    </div>,
+    </div>
+    </TimelineResizePane>,
   );
 }
 

@@ -453,8 +453,8 @@ const TIMELINE: Tutorial = {
     step({
       id: "planner-timeline-collapse",
       anchor: "bottom-collapse",
-      title: "접기 · 펴기 (Ctrl+Space)",
-      body: "판이 3D 화면의 절반을 덮을 때 «접기» 로 아래로 내립니다. 접어도 «재생» 단추와 시각은 남습니다. 접힘 상태는 이 컴퓨터에 기억됩니다.",
+      title: "높이 조절 · 접기 · 펴기",
+      body: "펼친 타임라인의 위쪽 손잡이를 위아래로 끌어 높이를 조절합니다. 트랙이 많으면 판 안에서 스크롤합니다. «접기» 또는 Ctrl+Space로 접어도 재생 단추와 시각은 남고, 다시 펴면 마지막 높이를 유지합니다.",
     }),
     step({
       id: "planner-timeline-duration",
