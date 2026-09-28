@@ -1,5 +1,6 @@
 import { gatherStoredCutMagnificRefs, buildCutVideoMagnificPrompt, buildCutImageMagnificPrompt } from "@/lib/cutMagnificCompose";
 import { composeInMagnific, type MagnificVideoResolution } from "@/lib/magnificCompose";
+import { musicOf } from "@/lib/compositionEdit";
 import { HOLDS_PLANNER } from "@/lib/useTutorialPanel";
 import { aspectNumberOf } from "@/components/composition/planner/PlannerChrome";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -777,6 +778,8 @@ export default function CutCard({
      고개를 든다」 같은 시간 이야기가 끼어들어 자세가 흐려집니다. */
   const [sendingVideo, setSendingVideo] = useState(false);
   const [magnificVideoResolution, setMagnificVideoResolution] = useState<MagnificVideoResolution>("1080p");
+  const [magnificMusicChoice, setMagnificMusicChoice] = useState<boolean | null>(null);
+  const magnificMusicEnabled = magnificMusicChoice ?? Boolean(cut.composition && musicOf(cut.composition));
   // 인물 id → 이름, 이름 → 연기 기준은 영상 뼈대 재료(`cutVideoSkeletonInput`) 안에서 짓습니다 — 일괄 생성과 같은 규칙.
   const videoSeconds = cutVideoSecondsOf(cut);
   const heroImage = heroImageOf(cut);
@@ -955,9 +958,9 @@ export default function CutCard({
         영상이 카메라 움직임과 타이밍을 통째로 들고 있어 가장 강해야 합니다.
         영상이 없으면 구도 그림이 그 자리를 대신합니다(움직임은 글로만 갑니다).
       */
-      const paths = magnificCutVideoReferences(cut, references, useRefVideo);
+      const paths = magnificCutVideoReferences(cut, references, useRefVideo, magnificMusicEnabled);
       const composedPrompt = buildCutVideoMagnificPrompt({
-        cut, characters, background, summary, useComposition, useRefVideo, videoSeconds, prompt, lang, refs,
+        cut, characters, background, summary, useComposition, useRefVideo, musicEnabled: magnificMusicEnabled, videoSeconds, prompt, lang, refs,
       });
       await composeInMagnific({
         kind: "video",
@@ -966,6 +969,7 @@ export default function CutCard({
         requestedVideoModel: videoModel,
         seconds: videoSeconds,
         videoResolution: magnificVideoResolution,
+        musicEnabled: magnificMusicEnabled,
         prompt: composedPrompt,
         referencePaths: paths,
         owner: { kind: "cut", name: `컷 ${cut.order}`, cutId: cut.id },
@@ -1880,6 +1884,8 @@ export default function CutCard({
             videoModel={videoModel}
             magnificVideoResolution={magnificVideoResolution}
             onMagnificVideoResolutionChange={setMagnificVideoResolution}
+            magnificMusicEnabled={magnificMusicEnabled}
+            onMagnificMusicEnabledChange={setMagnificMusicChoice}
             magnificBusy={sendingVideo}
             patchCut={patchCut}
             applyVideoPrompt={applyVideoPrompt}
@@ -2100,7 +2106,7 @@ export default function CutCard({
           레퍼런스 영상이 저장되면 컷이 그 경로와 길이를 들고 있습니다.
           
         */
-        onVideoSaved={async (refVideoPath, refVideoSeconds) => {
+        onVideoSaved={async (refVideoPath, refVideoSeconds, refVideoAudioPath) => {
           if (!commitProjectChange) throw new CompositionControlError("project_not_saved", "프로젝트 저장이 준비되지 않았습니다.");
           // 몇 분 동안 바뀐 프롬프트·대사·다른 컷을 보존하고, 파일 저장 확인 뒤에만 완료를 알립니다.
           await commitProjectChange(current => {
@@ -2108,7 +2114,7 @@ export default function CutCard({
             const scenes = current.scenes.map(scene => ({ ...scene, cuts: scene.cuts.map(item => {
               if (item.id !== cut.id) return item;
               found = true;
-              return { ...item, refVideoPath, refVideoSeconds };
+              return { ...item, refVideoPath, refVideoSeconds, refVideoAudioPath };
             }) }));
             if (!found) throw new CompositionControlError("cut_not_found", "영상을 붙일 컷이 삭제되었습니다.");
             return { ...current, scenes };

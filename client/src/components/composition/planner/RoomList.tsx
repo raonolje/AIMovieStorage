@@ -20,6 +20,8 @@ import { confirmDialog } from "@/components/ConfirmDialog";
 /**
  * 세워 둔 **방들** — 고르기·더하기·지우기와 활성 방의 자리.
  *
+ *
+ *
  * # 왜 방을 나누는가 — 크게 만들면 되지 않나
  *
  * 안 됩니다. **방 크기가 곧 축척**이기 때문입니다(`roomAutoGrow` 주석). 거실과 주방을

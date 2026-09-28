@@ -162,7 +162,7 @@ export interface CompositionPlannerProps {
    *
    *
    */
-  onVideoSaved?: (path: string, seconds: number) => void | Promise<void>;
+  onVideoSaved?: (path: string, seconds: number, audioPath?: string) => void | Promise<void>;
   /** 인물 이름·키를 여기서 고쳤을 때 프로젝트에 올려보냅니다 */
   onCharacterUpdate?: (
     id: string,
@@ -668,7 +668,7 @@ export default function CompositionPlanner({
       뽑은 영상은 **구도가 들고 있습니다**(). 컷에 적히는 것은 통째로 뽑은 한 편이고,
       여기 목록에는 조각까지 남아 나중에 «그때 그 12초짜리» 를 다시 고를 수 있습니다.
     */
-    onRendered: ({ path, seconds, part }) =>
+    onRendered: ({ path, seconds, part, audioPath }) =>
       setState((current) =>
         addRenderIn(current, {
           id: uid(),
@@ -676,6 +676,7 @@ export default function CompositionPlanner({
           seconds,
           at: new Date().toISOString(),
           part,
+          audioPath,
         }),
       ),
   });

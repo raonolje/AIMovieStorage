@@ -28,6 +28,22 @@ interface SubFolder {
   files: string[];
 }
 
+/** 곡 폴더에서 온 기록만 폴더 삭제에 따라 걷습니다. 파일이 아직 없는 새 기획 프로젝트는 보존합니다. */
+export function reconcileBgmDeletedFolders(projects: BgmProject[], folders: readonly SubFolder[]) {
+  const present = new Set(folders.map((folder) => folder.name.toLocaleLowerCase()));
+  const removedIds = new Set<string>();
+  const kept = projects.filter((project) => {
+    const fromSongFolder = project.tracks.some((track) => (track.resultPaths || []).some((file) =>
+      file.replace(/\\/g, "/").toLocaleLowerCase().includes(`/bgm/곡/${project.name.toLocaleLowerCase()}/`)));
+    if (fromSongFolder && !present.has(project.name.toLocaleLowerCase())) {
+      removedIds.add(project.id);
+      return false;
+    }
+    return true;
+  });
+  return { kept, removedIds };
+}
+
 /** 곡 파일에서 «곡 이름» 을 읽습니다 — `<프로젝트>_<곡 이름>_<번호>[_<번호>].wav`. */
 export function trackNameOf(filePath: string, projectName: string): string {
   const base = (filePath.split(/[\\/]/).pop() || "").replace(/\.[^.]+$/, "");
@@ -75,8 +91,9 @@ export async function restoreBgmProjectsFromDisk(): Promise<BgmProject[]> {
     통째로 옛 값으로 되돌아갑니다. 훑기는 «어떤 파일이 있더라» 만 알아 오는 일이고,
     **무엇에 얹을지는 그때의 최신 기록**이어야 합니다.
   */
-  let changed = false;
-  const next = [...loadBgmProjects()];
+  const { kept, removedIds } = reconcileBgmDeletedFolders(loadBgmProjects(), folders);
+  let changed = removedIds.size > 0;
+  const next = [...kept];
 
   for (const folder of folders) {
     if (!folder.files.length) continue;
@@ -127,7 +144,7 @@ export async function restoreBgmProjectsFromDisk(): Promise<BgmProject[]> {
     저장 직전에 **한 번 더** 최신을 읽어, 우리가 더한 곡만 얹습니다. 훑는 동안 사람이 새 곡을
     만들었을 수도 있고, 그것까지 지우면 «만들자마자 사라졌다» 가 됩니다.
   */
-  const latest = loadBgmProjects();
+  const latest = loadBgmProjects().filter((project) => !removedIds.has(project.id));
   const merged = next.map((item) => {
     const fresh = latest.find((other) => other.id === item.id);
     if (!fresh) return item;

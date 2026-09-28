@@ -172,6 +172,8 @@ export interface EnvironmentPanelProps extends SectionToggles {
     remove: (id: string) => void;
     /**
      * **다른 작품에서 방 끌어오기** 를 여는 자리. 안 주면 단추가 안 보입니다.
+     *
+     *
      */
     borrow?: () => void;
   };
@@ -179,6 +181,7 @@ export interface EnvironmentPanelProps extends SectionToggles {
   onOpenGallery: () => void;
   /**
    * **장소 라이브러리**(옛 배경 단계) 열기 — 계보(관계도)·보유 에셋을 봅니다.
+   *
    */
   onOpenLibrary?: () => void;
   /**
@@ -1516,7 +1519,8 @@ function RoomProps({
           </label>
 
           {/*
-            **벽과 조명에는 에셋이 없습니다.*          */}
+            **벽과 조명에는 에셋이 없습니다.**
+          */}
           {SWAPPABLE_KINDS.includes(picked.kind) && (
             <>
               <select

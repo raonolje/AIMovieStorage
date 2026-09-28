@@ -1,5 +1,18 @@
 import { ArrayBufferTarget, Muxer } from "mp4-muxer";
 
+// WebView2 exposes WebCodecs audio at runtime, but the pinned TypeScript DOM declarations omit it.
+type AudioChunk = Parameters<Muxer<ArrayBufferTarget>["addAudioChunk"]>[0];
+type AudioChunkMeta = Parameters<Muxer<ArrayBufferTarget>["addAudioChunk"]>[1];
+type AudioConfig = { codec: string; sampleRate: number; numberOfChannels: number; bitrate: number };
+type AudioDataLike = { close(): void };
+type AudioEncoderLike = { state: string; configure(config: AudioConfig): void; encode(data: AudioDataLike): void; flush(): Promise<void>; close(): void };
+const audioWebCodecs = globalThis as typeof globalThis & {
+  AudioEncoder?: { new(init: { output(chunk: AudioChunk, meta?: AudioChunkMeta): void; error(error: Error): void }): AudioEncoderLike;
+    isConfigSupported(config: AudioConfig): Promise<{ supported: boolean }> };
+  AudioData?: { new(init: { format: "f32-planar"; sampleRate: number; numberOfChannels: number;
+    numberOfFrames: number; timestamp: number; data: Float32Array }): AudioDataLike };
+};
+
 /**
  * 레퍼런스 영상 인코딩.
  *
@@ -26,6 +39,8 @@ export interface ReferenceVideoOptions {
   drawFrame: (time: number, index: number) => HTMLCanvasElement | Promise<HTMLCanvasElement>;
   onProgress?: (done: number, total: number) => void;
   signal?: AbortSignal;
+  /** 같은 프레임 구간에서 렌더한 음악. 있으면 MP4에 AAC로 합칩니다. */
+  audio?: AudioBuffer;
 }
 
 export interface ReferenceVideoResult {
@@ -146,11 +161,20 @@ export async function renderReferenceVideo(options: ReferenceVideoOptions): Prom
 
   const codec = await pickCodec(width, height, fps, bitrate);
   if (!codec) throw new Error("이 환경에서 쓸 수 있는 H.264 인코더를 찾지 못했습니다.");
+  const audio = options.audio;
+  if (audio) {
+    if (!audioWebCodecs.AudioEncoder || !audioWebCodecs.AudioData)
+      throw new Error("이 환경에서는 영상에 음원을 합칠 AAC 인코더를 쓸 수 없습니다.");
+    const supported = await audioWebCodecs.AudioEncoder.isConfigSupported({ codec: "mp4a.40.2", sampleRate: audio.sampleRate,
+      numberOfChannels: audio.numberOfChannels, bitrate: 192_000 });
+    if (!supported.supported) throw new Error("이 환경에서는 AAC 음원 인코딩을 지원하지 않습니다.");
+  }
 
   const target = new ArrayBufferTarget();
   const muxer = new Muxer({
     target,
     video: { codec: "avc", width, height, frameRate: fps },
+    ...(audio ? { audio: { codec: "aac" as const, numberOfChannels: audio.numberOfChannels, sampleRate: audio.sampleRate } } : {}),
     // 파일을 다 만든 뒤 헤더를 앞으로 옮깁니다. 어디서든 바로 재생됩니다.
     fastStart: "in-memory",
   });
@@ -161,6 +185,12 @@ export async function renderReferenceVideo(options: ReferenceVideoOptions): Prom
     error: error => { encodeError = error instanceof Error ? error : new Error(String(error)); },
   });
   encoder.configure({ codec, width, height, framerate: fps, bitrate, latencyMode: "quality" });
+  const audioEncoder = audio ? new audioWebCodecs.AudioEncoder!({
+    output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+    error: error => { encodeError = error instanceof Error ? error : new Error(String(error)); },
+  }) : null;
+  if (audioEncoder && audio) audioEncoder.configure({ codec: "mp4a.40.2", sampleRate: audio.sampleRate,
+    numberOfChannels: audio.numberOfChannels, bitrate: 192_000 });
 
   const microsecondsPerFrame = 1_000_000 / fps;
   // 2초마다 키프레임. 편집 프로그램에서 스크럽할 때 반응이 빨라집니다.
@@ -193,11 +223,27 @@ export async function renderReferenceVideo(options: ReferenceVideoOptions): Prom
     }
 
     await finishEncoding(encoder.flush(), options.signal);
+    if (audioEncoder && audio) {
+      const block = 1024;
+      for (let first = 0; first < audio.length; first += block) {
+        if (options.signal?.aborted) throw new DOMException("취소했습니다.", "AbortError");
+        const length = Math.min(block, audio.length - first);
+        const planar = new Float32Array(length * audio.numberOfChannels);
+        for (let channel = 0; channel < audio.numberOfChannels; channel++)
+          planar.set(audio.getChannelData(channel).subarray(first, first + length), channel * length);
+        const data = new audioWebCodecs.AudioData!({ format: "f32-planar", sampleRate: audio.sampleRate,
+          numberOfChannels: audio.numberOfChannels, numberOfFrames: length,
+          timestamp: Math.round(first * 1_000_000 / audio.sampleRate), data: planar });
+        try { audioEncoder.encode(data); } finally { data.close(); }
+      }
+      await finishEncoding(audioEncoder.flush(), options.signal);
+    }
     if (options.signal?.aborted) throw new DOMException("취소했습니다.", "AbortError");
     if (encodeError) throw encodeError;
     muxer.finalize();
     return { blob: new Blob([target.buffer], { type: "video/mp4" }), frameCount, codec };
   } finally {
     if (encoder.state !== "closed") encoder.close();
+    if (audioEncoder && audioEncoder.state !== "closed") audioEncoder.close();
   }
 }

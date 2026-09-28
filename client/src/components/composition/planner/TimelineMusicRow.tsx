@@ -4,6 +4,8 @@ import type { CompositionMusic } from "@/lib/composition";
 /**
  * **노래 레이어** — 타임라인 맨 윗줄.
  *
+ *
+ *
  * 편집 프로그램처럼 맨 윗줄입니다 — 노래가 시간표이고 나머지가 그 위에서 움직이니까요.
  * 2026-09-18 에 `MoveTimeline.tsx` 에서 떼어 냈습니다. 바깥에 기대는 것이 다섯뿐입니다.
  */

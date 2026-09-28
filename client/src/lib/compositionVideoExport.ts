@@ -101,7 +101,7 @@ registerTaskRunner(KIND, async (raw, report, task) => {
         if (!unchanged && !attached)
           throw new Error(t("저장 직전에 레퍼런스 영상 선택이 바뀌었습니다."));
         return { ...current, scenes: current.scenes.map(scene => ({ ...scene, cuts: scene.cuts.map(item =>
-          item.id === payload.cutId ? { ...item, refVideoPath: video.path, refVideoSeconds: video.seconds } : item) })) };
+          item.id === payload.cutId ? { ...item, refVideoPath: video.path, refVideoSeconds: video.seconds, refVideoAudioPath: video.audioPath } : item) })) };
       });
       if (!outcome.persisted) throw new Error(t("영상 파일은 만들었지만 프로젝트 저장을 확인하지 못했습니다: {why}", { why: outcome.why ?? outcome.outcome }));
     });

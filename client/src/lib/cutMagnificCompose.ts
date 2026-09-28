@@ -7,7 +7,7 @@ import {
   pickSheetPath,
   cutLinkInput,
 } from "./promptPayloads";
-import { cutVideoLinkInput } from "./cutVideoReferences";
+import { cutVideoLinkInput, magnificCutAudioReference } from "./cutVideoReferences";
 import { heroImageOf, formatVideoSeconds } from "./cutVideoPrompt";
 import { relinkPromptText, splitLinkTail } from "./promptLinks";
 import { cutComposeLines } from "./cutComposeLines";
@@ -146,6 +146,7 @@ export function buildCutVideoMagnificPrompt(input: {
   summary: CompositionCameraSummary;
   useComposition: boolean;
   useRefVideo: boolean;
+  musicEnabled?: boolean;
   videoSeconds: number;
   prompt: string;
   lang: "ko" | "en";
@@ -158,6 +159,7 @@ export function buildCutVideoMagnificPrompt(input: {
     summary,
     useComposition,
     useRefVideo,
+    musicEnabled,
     videoSeconds,
     prompt,
     lang,
@@ -177,6 +179,13 @@ export function buildCutVideoMagnificPrompt(input: {
       ko
         ? `${guideTag} 는 이 컷의 3D 배치도입니다. 카메라 각도·화각·인물이 선 자리를 그대로 맞추세요.`
         : `${guideTag} is a 3D block-out of this shot. Match its camera angle, lens and figure placement exactly.`,
+    );
+  const audioPath = magnificCutAudioReference(cut, useRefVideo, Boolean(musicEnabled));
+  if (audioPath)
+    lines.push(
+      ko
+        ? `${tagOf(audioPath)} 는 ${tagOf(cut.refVideoPath!)} 와 같은 구간의 음원 레퍼런스입니다. 음악의 박자에 동작을 맞추고 영상의 카메라·동선을 따르세요.`
+        : `${tagOf(audioPath)} is the audio reference for the same time range as ${tagOf(cut.refVideoPath!)}. Match the choreography to its rhythm and follow the video's camera motion and blocking.`,
     );
   const heroPath = heroImageOf(cut)?.filePath;
   if (heroPath)

@@ -8,9 +8,11 @@ import { uid } from "@/lib/projectTypes";
 import type { Cut, GeneratedImageAsset } from "@/lib/projectTypes";
 import type { MagnificVideoResolution } from "@/lib/magnificCompose";
 import { useT } from "@/lib/i18n";
+import { musicOf } from "@/lib/compositionEdit";
 
 /**
  * **컷을 영상으로 뽑는 칸.**
+ *
  *
  * 그림 프롬프트와 칸을 나눈 까닭은 `lib/cutVideoPrompt.ts` 에 적어 두었습니다 —
  * 한 칸에 섞으면 그림 쪽 자세가 흐려집니다.
@@ -22,6 +24,8 @@ export default function CutVideoSection({
   videoModel,
   magnificVideoResolution,
   onMagnificVideoResolutionChange,
+  magnificMusicEnabled,
+  onMagnificMusicEnabledChange,
   magnificBusy,
   patchCut,
   applyVideoPrompt,
@@ -42,12 +46,15 @@ export default function CutVideoSection({
   videoModel?: string;
   magnificVideoResolution: MagnificVideoResolution;
   onMagnificVideoResolutionChange: (value: MagnificVideoResolution) => void;
+  magnificMusicEnabled: boolean;
+  onMagnificMusicEnabledChange: (value: boolean) => void;
   magnificBusy: boolean;
   patchCut: (patch: Partial<Cut> | ((cut: Cut) => Partial<Cut>)) => void;
   /** 규칙으로만 짓는 「영상 프롬프트」. */
   applyVideoPrompt: () => void;
   /**
    * LLM 으로 받는 「프롬프트 작성」 — 규칙 뼈대 위에 상황·환경·동작·표정을 채웁니다.
+   *
    */
   runVideoPrompt: () => void;
   videoBusy: boolean;
@@ -61,7 +68,7 @@ export default function CutVideoSection({
   motionMask: GeneratedImageAsset | null;
   localVideoRefs: { kind: "image" | "video" | "audio"; path: string }[];
   /** 구도잡기에서 뽑아 둔 영상들. 그중 하나를 레퍼런스로 고릅니다. */
-  renders: { id: string; path: string; seconds: number; at: string; part?: string }[];
+  renders: { id: string; path: string; seconds: number; at: string; part?: string; audioPath?: string }[];
   projectName: string;
   sceneTitle: string;
   index: number;
@@ -224,8 +231,8 @@ export default function CutVideoSection({
                         onClick={() =>
                           patchCut((current) =>
                             current.refVideoPath === render.path
-                              ? { refVideoPath: undefined, refVideoSeconds: undefined }
-                              : { refVideoPath: render.path, refVideoSeconds: render.seconds },
+                              ? { refVideoPath: undefined, refVideoSeconds: undefined, refVideoAudioPath: undefined }
+                              : { refVideoPath: render.path, refVideoSeconds: render.seconds, refVideoAudioPath: render.audioPath },
                           )
                         }
                         title={`${render.path}
@@ -265,6 +272,14 @@ ${new Date(render.at).toLocaleString()}`}
             <option value="720p">720p</option>
             <option value="1080p">1080p</option>
           </select>
+        </label>
+        <label className="flex items-center gap-2 text-[10px] text-muted-foreground" data-tour="cut-magnific-music">
+          <input type="checkbox" checked={magnificMusicEnabled} disabled={magnificBusy}
+            onChange={event => onMagnificMusicEnabledChange(event.target.checked)} />
+          <span>{t("Magnific 음악")}</span>
+          <span>{cut.composition && musicOf(cut.composition)
+            ? t("켜면 선택한 영상 조각과 같은 구간의 음원을 연결하고 @로 부릅니다")
+            : t("구도잡기에 음원이 없으면 별도 음원 레퍼런스 없이 생성합니다")}</span>
         </label>
         <MagnificVideoCapability modelId={videoModel} hasRefVideo={cut.useRefVideo !== false && Boolean(cut.refVideoPath)} />
         <PromptResultPanels

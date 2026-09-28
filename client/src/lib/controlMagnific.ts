@@ -6,6 +6,7 @@ import { readProject } from "./projectWrite";
 import { projectFolderName } from "./localProjectStore";
 import { getMediaLibrarySettings } from "./mediaLibrary";
 import { summarizeCompositionCamera } from "./composition";
+import { musicOf } from "./compositionEdit";
 import { targetModelOf } from "./modelRules";
 import { cutVideoSecondsOf } from "./cutVideoPrompt";
 import { magnificCutVideoReferences } from "./cutVideoReferences";
@@ -45,6 +46,8 @@ export const magnificComposePreviewSchema = z
     prompt: z.string().trim().min(1).max(32_000).optional(),
     promptMode: z.enum(["guided", "exact"]).default("guided"),
     videoResolution: z.enum(["720p", "1080p"]).default("1080p"),
+    /** 생략하면 구도잡기 음원이 있는 컷에서 자동으로 켭니다. */
+    musicEnabled: z.boolean().optional(),
   })
   .strict();
 export const magnificComposeExecuteSchema = z
@@ -215,9 +218,10 @@ export async function previewControlMagnific(raw: unknown) {
       "Magnific 데스크톱 영상 자동 구성은 확인된 Seedance 2.5만 지원합니다. 프로젝트의 영상 모델을 확인해 주세요.",
     );
   const seconds = request.kind === "video" ? cutVideoSecondsOf(cut) : undefined;
+  const musicEnabled = request.kind === "video" && (request.musicEnabled ?? Boolean(cut.composition && musicOf(cut.composition)));
   const referencePaths =
     request.kind === "video"
-      ? magnificCutVideoReferences(cut, refs.references, useRefVideo)
+      ? magnificCutVideoReferences(cut, refs.references, useRefVideo, musicEnabled)
       : refs.references;
   checkPaths(referencePaths, baseDirectory, projectFolder);
   if (request.promptMode === "exact") {
@@ -252,6 +256,7 @@ export async function previewControlMagnific(raw: unknown) {
               }),
               useComposition,
               useRefVideo,
+              musicEnabled,
               videoSeconds: seconds!,
               prompt,
               lang: request.language,
@@ -266,6 +271,7 @@ export async function previewControlMagnific(raw: unknown) {
     // 기존 컷 카드의 구성과 같은 기본값입니다. 프로젝트의 별도 MCP 설정을 몰래 섞지 않습니다.
     aspectRatio: "16:9",
     videoResolution: request.videoResolution,
+    musicEnabled,
     count: 1,
   };
   await validateMagnificComposition(plan);
@@ -305,6 +311,7 @@ export async function previewControlMagnific(raw: unknown) {
     model: plan.model,
     seconds: plan.seconds,
     resolution: request.kind === "video" ? plan.videoResolution : undefined,
+    musicEnabled: request.kind === "video" ? plan.musicEnabled : undefined,
     aspectRatio: plan.aspectRatio,
     references: plan.referencePaths.map((path) => ({
       name: path.split(/[\\/]/).pop(),

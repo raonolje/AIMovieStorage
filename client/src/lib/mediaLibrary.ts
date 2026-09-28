@@ -1065,7 +1065,8 @@ export async function composeMagnificAuto(input: {
   /** 영상일 때 러닝타임(초) — 구도잡기 타임라인이 정한 값. */
   durationSeconds?: number;
   /** Magnific 영상 구성 전용. 로컬 생성과 이미지 구성의 해상도는 바꾸지 않습니다. */
-  resolution?: "720p" | "1080p";
+    resolution?: "720p" | "1080p";
+    musicEnabled?: boolean;
   /** 조종기는 외부 전송 직전에 현재 판과 영속 시작 기록을 확인합니다. */
   beforeCompose?: () => Promise<void>;
   /** 앞 구성이 끝나기를 기다리게 됐을 때 */
@@ -1087,7 +1088,8 @@ export async function composeMagnificAuto(input: {
     model: input.model,
     kind: input.kind ?? "image",
     durationSeconds: input.durationSeconds,
-    resolution: input.resolution,
+      resolution: input.resolution,
+      musicEnabled: input.musicEnabled,
     aspectRatio: input.aspectRatio,
     count: input.count,
   });

@@ -18,8 +18,8 @@ export function useReferenceVideo({ captureFormat, timeline, cameraMove, project
   sceneTitle?: string;
   cutOrder?: number;
   /** 파일 경로를 화면에 붙인 시점이 아니라 프로젝트 저장 완료까지 기다립니다. */
-  onVideoSaved?: (path: string, seconds: number) => void | Promise<void>;
-  onRendered?: (render: { path: string; seconds: number; part?: string }) => void;
+  onVideoSaved?: (path: string, seconds: number, audioPath?: string) => void | Promise<void>;
+  onRendered?: (render: { path: string; seconds: number; part?: string; audioPath?: string }) => void;
   setPlaying: (value: boolean) => void;
   setPreviewing: (value: boolean) => void;
 }) {
@@ -50,13 +50,13 @@ export function useReferenceVideo({ captureFormat, timeline, cameraMove, project
     try {
       // 미리보기 종료가 반영된 뒤 같은 캔버스를 씁니다. 숨겨진 창에서도 rAF를 기다리지 않습니다.
       await new Promise<void>(resolve => setTimeout(resolve, 0));
-      return await exportReferenceVideoFiles({ ...options, ...controls, signal: abort.signal, renderer,
+      return await exportReferenceVideoFiles({ ...options, music: timeline.music, ...controls, signal: abort.signal, renderer,
         currentRenderer: () => videoRendererRef.current, projectName, sceneTitle, cutOrder,
         shotLabel: cameraMove ? SHOT_PRESETS.find(preset => preset.id === cameraMove.shotId)?.label : null,
         splitSeconds, requireProject: fromController,
         onProgress: (done, total) => { paintProgress(done, total); controls.onProgress?.(done, total); },
         onSaved: fromController ? undefined : async video => {
-          if (!video.part) await onVideoSaved?.(video.path, video.seconds);
+          if (!video.part) await onVideoSaved?.(video.path, video.seconds, video.audioPath);
           onRendered?.(video);
         },
       });

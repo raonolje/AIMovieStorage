@@ -8,6 +8,7 @@ model-specific prompts, while keeping characters, 3D blocking and generated asse
 
 **[Download for Windows](https://github.com/raonolje/AIMovieStorage/releases/latest)** · [Installation](#installation) ·
 [Local models](#local-models-and-seedvr2) · [Claude / OpenAI APIs](#claude-and-openai-api-connections) ·
+[Codex / Claude controller](docs/APP_CONTROL.md) ·
 [Feature details](#what-it-does) · [Build from source](#build-from-source) ·
 [Report an issue](https://github.com/raonolje/AIMovieStorage/issues)
 
@@ -24,8 +25,18 @@ model-specific prompts, while keeping characters, 3D blocking and generated asse
 
 **Workflow:** screenplay → characters & locations → 3D blocking → AI-assisted prompts → local or external generation → upscale & reuse.
 
+### From shot plan to generated concert video
+
+The top half is a **15-second reference video exported from AIMovieStorage's shot planner**: five stand-ins, their positions and a moving camera on the neon stage. The bottom half is one **Magnific / Seedance 2.5 result**, made with that video plus character and stage references. It shows a group formation, moving close-ups and a raised camera angle. This is one example, not a claim that every pose or frame matches exactly. The comparison is muted.
+
+[![Shot-planner reference above and Seedance 2.5 concert result below](docs/images/shot-planner-vs-seedance-2-5.jpg)](docs/media/shot-planner-vs-seedance-2-5.mp4)
+
+**[Watch the 15-second comparison (MP4)](docs/media/shot-planner-vs-seedance-2-5.mp4)**
+
 > **Beta.** Local generation and model-specific prompts are still being verified. Check results and keep backups.
 > The interface defaults to Korean; English, Japanese and Chinese are available in Settings, with some screens still untranslated.
+
+For chat-based editing, the bundled [Codex skill](skills/aimoviestorage-control/SKILL.md) is registered when the app starts. Connect the local app controller in Settings; the skill alone does not configure MCP. It can save chat-created images, videos and prompts back into a project. [Connection guide](docs/APP_CONTROL.md).
 
 ## Local models and SeedVR2
 
@@ -253,6 +264,7 @@ For the same reason a few engines are not part of this build — `edition.json` 
 
 **[Windows 다운로드](https://github.com/raonolje/AIMovieStorage/releases/latest)** · [설치 안내](#설치-안내) ·
 [로컬 모델](#로컬-모델과-seedvr2) · [Claude / OpenAI API](#claudeopenai-api-연결) ·
+[Codex / Claude 조종기](docs/APP_CONTROL.md) ·
 [기능 자세히 보기](#무엇을-해-주는가) · [소스에서 실행](#소스에서-실행) ·
 [오류 제보](https://github.com/raonolje/AIMovieStorage/issues)
 
@@ -269,8 +281,18 @@ For the same reason a few engines are not part of this build — `edition.json` 
 
 **작업 흐름:** 시나리오 → 인물·장소 → 3D 구도 → AI 프롬프트 작성 → 로컬·외부 생성 → 업스케일·재사용.
 
+### 구도잡기 레퍼런스와 콘서트 결과 비교
+
+위쪽은 **AIMovieStorage 구도잡기에서 뽑은 15초 레퍼런스 영상**입니다. 네온 무대에 5명의 대역을 배치하고 카메라 동선을 타임라인에 잡았습니다. 아래쪽은 이 영상과 인물·무대 이미지를 참고해 만든 **Magnific / Seedance 2.5 결과 한 편**입니다. 군무 대형, 이동하는 인물 클로즈업, 높은 카메라 각도를 비교해 볼 수 있습니다. 모든 자세와 프레임이 정확히 일치한다는 뜻은 아닙니다. 비교본은 음소거했습니다.
+
+[![위쪽 구도잡기 영상과 아래쪽 Seedance 2.5 콘서트 결과 비교](docs/images/shot-planner-vs-seedance-2-5.jpg)](docs/media/shot-planner-vs-seedance-2-5.mp4)
+
+**[15초 비교 영상 보기 (MP4)](docs/media/shot-planner-vs-seedance-2-5.mp4)**
+
 > **베타입니다.** 로컬 생성과 모델별 프롬프트는 검증 중입니다. 결과를 확인하고 중요한 자료는 백업해 주세요.
 > 기본 언어는 한국어이며 설정에서 English · 日本語 · 中文으로 바꿀 수 있습니다. 일부 화면은 아직 한국어로 표시됩니다.
+
+대화로 편집할 때는 앱 실행 시 등록되는 [Codex 스킬](skills/aimoviestorage-control/SKILL.md)을 사용할 수 있습니다. 로컬 MCP 조종기 연결은 설정에서 별도로 합니다. 채팅에서 만든 이미지·영상·프롬프트를 프로젝트에 기록하고 대표 이미지를 지정할 수 있습니다. [연결 안내](docs/APP_CONTROL.md).
 
 ## 로컬 모델과 SeedVR2
 

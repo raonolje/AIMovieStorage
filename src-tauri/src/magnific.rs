@@ -840,7 +840,7 @@ pub mod pikaso {
 
 #[derive(Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-enum ReferenceMediaType { Image, Video }
+enum ReferenceMediaType { Image, Video, Audio }
 
 struct UploadReference {
     name: String,
@@ -928,10 +928,12 @@ fn upload_references(files: &[PathBuf]) -> Res<Vec<UploadReference>> {
         let extension = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
         let media_type = if is_video_path(file) {
             ReferenceMediaType::Video
+        } else if matches!(extension.as_str(), "mp3" | "wav" | "ogg" | "flac" | "m4a") {
+            ReferenceMediaType::Audio
         } else if matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff") {
             ReferenceMediaType::Image
         } else {
-            return Err(format!("자동 구성에서 이미지·영상으로 확인할 수 없는 파일입니다({name}). 이미지나 영상 레퍼런스를 선택하세요."));
+            return Err(format!("자동 구성에서 이미지·영상·음성으로 확인할 수 없는 파일입니다({name}). 지원되는 레퍼런스를 선택하세요."));
         };
         Ok(UploadReference { name, media_type })
     }).collect()
@@ -961,21 +963,30 @@ fn exact_upload_selection(new_ids: &[String], selected: &[String]) -> bool {
 fn clipboard_copy_is_fresh(before: u32, after: u32) -> bool { after != 0 && before != after }
 
 fn reference_output(creation: &CopiedCreation) -> &'static str {
-    if creation.media_type == Some(ReferenceMediaType::Video) { "video-output" } else { "output" }
+    match creation.media_type {
+        Some(ReferenceMediaType::Video) => "video-output",
+        Some(ReferenceMediaType::Audio) => "audio-output",
+        _ => "output",
+    }
 }
 
 fn reference_input(creation: &CopiedCreation, kind: Option<&str>) -> Res<(&'static str, &'static str)> {
-    if kind != Some("video") { return Ok(("reference", "image")); }
+    if kind != Some("video") {
+        return if creation.media_type == Some(ReferenceMediaType::Audio) {
+            Err("음원 레퍼런스는 영상 생성기에만 연결할 수 있습니다.".into())
+        } else { Ok(("reference", "image")) };
+    }
     // 실제 영상 생성기 DOM에서 확인한 입력 포트입니다(2026-09-24).
     // 영상도 image/reference 로 보내면 선이 사라져 조건 없이 생성될 수 있었습니다.
     match creation.media_type {
         Some(ReferenceMediaType::Image) => Ok(("references", "image")),
         Some(ReferenceMediaType::Video) => Ok(("video-reference", "video")),
+        Some(ReferenceMediaType::Audio) => Ok(("audio", "audio")),
         None => Err(format!("레퍼런스 종류를 확인하지 못해 영상 생성기에 연결하지 않았습니다({}). 원본 파일에서 다시 구성하세요.", creation.name)),
     }
 }
 
-fn video_generator_data(model: &str, aspect_ratio: &str, duration_seconds: Option<f64>, resolution: Option<&str>, prompt: &str) -> Res<serde_json::Value> {
+fn video_generator_data(model: &str, aspect_ratio: &str, duration_seconds: Option<f64>, resolution: Option<&str>, music_enabled: bool, prompt: &str) -> Res<serde_json::Value> {
     // 2026-09-24 실제 Seedance 2.5 생성기를 복사해 확인한 데스크톱 스키마입니다.
     // MCP의 모델 slug를 mode 한 칸에 넣거나 durationSeconds를 쓰면 화면 설정과 달라집니다.
     if !matches!(model, "seedance-2-5-pro" | "bytedance-seedance-pro-2.5") {
@@ -994,7 +1005,7 @@ fn video_generator_data(model: &str, aspect_ratio: &str, duration_seconds: Optio
         "numberOfGenerations": 1, "prompt": prompt, "aspectRatio": aspect_ratio,
         "resolution": resolution, "duration": duration,
         "model": "bytedance-seedance-pro-2.5", "api": "bytedance", "mode": "pro-2.5", "modeModel": "seedance",
-        "autoModeDuration": "short", "withSoundEffects": true,
+        "autoModeDuration": "short", "withSoundEffects": true, "noMusic": !music_enabled,
         "extraParameters": { "style": "default" }, "videoPreset": "custom",
     }))
 }
@@ -1134,6 +1145,7 @@ pub fn build_flow_payload(
     // 영상일 때 러닝타임(초). 구도잡기 타임라인이 정한 값이 그대로 옵니다.
     duration_seconds: Option<f64>,
     resolution: Option<&str>,
+    music_enabled: bool,
 ) -> Result<(serde_json::Value, usize), String> {
     if prompt.trim().is_empty() {
         return Err("프롬프트가 비었습니다.".into());
@@ -1202,7 +1214,7 @@ pub fn build_flow_payload(
         */
         let is_video = kind == Some("video");
         let gen_data = if is_video {
-            video_generator_data(model, aspect_ratio, duration_seconds, resolution, &prompt_with_chips)?
+            video_generator_data(model, aspect_ratio, duration_seconds, resolution, music_enabled, &prompt_with_chips)?
         } else { serde_json::json!({
             "aspectRatio": aspect_ratio,
             "mode": model,
@@ -1421,13 +1433,14 @@ pub async fn magnific_compose_auto(
     // 영상일 때 러닝타임(초). 구도잡기 타임라인이 정한 값이 그대로 옵니다.
     duration_seconds: Option<f64>,
     resolution: Option<String>,
+    music_enabled: Option<bool>,
 ) -> Res<ComposeResult> {
     if prompt.trim().is_empty() {
         return Err("보낼 프롬프트가 없습니다.".into());
     }
     // 업로드나 원본 노드 정리 전에 미지원 설정을 거절합니다.
     if kind.as_deref() == Some("video") {
-        video_generator_data(&model, &aspect_ratio, duration_seconds, resolution.as_deref(), &prompt)?;
+        video_generator_data(&model, &aspect_ratio, duration_seconds, resolution.as_deref(), music_enabled.unwrap_or(false), &prompt)?;
     }
     // 레퍼런스에 영상이 섞이면 2단계가 변환을 기다리느라(150회 ≈ 4분) 길어지므로 마감도 길게.
     // `kind == "video"` 로 가르면 안 됩니다 — 씬 스토리보드는 kind=video 인데 레퍼런스는 시트 한 장입니다.
@@ -1446,7 +1459,7 @@ pub async fn magnific_compose_auto(
       시간만큼 깎여 죽습니다. 마감이 터지면 본체 future 가 drop 되어 CDP 웹소켓도 같이 닫히고,
       잠금 guard 는 이 함수가 쥐고 있으니 돌아갈 때 풀립니다.
     */
-    let body = compose_body(base_directory, paths, prompt, model, aspect_ratio, count, kind, duration_seconds, resolution, has_video);
+    let body = compose_body(base_directory, paths, prompt, model, aspect_ratio, count, kind, duration_seconds, resolution, music_enabled.unwrap_or(false), has_video);
     match tokio::time::timeout(budget, body).await {
         Ok(result) => result,
         Err(_) => Err(format!(
@@ -1483,6 +1496,7 @@ async fn compose_body(
     kind: Option<String>,
     duration_seconds: Option<f64>,
     resolution: Option<String>,
+    music_enabled: bool,
     has_video: bool,
 ) -> Res<ComposeResult> {
     // 페이지 찾기. 포트가 없으면: 마그니픽이 안 떠 있으면 우리가 켜고, 떠 있으면 다시 켜 달라고 합니다.
@@ -1666,6 +1680,7 @@ async fn compose_body(
         kind.as_deref(),
         duration_seconds,
         resolution.as_deref(),
+        music_enabled,
     )?;
     // 현재 페이지 DOM은 화면 밖 노드를 렌더링하지 않습니다. 붙여넣기 전 저장된 보드를
     // 기록해 두면, 아래 화면 검사에서 일부만 보일 때 실제 저장 결과로 재확인할 수 있습니다.
@@ -1743,7 +1758,8 @@ pub fn resolve_image_files(base_directory: &str, paths: &[String]) -> Res<(Vec<P
     let mut files = vec![];
     for path in paths {
         let target = Path::new(path);
-        if !extension_allowed(target) && !is_video_path(target) {
+        let audio = matches!(target.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(), Some("mp3" | "wav" | "ogg" | "flac" | "m4a"));
+        if !extension_allowed(target) && !is_video_path(target) && !audio {
             continue;
         }
         let real = ensure_inside(&base, target)?;
@@ -1998,7 +2014,7 @@ mod compose_regression_tests {
         let matched = match_uploaded_creations(&wanted, &copies).unwrap();
         assert_eq!(matched[0].media_type, Some(ReferenceMediaType::Image));
         assert_eq!(matched[1].media_type, Some(ReferenceMediaType::Video));
-        let (payload, count) = build_flow_payload("@actor @dance", &matched, "seedance-2-5-pro", "16:9", 2, None, Some("video"), Some(5.0), Some("720p")).unwrap();
+        let (payload, count) = build_flow_payload("@actor @dance", &matched, "seedance-2-5-pro", "16:9", 2, None, Some("video"), Some(5.0), Some("720p"), false).unwrap();
         assert_eq!(count, 2);
         let elements = payload["elements"].as_array().unwrap();
         for (index, (port, data_type)) in [("references", "image"), ("video-reference", "video")].into_iter().enumerate() {
@@ -2017,17 +2033,40 @@ mod compose_regression_tests {
     }
 
     #[test]
+    fn music_video_links_audio_and_camera_as_distinct_references() {
+        let wanted = upload_references(&[
+            PathBuf::from("camera.mp4"), PathBuf::from("song.wav"), PathBuf::from("cast.png"),
+        ]).unwrap();
+        let copied = vec![creation("v", "camera #2"), creation("a", "song #2"), creation("i", "cast #2")];
+        let matched = match_uploaded_creations(&wanted, &copied).unwrap();
+        let (payload, _) = build_flow_payload(
+            "Follow @camera and match @song with @cast", &matched,
+            "seedance-2-5-pro", "16:9", 1, None, Some("video"), Some(15.0), Some("720p"), true,
+        ).unwrap();
+        let elements = payload["elements"].as_array().unwrap();
+        let incoming = elements[3]["workflowConnections"]["incoming"].as_array().unwrap();
+        assert_eq!(incoming[0]["sourcePort"], "video-output");
+        assert_eq!(incoming[0]["targetPort"], "video-reference");
+        assert_eq!(incoming[1]["sourcePort"], "audio-output");
+        assert_eq!(incoming[1]["targetPort"], "audio");
+        assert_eq!(incoming[1]["dataType"], "audio");
+        assert_eq!(elements[3]["data"]["noMusic"], false);
+        assert!(elements[3]["data"]["prompt"].as_str().unwrap().contains(":song #2:audio-output]"));
+        assert!(elements[3]["data"]["prompt"].as_str().unwrap().contains(":camera #2:video-output]"));
+    }
+
+    #[test]
     fn image_generator_keeps_its_existing_port_and_unknown_video_type_fails() {
         let copies = [creation("a", "actor")];
-        let (payload, _) = build_flow_payload("@actor", &copies, "image-model", "16:9", 1, None, Some("image"), None, None).unwrap();
+        let (payload, _) = build_flow_payload("@actor", &copies, "image-model", "16:9", 1, None, Some("image"), None, None, false).unwrap();
         assert_eq!(payload["elements"][1]["workflowConnections"]["incoming"][0]["targetPort"], "reference");
-        assert!(build_flow_payload("@actor", &copies, "seedance-2-5-pro", "16:9", 1, None, Some("video"), Some(5.0), None).is_err());
+        assert!(build_flow_payload("@actor", &copies, "seedance-2-5-pro", "16:9", 1, None, Some("video"), Some(5.0), None, false).is_err());
     }
 
     #[test]
     fn unsupported_media_is_not_silently_an_image_and_video_timeout_matches_extensions() {
         assert!(upload_references(&[PathBuf::from("notes.txt")]).is_err());
-        assert!(upload_references(&[PathBuf::from("song.wav")]).is_err());
+        assert_eq!(upload_references(&[PathBuf::from("song.wav")]).unwrap()[0].media_type, ReferenceMediaType::Audio);
         for name in ["clip.mp4", "clip.MOV", "clip.webm", "clip.m4v", "clip.avi", "clip.mkv"] {
             let file = PathBuf::from(name);
             assert!(is_video_path(&file));
@@ -2037,7 +2076,7 @@ mod compose_regression_tests {
 
     #[test]
     fn seedance_desktop_data_uses_the_observed_model_fields_and_duration() {
-        let data = video_generator_data("seedance-2-5-pro", "16:9", Some(15.0), Some("720p"), "프롬프트").unwrap();
+        let data = video_generator_data("seedance-2-5-pro", "16:9", Some(15.0), Some("720p"), true, "프롬프트").unwrap();
         assert_eq!(data["model"], "bytedance-seedance-pro-2.5");
         assert_eq!(data["api"], "bytedance");
         assert_eq!(data["mode"], "pro-2.5");
@@ -2047,26 +2086,28 @@ mod compose_regression_tests {
         assert_eq!(data["prompt"], "프롬프트");
         assert_eq!(data["videoPreset"], "custom");
         assert_eq!(data["withSoundEffects"], true);
+        assert_eq!(data["noMusic"], false);
         assert_eq!(data["extraParameters"]["style"], "default");
         assert!(data.get("durationSeconds").is_none());
         assert!(data.get("cost").is_none());
-        let default = video_generator_data("bytedance-seedance-pro-2.5", "16:9", None, None, "p").unwrap();
+        let default = video_generator_data("bytedance-seedance-pro-2.5", "16:9", None, None, false, "p").unwrap();
         assert_eq!(default["duration"], 5.0);
         assert_eq!(default["resolution"], "1080p");
+        assert_eq!(default["noMusic"], true);
     }
 
     #[test]
     fn unsupported_desktop_video_settings_are_rejected() {
-        assert!(video_generator_data("unknown", "16:9", Some(5.0), Some("720p"), "p").is_err());
-        assert!(video_generator_data("seedance-2-5-pro", "16:9", Some(5.0), Some("4k"), "p").is_err());
+        assert!(video_generator_data("unknown", "16:9", Some(5.0), Some("720p"), false, "p").is_err());
+        assert!(video_generator_data("seedance-2-5-pro", "16:9", Some(5.0), Some("4k"), false, "p").is_err());
         for duration in [f64::NAN, f64::INFINITY, 0.0, 31.0] {
-            assert!(video_generator_data("seedance-2-5-pro", "16:9", Some(duration), None, "p").is_err());
+            assert!(video_generator_data("seedance-2-5-pro", "16:9", Some(duration), None, false, "p").is_err());
         }
     }
 
     #[tokio::test]
     async fn unknown_video_model_fails_before_any_board_or_file_access() {
-        let error = magnific_compose_auto("없는 폴더".into(), vec!["없는 영상.mp4".into()], "p".into(), "unknown".into(), "16:9".into(), 1, Some("video".into()), Some(5.0), Some("720p".into())).await;
+        let error = magnific_compose_auto("없는 폴더".into(), vec!["없는 영상.mp4".into()], "p".into(), "unknown".into(), "16:9".into(), 1, Some("video".into()), Some(5.0), Some("720p".into()), Some(true)).await;
         assert!(matches!(error, Err(message) if message.contains("데스크톱 생성기 설정")));
     }
 

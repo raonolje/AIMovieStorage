@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 /// 로컬 업스케일 엔진(설치·상주 워커·실행). ComfyUI 다리와는 별개입니다 —
 /// 이 파일 아래쪽의 `comfy_*` 는 «외부 엔진» 으로 그대로 남습니다.
 mod comfy;
+mod codex_skill;
 mod comfy_generation;
 mod asset_upload;
 mod control;
@@ -1496,6 +1497,11 @@ pub fn run() {
         ])
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            match codex_skill::install_for_current_user() {
+                Ok(true) => log::info!("AIMovieStorage Codex skill registered"),
+                Ok(false) => log::info!("Codex skill kept user-customized or unmanaged copy"),
+                Err(error) => log::warn!("Codex skill registration failed: {error}"),
+            }
             // 「어느 판이 떴나」 를 로그 첫머리에 남깁니다 — 공개판에서 「엔진이 안 보인다」 는 보고가
             // 오면 이 한 줄로 판 문제인지 설치 문제인지 갈립니다.
             log::info!("판: {}", edition::describe());

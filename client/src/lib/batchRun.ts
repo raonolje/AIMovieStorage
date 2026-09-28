@@ -28,6 +28,8 @@ import type { Cut, ProjectDraft, Scene } from "@/lib/projectTypes";
 /**
  * **한 번에 뽑기** — 작품 하나를 **순서대로** 끝까지 뽑습니다.
  *
+ *
+ *
  * # 순서가 곧 품질입니다
  *
  * 1. **캐릭터 시트** — 인물이 먼저 있어야 합니다. 시트 없이 컷을 뽑으면 컷마다

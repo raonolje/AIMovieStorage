@@ -48,6 +48,8 @@ export interface MagnificComposeInput {
   seconds?: number;
   /** 로컬 생성 옵션과 분리합니다. 생략한 기존 호출은 1080p로 구성합니다. */
   videoResolution?: MagnificVideoResolution;
+  /** Magnific 영상 생성기의 음악 토글. 음향 효과는 별도로 켜 둡니다. */
+  musicEnabled?: boolean;
   onStatus?: (message: string) => void;
   /** 대기·카탈로그 조회 뒤 실제 외부 전송 직전에 최신 판을 확인합니다. */
   beforeCompose?: () => Promise<void>;
@@ -63,7 +65,7 @@ export async function validateMagnificComposition(input: MagnificComposeInput): 
     throw new Error(t("선택한 영상 모델의 Magnific 데스크톱 연결값을 확인하지 못했습니다. 기본 모델로 바꾸지 않았습니다. Magnific에서 모델을 직접 고르거나 MCP 생성 목록을 사용하세요."));
   }
   if (input.kind === "video") assertVideoDuration(input.seconds ?? 5, input.requestedVideoModel ?? input.model ?? MAGNIFIC_VIDEO_MODEL);
-  if (input.kind === "video" && paths.some(path => mediaTypeOfPath(path) === "video")) {
+  if (input.kind === "video" && paths.some(path => mediaTypeOfPath(path) === "video" || mediaTypeOfPath(path) === "audio")) {
     const model = findMagnificVideoModel(await loadMagnificModels("video"), input.model ?? MAGNIFIC_VIDEO_MODEL);
     assertVideoDuration(input.seconds ?? 5, input.requestedVideoModel ?? input.model ?? MAGNIFIC_VIDEO_MODEL, model);
     assertMagnificVideoInputs(model, {
@@ -95,6 +97,7 @@ export async function composeInMagnific(input: MagnificComposeInput): Promise<st
     kind: input.kind ?? "image",
     durationSeconds: input.seconds,
     resolution: input.kind === "video" ? resolution : undefined,
+    musicEnabled: input.kind === "video" ? input.musicEnabled ?? false : undefined,
     model:
       input.model ??
       (input.kind === "video" ? MAGNIFIC_VIDEO_MODEL : MAGNIFIC_IMAGE_MODEL),

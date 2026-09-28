@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import GlobalNav from "@/components/GlobalNav";
 import { Button } from "@/components/ui/button";
-import { Plus, Film, Clock, Layers, Eye, EyeOff, RefreshCw, Search, Grid3X3, List, Clapperboard, Sparkles, TrendingUp } from "lucide-react";
+import { Plus, Film, Clock, Layers, Eye, EyeOff, RefreshCw, Search, Grid3X3, List, Clapperboard, Sparkles, TrendingUp, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialogHost, confirmDialog } from "@/components/ConfirmDialog";
 import { localeTag, useLocale, useT } from "@/lib/i18n";
@@ -16,6 +16,7 @@ import {
   type LocalProjectSummary,
 } from "@/lib/localProjectStore";
 import { totalLlmJobCount } from "@/lib/llmActivity";
+import { restoreBgmProjectsFromDisk } from "@/lib/bgmRestore";
 
 /**
  * 프로젝트 보드.
@@ -50,6 +51,8 @@ export default function ProjectsPage() {
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [projects, setProjects] = useState<LocalProjectSummary[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const [hidden, setHidden] = useState<LocalProjectSummary[]>([]);
   const [showHidden, setShowHidden] = useState(false);
@@ -72,11 +75,14 @@ export default function ProjectsPage() {
    */
   const reload = async () => {
     setReloading(true);
+    setLoadError(false);
     try {
       await loadProjects();
+      await restoreBgmProjectsFromDisk();
       refresh();
       toast.success(t("폴더를 다시 읽었습니다."));
     } catch (error) {
+      setLoadError(true);
       toast.error(String(error));
     } finally {
       setReloading(false);
@@ -90,9 +96,9 @@ export default function ProjectsPage() {
     // 만들면 남의 project.json 을 덮어썼습니다.
     let alive = true;
     void loadProjects()
-      .catch(() => null)
+      .catch(() => { if (alive) setLoadError(true); })
       .finally(() => {
-        if (alive) refresh();
+        if (alive) { refresh(); setLoadingProjects(false); }
       });
     return () => {
       alive = false;
@@ -181,7 +187,7 @@ export default function ProjectsPage() {
                   {t("프로젝트 보드")}
                 </h1>
                 <p className="text-sm" style={{ color: "oklch(0.50 0.01 265)" }}>
-                  {t("{count}개의 프로젝트 · 로컬 작업 공간", { count: projects.length })}
+                  {loadingProjects ? t("프로젝트를 불러오는 중…") : t("{count}개의 프로젝트 · 로컬 작업 공간", { count: projects.length })}
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -260,7 +266,18 @@ export default function ProjectsPage() {
 
         {/* 카드 */}
         <div className="px-6 pb-12">
-          {projects.length === 0 ? (
+          {loadingProjects ? (
+            <div role="status" aria-live="polite" className="flex flex-col items-center gap-3 rounded-xl px-4 py-20"
+              style={{ border: "2px dashed oklch(1 0 0 / 10%)" }}>
+              <Loader2 className="h-8 w-8 animate-spin" style={{ color: "oklch(0.72 0.16 200)" }} />
+              <p className="text-sm text-white/70">{t("프로젝트를 불러오는 중…")}</p>
+            </div>
+          ) : loadError && projects.length === 0 ? (
+            <div role="alert" className="rounded-xl px-4 py-12 text-center text-sm text-white/70"
+              style={{ border: "2px dashed oklch(1 0 0 / 10%)" }}>
+              {t("프로젝트 목록을 읽지 못했습니다. 폴더 다시 읽기를 눌러 주세요.")}
+            </div>
+          ) : projects.length === 0 ? (
             <div
               className="flex flex-col items-center gap-3 rounded-xl px-4 py-16"
               style={{ border: "2px dashed oklch(1 0 0 / 10%)" }}

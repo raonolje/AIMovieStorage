@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { mediaRegisterSchema, assetSetPrimarySchema, registerControlMedia, setControlAssetPrimary } from "./controlAssetRegistration";
 import { magnificComposePreviewSchema, magnificComposeExecuteSchema, previewControlMagnific, enqueueControlMagnific } from "./controlMagnific";
 import { comfyWorkflowSchema, comfyGenerateSchema, getControlComfyStatus, getControlComfyWorkflow, enqueueControlComfy } from "./controlComfy";
 import { controlDetailSchema, projectControlValue } from "./controlProjection";
@@ -137,6 +138,8 @@ export function addControlTool<T>(
   });
 }
 const empty = z.object({}).strict();
+addControlTool("media_register", "Copy a Codex/Claude-created local image or video into a project character, background or cut, saving the generation prompt and provenance. Requires the latest project revision and a stable operationId for retries. makePrimary selects the representative asset.", mediaRegisterSchema, false, registerControlMedia);
+addControlTool("asset_set_primary", "Select the representative image or video in a project character, background or cut after reading its latest revision.", assetSetPrimarySchema, false, setControlAssetPrimary);
 addControlTool("magnific_compose_preview", "Preview a saved cut's Magnific desktop composition, including its exact prompt, references and video settings. Read project_get first and supply expectedRevision. Does not upload or generate. Preview expires after ten minutes; unsaved guide captures must be saved first.", magnificComposePreviewSchema, true, previewControlMagnific);
 addControlTool("magnific_compose", "Queue an inspected Magnific desktop composition using previewId and expectedRevision. Uploads references and configures the generator; NEVER presses Generate or spends generation credits. Requires a signed-in desktop board. Reuse operationId; check job_get. A disconnected partial upload is not automatically repeated.", magnificComposeExecuteSchema, false, enqueueControlMagnific, false, true);
 addControlTool("comfy_status", "Check the configured external ComfyUI connection and which image/video workflows are registered. Does not submit a workflow.", empty, true, getControlComfyStatus, false, true);

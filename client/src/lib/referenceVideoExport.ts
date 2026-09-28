@@ -2,18 +2,22 @@ import { t } from "./i18n";
 import type { VideoFrameRenderer } from "@/components/composition/CompositionViewport";
 import { renderReferenceVideo, splitParts } from "./referenceVideo";
 import { saveProjectMediaAsset } from "./mediaLibrary";
+import { referenceAudioWav, renderReferenceAudio } from "./referenceAudio";
+import type { CompositionMusic } from "./composition";
 
 export interface CompositionVideoOptions {
   width: number;
   height: number;
   duration: number;
   fps: number;
+  music?: CompositionMusic | null;
 }
 export interface SavedReferenceVideo extends CompositionVideoOptions {
   path: string;
   seconds: number;
   frameCount: number;
   codec: string;
+  audioPath?: string;
   part?: string;
 }
 export interface CompositionVideoControls {
@@ -52,8 +56,10 @@ export async function exportReferenceVideoFiles(options: CompositionVideoOptions
     renderer.begin(options.width, options.height);
     for (const [part, { firstFrame, frames }] of parts.entries()) {
       check();
+      const audio = options.music ? await renderReferenceAudio(options.music, firstFrame, frames, fps, options.signal) : undefined;
+      check();
       const encoded = await renderReferenceVideo({
-        width: options.width, height: options.height, duration: frames / fps, fps, signal: options.signal,
+        width: options.width, height: options.height, duration: frames / fps, fps, signal: options.signal, audio,
         drawFrame: async (_time, index) => {
           check();
           const at = (firstFrame + index) / fps;
@@ -76,8 +82,18 @@ export async function exportReferenceVideoFiles(options: CompositionVideoOptions
         // File.name은 저장 시 확장자만 쓰므로 stem도 명시합니다. 그림과 이름이 같으면 Magnific @태그가 모호해집니다.
         stem: `${options.sceneTitle || "Reference"}_구도영상`,
       }) : null;
+      const audioFileName = fileName.replace(/\.mp4$/i, ".wav");
+      const audioAsset = audio && options.projectName?.trim() ? await saveProjectMediaAsset(
+        new File([referenceAudioWav(audio)], audioFileName, { type: "audio/wav" }), {
+          projectName: options.projectName, assetType: "composition-video", ownerName: options.sceneTitle || "Reference",
+          stem: `${options.sceneTitle || "Reference"}_구도음원`,
+        },
+      ) : null;
+      if (audio && options.projectName?.trim() && !audioAsset?.path)
+        throw new Error("영상은 저장했지만 같은 구간의 음원을 저장하지 못했습니다. 음악 레퍼런스 없이 완료로 표시하지 않습니다.");
       if (asset?.path) {
         const video: SavedReferenceVideo = { path: asset.path, seconds: encoded.frameCount / fps,
+          ...(audioAsset?.path ? { audioPath: audioAsset.path } : {}),
           frameCount: encoded.frameCount, codec: encoded.codec, width: options.width, height: options.height,
           fps, duration: encoded.frameCount / fps, ...(parts.length > 1 ? { part: `${part + 1}/${parts.length}` } : {}) };
         saved.push(video);
@@ -92,6 +108,11 @@ export async function exportReferenceVideoFiles(options: CompositionVideoOptions
         try {
           const link = document.createElement("a");
           link.href = url; link.download = fileName; link.click();
+          if (audio) {
+            const audioUrl = URL.createObjectURL(referenceAudioWav(audio));
+            try { const audioLink = document.createElement("a"); audioLink.href = audioUrl; audioLink.download = audioFileName; audioLink.click(); }
+            finally { URL.revokeObjectURL(audioUrl); }
+          }
         } finally { URL.revokeObjectURL(url); }
       }
     }

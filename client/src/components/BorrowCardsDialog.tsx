@@ -17,6 +17,8 @@ import type { RoomPreset } from "@/lib/roomPreset";
 /**
  * **다른 작품에서 끌어오기** — 고르는 창.
  *
+ *
+ *
  * 두 단으로 고릅니다 — **카드를 고르고, 그 카드의 그림 중 몇 장을 고릅니다.** 카드만
  * 고르고 그림을 안 고르면 설정만 옵니다(그것도 쓸모가 있습니다 — 이쪽에서 새로 뽑으면 됩니다).
  *
@@ -327,7 +329,8 @@ export default function BorrowCardsDialog({
                 {/*
                   ── 변형 ──────────────────────────────────────────────
                    카드와 같은 방식으로
-                  **변형을 켜고, 그 변형의 그림을 고릅니다.*                */}
+                  **변형을 켜고, 그 변형의 그림을 고릅니다.**
+                */}
                 {on && item.variations.length > 0 && (
                   <div className="space-y-1 px-3 pb-3">
                     <p className="text-[9px] font-semibold" style={{ color: "oklch(0.55 0.01 265)" }}>

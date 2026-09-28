@@ -193,7 +193,7 @@ export default function BgmProjectsPage() {
     void restoreBgmProjectsFromDisk().then((filled) => {
       if (!alive || filled === loaded) return;
       setProjects(loadBgmProjects());
-      setSelectedId((current) => current ?? filled[0]?.id ?? null);
+      setSelectedId((current) => filled.some((item) => item.id === current) ? current : filled[0]?.id ?? null);
     });
     return () => {
       alive = false;
