@@ -370,7 +370,9 @@ registerTaskRunner(KIND, async (raw, report, task) => {
   if (saved.externalEffectStartedAt)
     fail(
       "external_result_unknown",
-      "Magnific 구성의 완료 여부를 확인하지 못했습니다. 자동으로 다시 올리지 않습니다. 보드를 확인하고 새 미리보기와 작업 요청 열쇠로 요청해 주세요.",
+      typeof saved.externalCheckpoint?.message === "string"
+        ? saved.externalCheckpoint.message
+        : "Magnific 구성의 완료 여부를 확인하지 못했습니다. 자동으로 다시 올리지 않습니다. 보드를 확인하고 새 미리보기와 작업 요청 열쇠로 요청해 주세요.",
     );
   await validateCurrent(payload);
   let message: string;
@@ -395,12 +397,21 @@ registerTaskRunner(KIND, async (raw, report, task) => {
       const explanation = t(
         "Magnific 구성의 완료 여부를 확인하지 못했습니다. 자동으로 다시 올리지 않습니다. 보드를 확인하고 새 미리보기와 작업 요청 열쇠로 요청해 주세요.",
       );
+      // 부분 업로드 가능성 때문에 자동 재시도는 막되, 실제 native 오류를 지우지는 않습니다.
+      // 이 원인이 없으면 화면 DOM의 가시 노드 수와 저장된 보드 수가 어긋난 경우를 진단할 수 없습니다.
+      const cause = (error instanceof Error ? error.message : String(error))
+        .replace(/Bearer\s+\S+/gi, "Bearer [숨김]")
+        .replace(/https?:\/\/\S+/g, "[외부 주소]")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 400);
+      const message = cause ? `${explanation} 원인: ${cause}` : explanation;
       await saveTaskExternalCheckpoint(task.id, {
         phase: "unknown",
         paidGeneration: false,
-        message: explanation,
+        message,
       }).catch(() => undefined);
-      throw new ProjectControlError("external_result_unknown", explanation);
+      throw new ProjectControlError("external_result_unknown", message);
     }
     throw error;
   }

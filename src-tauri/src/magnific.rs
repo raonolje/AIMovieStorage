@@ -1004,6 +1004,73 @@ fn require_complete_paste(actual: usize, expected: usize) -> Res<()> {
     Err(format!("마그니픽 구성이 일부만 배치되어 완료하지 못했습니다. 예상 노드 {expected}개, 확인 {actual}개, 부족 {}개, 초과 {}개입니다. 보드의 레퍼런스와 생성기를 확인하세요.", expected.saturating_sub(actual), actual.saturating_sub(expected)))
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct BoardSnapshot {
+    nodes: std::collections::BTreeSet<String>,
+    connections: std::collections::BTreeSet<String>,
+}
+
+/// Spaces 보드는 화면 밖 노드를 DOM에서 빼므로 `.vue-flow__node` 개수만으로 붙여넣기
+/// 완료를 판정할 수 없습니다. MCP의 저장된 보드에서 노드·연결 ID를 읽어 재확인합니다.
+fn toon_table_ids(text: &str, table: &str) -> Res<std::collections::BTreeSet<String>> {
+    let header = format!("{table}[");
+    let mut found = false;
+    let mut ids = std::collections::BTreeSet::new();
+    for line in text.lines() {
+        if line.starts_with(&header) {
+            found = true;
+            continue;
+        }
+        if !found { continue; }
+        if !line.starts_with("  ") { break; }
+        let row = line.trim();
+        let id = if let Some(quoted) = row.strip_prefix('"') {
+            quoted.split('"').next().unwrap_or("")
+        } else {
+            row.split(',').next().unwrap_or("")
+        };
+        if !id.is_empty() { ids.insert(id.to_string()); }
+    }
+    if !found { return Err(format!("마그니픽 보드에 {table} 목록이 없습니다.")); }
+    Ok(ids)
+}
+
+fn board_snapshot_from_mcp(value: &serde_json::Value) -> Res<BoardSnapshot> {
+    if let Some(text) = value.as_str() {
+        return Ok(BoardSnapshot {
+            nodes: toon_table_ids(text, "nodes")?,
+            connections: toon_table_ids(text, "connections")?,
+        });
+    }
+    let ids = |table: &str| -> Res<std::collections::BTreeSet<String>> {
+        value.get(table).and_then(|v| v.as_array())
+            .ok_or_else(|| format!("마그니픽 보드에 {table} 목록이 없습니다."))?
+            .iter().map(|item| item.get("id").and_then(|v| v.as_str())
+                .map(str::to_string).ok_or_else(|| format!("{table} 항목의 id가 없습니다.")))
+            .collect()
+    };
+    Ok(BoardSnapshot { nodes: ids("nodes")?, connections: ids("connections")? })
+}
+
+fn space_id_from_url(page_url: &str) -> Option<String> {
+    let url = reqwest::Url::parse(page_url).ok()?;
+    let segments: Vec<_> = url.path_segments()?.collect();
+    segments.windows(2).find(|pair| pair[0] == "spaces").map(|pair| pair[1].to_string())
+}
+
+async fn saved_board_snapshot(space_id: &str) -> Res<BoardSnapshot> {
+    let result = crate::magnific_mcp::magnific_call(
+        "spaces_state".into(),
+        Some(serde_json::json!({ "spaceId": space_id, "scope": "current_page" })),
+    ).await?;
+    board_snapshot_from_mcp(&result)
+}
+
+fn board_paste_complete(before: &BoardSnapshot, after: &BoardSnapshot, nodes: usize, connections: usize) -> bool {
+    after.nodes.difference(&before.nodes).count() == nodes
+        && after.connections.difference(&before.connections).count() == connections
+}
+
 /// 프롬프트의 `@이름` 을 마그니픽 칩 표기 `@[요소id:이름:output]` 으로 바꿉니다.
 ///
 /// 이름이 긴 것부터 바꿔 `@냥이_001` 이 `@냥이_001_b` 를 잘라먹지 않게 하고, 태그 뒤가
@@ -1600,6 +1667,14 @@ async fn compose_body(
         duration_seconds,
         resolution.as_deref(),
     )?;
+    // 현재 페이지 DOM은 화면 밖 노드를 렌더링하지 않습니다. 붙여넣기 전 저장된 보드를
+    // 기록해 두면, 아래 화면 검사에서 일부만 보일 때 실제 저장 결과로 재확인할 수 있습니다.
+    // MCP 연결이 없는 데스크톱 사용자에게는 기존 DOM 확인 경로를 유지합니다.
+    let saved_before = if let Some(space_id) = space_id_from_url(&page_url) {
+        saved_board_snapshot(&space_id).await.ok().map(|snapshot| (space_id, snapshot))
+    } else {
+        None
+    };
     put_flow_on_clipboard(&payload)?;
     let before = set_of(&cdp.node_ids(false).await?);
     cdp.key("Escape", 27, false, false).await?;
@@ -1620,7 +1695,21 @@ async fn compose_body(
         let now = cdp.node_ids(false).await?;
         pasted = now.iter().filter(|id| !before.contains(*id)).count();
     }
-    require_complete_paste(pasted, expected)?;
+    if pasted != expected {
+        let mut saved_complete = false;
+        if let Some((space_id, before_snapshot)) = &saved_before {
+            for _ in 0..10 {
+                if let Ok(after) = saved_board_snapshot(space_id).await {
+                    if board_paste_complete(before_snapshot, &after, expected, creations.len() * gen_count) {
+                        saved_complete = true;
+                        break;
+                    }
+                }
+                sleep(750).await;
+            }
+        }
+        if !saved_complete { require_complete_paste(pasted, expected)?; }
+    }
     let what = if kind.as_deref() == Some("video") { "영상" } else { "이미지" };
     let mut message = if creations.is_empty() {
         format!("마그니픽 캔버스에 {what} 생성기 {gen_count}개(프롬프트만)를 놓았습니다.")
@@ -1869,6 +1958,19 @@ mod compose_regression_tests {
         assert!(require_complete_paste(4, 5).unwrap_err().contains("부족 1개"));
         assert!(require_complete_paste(0, 5).unwrap_err().contains("부족 5개"));
         assert!(require_complete_paste(6, 5).unwrap_err().contains("초과 1개"));
+    }
+
+    #[test]
+    fn saved_board_confirms_nodes_missing_from_visible_dom() {
+        let before = board_snapshot_from_mcp(&serde_json::Value::String(
+            "board:\n  elementsCount: 1\nnodes[1]{id,type}:\n  old,creation\nconnections[0]{id,sourceElementId}:\n".into(),
+        )).unwrap();
+        let after = board_snapshot_from_mcp(&serde_json::Value::String(
+            "board:\n  elementsCount: 3\nnodes[3]{id,type}:\n  old,creation\n  new-ref,creation\n  new-generator,video-generator\nconnections[1]{id,sourceElementId}:\n  \"new-ref:output->new-generator:references\",new-ref\n".into(),
+        )).unwrap();
+        assert!(board_paste_complete(&before, &after, 2, 1));
+        assert!(!board_paste_complete(&before, &after, 2, 2));
+        assert_eq!(space_id_from_url("https://www.magnific.com/app/spaces/board-id?tab=blank&page=1").as_deref(), Some("board-id"));
     }
 
     #[test]

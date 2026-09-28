@@ -343,12 +343,19 @@ describe("Magnific 데스크톱 조종의 미리보기와 실행", () => {
       previewId: preview.previewId,
       operationId: "unknown",
     });
-    expect((await finish(q, job.jobId)).status).toBe("failed");
+    const first = await finish(q, job.jobId);
+    expect(first.status).toBe("failed");
+    expect(first.error).toContain("응답을 받지 못했습니다.");
+    expect(first.externalCheckpoint).toMatchObject({
+      phase: "unknown",
+      message: expect.stringContaining("응답을 받지 못했습니다."),
+    });
     vi.resetModules();
     ({ q, control } = await prepare());
     q.retryTask(job.jobId);
     const retried = await finish(q, job.jobId);
     expect(retried.error).toContain("자동으로 다시 올리지 않습니다");
+    expect(retried.error).toContain("응답을 받지 못했습니다.");
     expect(retried.externalEffectStartedAt).toBeGreaterThan(0);
     expect(state.native).toHaveBeenCalledTimes(1);
   });
