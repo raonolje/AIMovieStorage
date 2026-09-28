@@ -670,6 +670,7 @@ fn extract_code(archive_path: &Path, engine_root: &Path, dest: &Path, strip_root
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn hidden_command(program: &Path) -> Command {
+    #[allow(unused_mut)]
     let mut command = Command::new(program);
     #[cfg(windows)]
     {

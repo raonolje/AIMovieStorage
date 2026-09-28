@@ -1812,6 +1812,7 @@ pub fn resolve_image_files(base_directory: &str, paths: &[String]) -> Res<(Vec<P
 #[tauri::command]
 pub fn send_images_to_magnific(base_directory: String, paths: Vec<String>) -> Res<SendImagesResult> {
     let (files, fingerprints) = resolve_image_files(&base_directory, &paths)?;
+    #[cfg(target_os = "windows")]
     let done = |message: String| Ok(SendImagesResult { message, fingerprints: fingerprints.clone() });
 
     #[cfg(target_os = "windows")]
@@ -1834,7 +1835,7 @@ pub fn send_images_to_magnific(base_directory: String, paths: Vec<String>) -> Re
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = done;
+        let _ = (files, fingerprints);
         Err("이 OS 에서는 아직 그림 보내기를 지원하지 않습니다.".into())
     }
 }
