@@ -1,11 +1,11 @@
 ---
 name: aimoviestorage-control
-description: Use the locally running AIMovieStorage app through its controller to develop a film or music-video project across Codex chats, including shot planning, generation, and registering every created prompt, image, and video in the app.
+description: Control AIMovieStorage from Codex to create or continue film and music-video projects, including Korean requests such as "라온올제 국호 프로젝트 만들어줘"; register prompts, images, and videos in the app.
 ---
 
 # AIMovieStorage project work
 
-Use this skill when the user wants to create or continue an AIMovieStorage drama, music video, scene, or shot from a Codex chat. Work in the user's named project; ask which project only if the app lists several plausible matches and the choice changes the work.
+Use this skill when the user wants to create or continue an AIMovieStorage drama, music video, scene, or shot from a Codex chat. The short Korean request "라온올제 <이름> 프로젝트 만들어줘" means to work in the AIMovieStorage project named <이름>; "이어줘" means to continue it. First inspect the app and continue an existing matching project instead of creating a duplicate. Ask which project only if the app lists several plausible matches and the choice changes the work.
 
 ## Connect and inspect
 
