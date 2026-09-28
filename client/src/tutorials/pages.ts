@@ -597,6 +597,7 @@ const SETTINGS: Tutorial = {
       anchor: "settings-app-control",
       title: "대화로 앱 조종하기",
       body: "«앱 조종 켜기» 후 대화 앱에 연결 설정을 추가합니다. 프로젝트와 변경 내역을 먼저 읽고 수정하므로 직접 편집한 내용을 이어갈 수 있습니다. Magnific 구성은 미리보기 후 전송하고 유료 생성은 창에서 실행합니다. ComfyUI 생성은 아래에서 등록한 워크플로를 사용하며 결과와 작업 상태를 다시 조회할 수 있습니다.",
+      action: "해 볼 것: Magnific 구성 미리보기에서 올릴 레퍼런스마다 프롬프트에 @이름이 있는지 확인하세요. «본문 그대로»에서는 빠진 @이름이 있으면 전송 전에 멈춥니다.",
     },
     {
       id: "page-settings-comfy-generation",

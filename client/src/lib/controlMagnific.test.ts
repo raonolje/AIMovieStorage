@@ -158,7 +158,18 @@ describe("Magnific 데스크톱 조종의 미리보기와 실행", () => {
     await expect(
       control.previewControlMagnific({ ...request, promptMode: "exact" }),
     ).rejects.toThrow("prompt를 직접");
-    const prompt = "5인 💃\nFollow @구도영상. Keep @그룹.";
+    const incomplete = "5인 💃\nFollow @구도영상. Keep @그룹.";
+    await expect(
+      control.previewControlMagnific({
+        ...request,
+        promptMode: "exact",
+        prompt: incomplete,
+      }),
+    ).rejects.toMatchObject({
+      code: "unlinked_references",
+      details: { missingReferences: ["@구도", "@배경", "@인물"] },
+    });
+    const prompt = "5인 💃\nFollow @구도영상. Keep @그룹, @구도, @배경 and @인물.";
     const preview = await control.previewControlMagnific({
       ...request,
       promptMode: "exact",
@@ -166,7 +177,7 @@ describe("Magnific 데스크톱 조종의 미리보기와 실행", () => {
     });
     expect(preview.prompt).toBe(prompt);
     expect(preview.promptCharacters).toBe(Array.from(prompt).length);
-    expect(preview.promptWords).toBe(6);
+    expect(preview.promptWords).toBe(10);
     expect(preview.metrics).toMatchObject({
       utf8Bytes: new TextEncoder().encode(prompt).length,
       characterCountMethod: "unicode_code_points",

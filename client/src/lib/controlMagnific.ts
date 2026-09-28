@@ -120,6 +120,25 @@ function checkPaths(paths: string[], base: string, folder: string) {
   }
 }
 
+/** Native처럼 긴 이름부터 매칭해 @구도영상 하나를 @구도까지 두 번 센다고 착각하지 않습니다. */
+function unlinkedReferenceTags(prompt: string, tags: string[]): string[] {
+  const longestFirst = [...tags].sort((a, b) => b.length - a.length);
+  const linked = new Set<string>();
+  let from = 0;
+  while (from < prompt.length) {
+    const at = prompt.indexOf("@", from);
+    if (at < 0) break;
+    const tag = longestFirst.find((candidate) => {
+      if (!prompt.startsWith(candidate, at)) return false;
+      const after = prompt[at + candidate.length] ?? "";
+      return !/[A-Za-z0-9_-]/.test(after);
+    });
+    if (tag) linked.add(tag);
+    from = at + (tag?.length ?? 1);
+  }
+  return tags.filter((tag) => !linked.has(tag));
+}
+
 export async function previewControlMagnific(raw: unknown) {
   const request = magnificComposePreviewSchema.parse(raw);
   if (request.promptMode === "exact" && !request.prompt)
@@ -196,6 +215,23 @@ export async function previewControlMagnific(raw: unknown) {
       "Magnific 데스크톱 영상 자동 구성은 확인된 Seedance 2.5만 지원합니다. 프로젝트의 영상 모델을 확인해 주세요.",
     );
   const seconds = request.kind === "video" ? cutVideoSecondsOf(cut) : undefined;
+  const referencePaths =
+    request.kind === "video"
+      ? magnificCutVideoReferences(cut, refs.references, useRefVideo)
+      : refs.references;
+  checkPaths(referencePaths, baseDirectory, projectFolder);
+  if (request.promptMode === "exact") {
+    const missing = unlinkedReferenceTags(
+      prompt,
+      referencePaths.map((path) => refs.tagOf(path)),
+    );
+    if (missing.length)
+      fail(
+        "unlinked_references",
+        `올릴 레퍼런스가 프롬프트에 @로 연결되지 않았습니다: ${missing.join(", ")}. 본문 그대로 보내기에서는 각 이름을 직접 적어 주세요.`,
+        { missingReferences: missing },
+      );
+  }
   const plan: Plan = {
     kind: request.kind,
     prompt:
@@ -222,10 +258,7 @@ export async function previewControlMagnific(raw: unknown) {
               refs,
             })
           : buildCutImageMagnificPrompt(prompt, request.language, refs),
-    referencePaths:
-      request.kind === "video"
-        ? magnificCutVideoReferences(cut, refs.references, useRefVideo)
-        : refs.references,
+    referencePaths,
     owner: { kind: "cut", name: `컷 ${cut.order}`, cutId: cut.id },
     model: nativeModel,
     requestedVideoModel: request.kind === "video" ? model : undefined,
@@ -235,7 +268,6 @@ export async function previewControlMagnific(raw: unknown) {
     videoResolution: request.videoResolution,
     count: 1,
   };
-  checkPaths(plan.referencePaths, baseDirectory, projectFolder);
   await validateMagnificComposition(plan);
   await current(request.projectId, request.expectedRevision);
   for (const [key, item] of previews)

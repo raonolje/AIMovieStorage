@@ -1902,6 +1902,24 @@ mod compose_regression_tests {
     }
 
     #[test]
+    fn camera_and_four_image_mentions_each_become_a_chip() {
+        let mut video = creation("video", "구도영상 #2");
+        video.media_type = Some(ReferenceMediaType::Video);
+        let copies = vec![
+            video,
+            creation("group", "그룹 #2"),
+            creation("guide", "구도 #2"),
+            creation("stage", "배경 #2"),
+            creation("solo", "인물 #2"),
+        ];
+        let prompt = "Follow @구도영상; cast @그룹; blocking @구도; stage @배경; face @인물.";
+        let converted = with_mention_chips(prompt, &copies);
+        assert_eq!(converted.matches("@[").count(), 5);
+        assert!(converted.contains("@[video:구도영상 #2:video-output]"));
+        assert!(converted.contains("@[guide:구도 #2:output]"));
+    }
+
+    #[test]
     fn ambiguous_source_stems_are_rejected_before_upload() {
         for files in [vec!["a/actor.png", "b/actor.jpg"], vec!["actor.png", "actor #2.png"], vec!["Actor.png", "actor.jpg"]] {
             assert!(unique_reference_names(&files.into_iter().map(PathBuf::from).collect::<Vec<_>>()).is_err());
