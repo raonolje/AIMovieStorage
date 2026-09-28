@@ -67,7 +67,8 @@
           "Japanese",
           "SimpChinese"
         ],
-        "displayLanguageSelector": true
+        "displayLanguageSelector": true,
+        "installerHooks": "nsis/installer-language.nsh"
       }
     },
     "icon": [

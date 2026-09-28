@@ -1376,6 +1376,26 @@ fn open_project_inbox(base_directory: String, project_name: String) -> Res<Strin
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// NSIS writes its chosen language before the app starts. Existing app settings
+/// still take precedence in the UI; this is only a first-launch default.
+#[tauri::command]
+fn installer_app_locale() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var_os("APPDATA")?;
+        let path = PathBuf::from(appdata)
+            .join("AIMovieStorage")
+            .join("installer-language.txt");
+        let value = fs::read_to_string(path).ok()?;
+        let locale = value.trim();
+        return matches!(locale, "ko" | "en" | "ja" | "zh").then(|| locale.to_owned());
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1385,6 +1405,7 @@ pub fn run() {
         .manage(upscale::UpscaleState::default())
         .manage(control::ControlState::default())
         .invoke_handler(tauri::generate_handler![
+            installer_app_locale,
             control::control_status,
             control::control_enable,
             control::control_respond,

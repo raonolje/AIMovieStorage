@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getLocale, hasSavedLocale, LOCALES, setLocale, type Locale } from "@/lib/i18n";
 
 const COPY: Record<Locale, { title: string; detail: string; next: string }> = {
@@ -12,8 +13,34 @@ export default function FirstRunLanguage({ children }: { children: ReactNode }) 
   const [needsChoice, setNeedsChoice] = useState(() =>
     typeof window !== "undefined" && "__TAURI_INTERNALS__" in window && !hasSavedLocale(),
   );
+  const [checkingInstaller, setCheckingInstaller] = useState(() =>
+    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+      && /Windows/i.test(navigator.userAgent) && !hasSavedLocale(),
+  );
   const [selected, setSelected] = useState<Locale>(getLocale);
 
+  useEffect(() => {
+    if (!checkingInstaller) return;
+    let active = true;
+    void invoke<string | null>("installer_app_locale")
+      .then((value) => {
+        if (!active) return;
+        const locale = LOCALES.find((entry) => entry.id === value)?.id;
+        if (locale) {
+          setLocale(locale);
+          setNeedsChoice(false);
+        }
+      })
+      .catch(() => { /* A portable copy has no installer choice. */ })
+      .finally(() => { if (active) setCheckingInstaller(false); });
+    return () => { active = false; };
+  }, [checkingInstaller]);
+
+  if (checkingInstaller) return (
+    <main className="flex min-h-screen items-center justify-center bg-background" aria-label="Loading language selection">
+      <span className="h-8 w-8 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
+    </main>
+  );
   if (!needsChoice) return <>{children}</>;
   const copy = COPY[selected];
   return (

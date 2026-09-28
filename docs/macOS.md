@@ -4,7 +4,7 @@
 
 Magnific 데스크톱 창을 자동 조종하는 `구성` 기능도 현재 Windows 전용입니다. Mac에서는 Magnific MCP 또는 웹에서 작업하며, 앱의 자동 구성 단추는 명시적인 미지원 오류를 돌려줍니다.
 
-처음 실행할 때 앱 언어(한국어·영어·일본어·중국어)를 선택합니다. 이 설정은 이후 앱 설정에서 변경할 수 있습니다. Windows NSIS 설치 마법사에도 한국어·영어·일본어·중국어(간체) 설치 언어 선택을 표시합니다. 설치 마법사 언어와 앱 화면 언어는 각각 선택합니다.
+Mac DMG와 Windows 무설치본은 처음 실행할 때 앱 언어(한국어·영어·일본어·중국어)를 선택합니다. Windows NSIS 설치 마법사에서 고른 한국어·영어·일본어·중국어(간체)는 앱 첫 실행 언어로도 저장됩니다. 이미 앱에서 언어를 골랐다면 기존 설정이 우선하며, 어느 판에서나 앱 설정에서 변경할 수 있습니다.
 
 macOS 기기에서 `pnpm install --frozen-lockfile` 후 `pnpm build:macos:public`을 실행하면 공개판 DMG가 `src-tauri/target/public/release/bundle/dmg/`에 생성됩니다. 원본 비공개판은 `pnpm build:macos`로 빌드합니다. 공개판은 `edition.json`의 제외 엔진을 번들에서 걸러냅니다. Windows에서 `--dry-run`으로 설정과 제외 목록을 점검할 수 있지만 실제 DMG 빌드는 macOS가 필요합니다.
 
