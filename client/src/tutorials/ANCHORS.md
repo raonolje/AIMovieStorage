@@ -85,6 +85,7 @@
 | `card-first-reference` | `PromptCardBody.tsx` | «첫 레퍼런스 프롬프트» 접이식 머리 (L1266) |
 | `card-compose` | `PromptResultPanels.tsx` | 프롬프트 칸의 «구성» 단추 (L169) — 한글 칸 것에 달면 첫 번째로 잡힘 |
 | `card-local-generate` | `LocalGenerateButton.tsx` | 모델 고르는 칸과 «로컬로 뽑기» 를 싸는 줄 (L256) — «구성»(마그니픽)과 **다른 단추**입니다 |
+| `card-comfy-generate` | `ComfyGenerateButton.tsx` | «컴피로 뽑기»와 대기 중지를 감싸는 줄 |
 | `card-generated-images` | `GeneratedImageShelf.tsx` | «생성 결과 이미지» 선반 뿌리 (L277 제목이 든 상자) |
 | `card-image-crop` | `ImageActions.tsx` | 가위 `ActionButton corner="crop"` — `label="… 에서 칸 잘라내기"` (L135) |
 
@@ -131,6 +132,8 @@
 | 앵커 | 파일 | 요소 (줄 힌트) |
 | --- | --- | --- |
 | `settings-profile` | `SettingsPage.tsx` | `<Section title="프롬프트 작성 프로필">` (L409) |
+| `settings-app-control` | `AppControlPanel.tsx` | 대화 앱 연결과 조종 기능 안내 |
+| `settings-comfy-generation` | `SettingsPage.tsx` | ComfyUI 이미지·영상 워크플로를 감싸는 `Section` |
 | `settings-folders` | `SettingsPage.tsx` | `<Section title="폴더">` (L458) |
 | `settings-base-folder` | `SettingsPage.tsx` | «기본 저장 폴더» `FolderRow` (L459-461) |
 | `settings-api-keys` | `SettingsPage.tsx` | `<Section title="API 키">` (L492) |

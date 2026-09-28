@@ -23,6 +23,7 @@ import { useT } from "@/lib/i18n";
 import H3GenerationOptions, { useH3GenerationOptions } from "@/components/H3GenerationOptions";
 import StructureControlPicker from "@/components/StructureControlPicker";
 import type { LocalStructureControl } from "@/lib/localStructureControl";
+import ComfyGenerateButton from "@/components/ComfyGenerateButton";
 
 /**
  * «로컬로 뽑기» — 이 컴퓨터의 모델로 그림·영상을 바로 만듭니다.
@@ -35,7 +36,7 @@ import type { LocalStructureControl } from "@/lib/localStructureControl";
  * 캐릭터·배경·에셋·컷이 이 하나를 같이 씁니다(공통 규칙 1). 갈래마다 다른 것은
  * «어디에 저장하는가»(assetType·ownerName·stem)뿐입니다.
  */
-export default function LocalGenerateButton({
+function LocalEngineGenerateButton({
   kind,
   prompt,
   aspect = "16:9",
@@ -385,4 +386,13 @@ export default function LocalGenerateButton({
       )}
     </div>
   );
+}
+
+/** 외부 ComfyUI 는 앱 내 로컬 모델 설치 여부와 무관하게 쓸 수 있습니다. */
+export default function LocalGenerateButton(props: Parameters<typeof LocalEngineGenerateButton>[0]) {
+  return <>
+    <LocalEngineGenerateButton {...props} />
+    <ComfyGenerateButton kind={props.kind} prompt={props.prompt} references={props.references} firstFrame={props.firstFrame}
+      projectName={props.projectName} assetType={props.assetType} ownerName={props.ownerName} stem={props.stem} onDone={props.onDone} />
+  </>;
 }

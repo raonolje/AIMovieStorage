@@ -1626,7 +1626,7 @@ async fn compose_body(
         format!("마그니픽 캔버스에 {what} 생성기 {gen_count}개(프롬프트만)를 놓았습니다.")
     } else {
         format!(
-            "마그니픽 캔버스에 그림 {}장 + {what} 생성기 {gen_count}개(프롬프트·칩 포함)를 이어 놓았습니다.",
+            "마그니픽 캔버스에 레퍼런스 {}개 + {what} 생성기 {gen_count}개(프롬프트·칩 포함)를 이어 놓았습니다.",
             creations.len()
         )
     };

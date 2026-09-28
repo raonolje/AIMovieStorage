@@ -131,6 +131,8 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
     const applyMocap = await import("./compositionMocapControl");
     const exportVideo = await import("./compositionVideoExport");
     const loras = await import("./controlLoras");
+    const magnific = await import("./controlMagnific");
+    const comfy = await import("./controlComfy");
     for (const [name, schema] of [
       ["project_create", project.projectCreateSchema], ["project_update", project.projectUpdateSchema],
       ["composition_apply", composition.compositionApplyRequestSchema], ["composition_commit", composition.compositionSessionRequestSchema],
@@ -140,6 +142,10 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
       ["composition_apply_mocap", applyMocap.compositionApplyMocapSchema],
       ["composition_export_video", exportVideo.compositionExportVideoSchema],
       ["loras_list", loras.controlLorasListSchema],
+      ["magnific_compose_preview", magnific.magnificComposePreviewSchema],
+      ["magnific_compose", magnific.magnificComposeExecuteSchema],
+      ["comfy_workflow_get", comfy.comfyWorkflowSchema],
+      ["comfy_generate", comfy.comfyGenerateSchema],
     ] as const) {
       expect(tools.find(tool => tool.name === name)?.inputSchema).toEqual(z.toJSONSchema(schema));
     }
@@ -149,6 +155,9 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
     expect(tools.find(tool => tool.name === "project_update")?.inputSchema.required).toContain("expectedRevision");
     expect(tools.find(tool => tool.name === "composition_apply")?.inputSchema.required).toContain("expectedRevision");
     expect(tools.find(tool => tool.name === "loras_list")?.annotations.readOnlyHint).toBe(true);
+    expect(tools.find(tool => tool.name === "magnific_compose_preview")?.annotations.readOnlyHint).toBe(true);
+    expect(tools.find(tool => tool.name === "magnific_compose")?.annotations.openWorldHint).toBe(true);
+    expect(tools.find(tool => tool.name === "comfy_generate")?.inputSchema.required).toContain("expectedRevision");
     expectFailure(await call("loras_list", { engine: "anima" }), "invalid_request");
     expectFailure(await call("loras_list", { path: "C:/outside" }), "invalid_request");
   });

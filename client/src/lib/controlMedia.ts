@@ -111,7 +111,7 @@ export interface ControlAsset {
   target?: z.infer<typeof mediaTargetSchema>;
 }
 function mediaKind(path: string): ControlAsset["kind"] {
-  if (/\.(png|jpg|jpeg|webp|bmp)$/i.test(path)) return "image";
+  if (/\.(png|jpg|jpeg|webp|bmp|gif)$/i.test(path)) return "image";
   if (isVideoFile(path)) return "video";
   if (/\.(wav|mp3|ogg|flac)$/i.test(path)) return "audio";
   return "other";
@@ -186,7 +186,7 @@ function assetOf(
     throw new Error("현재 프로젝트에서 요청한 종류의 에셋을 찾지 못했습니다.");
   return asset;
 }
-function targetOf(
+export function controlMediaTarget(
   draft: ProjectDraft,
   target: z.infer<typeof mediaTargetSchema>,
 ) {
@@ -212,14 +212,14 @@ function targetOf(
   }
   throw new Error("결과를 붙일 컷을 찾지 못했습니다.");
 }
-async function attach(
+export async function attachControlMediaResult(
   projectId: string,
   target: z.infer<typeof mediaTargetSchema>,
   path: string,
   name: string,
   video = false,
 ) {
-  const assetId = uid();
+  let assetId: string = uid();
   const asset: GeneratedImageAsset = {
     id: assetId,
     name,
@@ -228,7 +228,15 @@ async function attach(
     file: null,
   };
   const outcome = await writeProjectAndConfirm(projectId, (current) => {
-    targetOf(current, target);
+    controlMediaTarget(current, target);
+    // 외부 생성 완료 뒤 앱이 재시작되어도 같은 결과 파일을 두 번 등록하지 않습니다.
+    const currentAssets = target.kind === "cut"
+      ? current.scenes.flatMap(scene => scene.cuts).filter(cut => cut.id === target.id)
+          .flatMap(cut => video ? cut.videos : cut.images)
+      : (target.kind === "character" ? current.characters : current.backgrounds)
+          .filter(item => item.id === target.id).flatMap(item => item.generatedImages);
+    const existing = currentAssets.find(item => item.filePath === path);
+    if (existing) { assetId = existing.id; return current; }
     if (target.kind === "cut")
       return {
         ...current,
@@ -279,7 +287,7 @@ function validateGeneration(raw: unknown) {
   const input = generateMediaSchema.parse(raw);
   const draft = readProject(input.projectId);
   if (!draft) throw new Error("프로젝트를 찾지 못했습니다.");
-  targetOf(draft, input.target);
+  controlMediaTarget(draft, input.target);
   const engine = LOCAL_ENGINE_CATALOG[input.engine];
   if (engine.kind !== "image" && engine.kind !== "video")
     throw new Error("이 명령은 이미지와 영상 엔진용입니다.");
@@ -354,7 +362,7 @@ export async function enqueueControlUpscale(raw: unknown) {
 registerTaskRunner("control.generate", async (raw, report, task) => {
   if (isStopping(task.id)) return;
   const { input, draft } = validateGeneration(raw);
-  const target = targetOf(draft, input.target);
+  const target = controlMediaTarget(draft, input.target);
   const kind = LOCAL_ENGINE_CATALOG[input.engine].kind;
   if (kind !== "image" && kind !== "video")
     throw new Error("지원하지 않는 생성 종류입니다.");
@@ -421,7 +429,7 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
   setTaskResult(task.id, { paths: [made.path], data: { ...controlSources, meta: made.meta } });
   if (isStopping(task.id))
     return { paths: [made.path], data: { attached: false, cancelled: true, ...controlSources } };
-  const assetId = await attach(
+  const assetId = await attachControlMediaResult(
     input.projectId,
     input.target,
     made.path,
@@ -442,7 +450,7 @@ registerTaskRunner("control.upscale", async (raw, report, task) => {
   setTaskResult(task.id, { paths: [result.path] });
   if (isStopping(task.id))
     return { paths: [result.path], data: { attached: false, cancelled: true } };
-  const assetId = await attach(
+  const assetId = await attachControlMediaResult(
     input.projectId,
     asset.target,
     result.path,

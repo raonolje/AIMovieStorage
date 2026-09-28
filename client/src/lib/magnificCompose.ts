@@ -24,13 +24,15 @@ export const MAGNIFIC_IMAGE_MODEL = "imagen-nano-banana-2";
 /**
  * 영상 생성기의 기본 모델.
  *
+ *
+ *
  * 레퍼런스 영상을 받아 그 움직임을 따르는 일이라 «영상→영상» 을 잘하는 쪽이 필요합니다.
  * 마그니픽에서 바꿔도 됩니다 — 여기 값은 노드를 놓을 때의 첫 자리일 뿐입니다.
  */
 export const MAGNIFIC_VIDEO_MODEL = "seedance-2-5-pro";
 export type MagnificVideoResolution = "720p" | "1080p";
 
-export async function composeInMagnific(input: {
+export interface MagnificComposeInput {
   prompt: string;
   /** 보낼 레퍼런스 그림의 파일 경로. 프롬프트에 태그로 쓰인 것만 주는 게 좋습니다. */
   referencePaths: string[];
@@ -47,8 +49,12 @@ export async function composeInMagnific(input: {
   /** 로컬 생성 옵션과 분리합니다. 생략한 기존 호출은 1080p로 구성합니다. */
   videoResolution?: MagnificVideoResolution;
   onStatus?: (message: string) => void;
-}): Promise<string> {
-  const say = input.onStatus ?? (() => undefined);
+  /** 대기·카탈로그 조회 뒤 실제 외부 전송 직전에 최신 판을 확인합니다. */
+  beforeCompose?: () => Promise<void>;
+}
+
+/** 미리보기는 같은 유효성 검사만 수행하고 보드·클립보드·보낸 기록을 바꾸지 않습니다. */
+export async function validateMagnificComposition(input: MagnificComposeInput): Promise<void> {
   const prompt = input.prompt.trim();
   if (!prompt) throw new Error("보낼 프롬프트가 없습니다.");
   const paths = [...new Set(input.referencePaths.filter((path) => path && path.trim()))];
@@ -65,9 +71,17 @@ export async function composeInMagnific(input: {
       // 검사한 해상도와 실제 캔버스 생성기에 넣는 값이 달라지면 안 됩니다.
       resolution,
     });
-    say(t("영상 입력 지원을 확인했습니다. Magnific에서 영상 노드가 레퍼런스로 연결됐는지 확인한 뒤 생성하세요."));
   }
-  if (input.owner) rememberMagnificSend(input.owner, prompt);
+}
+
+export async function composeInMagnific(input: MagnificComposeInput): Promise<string> {
+  await validateMagnificComposition(input);
+  const say = input.onStatus ?? (() => undefined);
+  const prompt = input.prompt.trim();
+  const paths = [...new Set(input.referencePaths.filter((path) => path && path.trim()))];
+  const resolution = input.videoResolution ?? "1080p";
+  if (input.kind === "video" && paths.some(path => mediaTypeOfPath(path) === "video"))
+    say(t("영상 입력 지원을 확인했습니다. Magnific에서 영상 노드가 레퍼런스로 연결됐는지 확인한 뒤 생성하세요."));
   // 그림이 없어도 됩니다 — 프롬프트만 든 생성기를 놓습니다(에셋·아직 그림 없는 인물).
   const what = input.kind === "video" ? "영상" : "이미지";
   say(
@@ -86,6 +100,11 @@ export async function composeInMagnific(input: {
       (input.kind === "video" ? MAGNIFIC_VIDEO_MODEL : MAGNIFIC_IMAGE_MODEL),
     aspectRatio: input.aspectRatio ?? "16:9",
     count: input.count ?? 1,
+    beforeCompose: async () => {
+      await input.beforeCompose?.();
+      // 충돌 검사에서 멈춘 요청을 실제로 보낸 기록으로 남기지 않습니다.
+      if (input.owner) rememberMagnificSend(input.owner, prompt);
+    },
     onQueued: () => say("앞의 «구성» 이 끝나면 이어서 시작합니다. 같은 캔버스와 클립보드를 쓰므로 한 번에 하나씩 돕니다."),
   });
 }

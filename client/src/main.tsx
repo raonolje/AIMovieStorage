@@ -15,6 +15,7 @@ import "./index.css";
 import "./lib/bootstrapStore";
 import "./lib/bootstrapRun";
 import "./lib/batchRun";
+import "./lib/comfyUiTasks";
 import { resumeTaskQueue } from "./lib/taskQueue";
 import { refreshMagnificStatus } from "./lib/magnificMcp";
 

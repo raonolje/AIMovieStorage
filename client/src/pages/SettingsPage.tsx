@@ -37,6 +37,7 @@ import { READING_WIDTH } from "@/lib/layout";
 import { ConfirmDialogHost, confirmDialog } from "@/components/ConfirmDialog";
 import PromptLibraryPanel from "@/components/PromptLibraryPanel";
 import LocalEnginesPanel from "@/components/LocalEnginesPanel";
+import ComfyGenerationPanel from "@/components/ComfyGenerationPanel";
 import {
   getAutoUnfoldEnabled,
   setAutoUnfoldEnabled,
@@ -854,6 +855,10 @@ export default function SettingsPage() {
 
         <Section icon={Cpu} tint="oklch(0.78 0.16 290)" title={t("로컬 모델 (그림·영상·음악)")} anchor="settings-local-engines">
           <LocalEnginesPanel />
+        </Section>
+
+        <Section icon={Link2} tint="oklch(0.78 0.16 160)" title={t("ComfyUI (그림·영상 생성)")} anchor="settings-comfy-generation">
+          <ComfyGenerationPanel />
         </Section>
 
         {/* ── 업스케일 엔진 ─────────────────────────────────────────── */}

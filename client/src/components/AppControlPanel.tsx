@@ -99,6 +99,7 @@ export default function AppControlPanel() {
 
   return (
     <section
+      data-tour="settings-app-control"
       className="space-y-3 rounded-xl p-4"
       aria-labelledby="app-control-title"
       style={{
@@ -124,6 +125,9 @@ export default function AppControlPanel() {
         {t(
           "Claude Desktop·Codex에서 대화하며 이 앱의 프로젝트를 읽고 수정합니다. 이 연결에는 별도 LLM API 키가 필요하지 않습니다.",
         )}
+      </p>
+      <p className="text-[11px] leading-relaxed text-slate-400">
+        {t("조종기로 Magnific에 올릴 구성을 미리 확인한 뒤 전송하거나, 설정한 ComfyUI 워크플로로 이미지·영상을 만들 수 있습니다. Magnific 구성 전송은 유료 생성을 시작하지 않습니다.")}
       </p>
       {!desktop ? (
         <p className="text-xs text-slate-400">

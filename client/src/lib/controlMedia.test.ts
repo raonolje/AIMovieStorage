@@ -53,6 +53,17 @@ beforeEach(() => {
 });
 
 describe("외부 생성의 저장·취소·재전송", () => {
+  it("같은 외부 결과의 재등록은 기존 ID를 반환하고 수동 편집을 유지한다", async () => {
+    const { media } = await prepare();
+    const target = { kind: "cut", id: "k" } as const;
+    const first = await media.attachControlMediaResult("p", target, "p/외부.mp4", "외부", true);
+    draft().scenes[0].cuts[0].description = "사용자가 고친 동작";
+    const second = await media.attachControlMediaResult("p", target, "p/외부.mp4", "외부", true);
+    expect(second).toBe(first);
+    expect(draft().scenes[0].cuts[0].videos).toHaveLength(1);
+    expect(draft().scenes[0].cuts[0].description).toBe("사용자가 고친 동작");
+  });
+
   it("LTX 두 단계는 최종 크기와 함께 명시 전달하고 다른 엔진에서는 거절한다", async () => {
     const { q, media } = await prepare();
     const options = { ...request.options, ltx_quality: "two-stage", width: 1920, height: 1080, fps: 24, seconds: 5 };

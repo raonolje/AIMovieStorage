@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { magnificComposePreviewSchema, magnificComposeExecuteSchema, previewControlMagnific, enqueueControlMagnific } from "./controlMagnific";
+import { comfyWorkflowSchema, comfyGenerateSchema, getControlComfyStatus, getControlComfyWorkflow, enqueueControlComfy } from "./controlComfy";
 import { controlDetailSchema, projectControlValue } from "./controlProjection";
 import { EDITION } from "./edition";
 import { controlLorasListSchema, listControlLoras } from "./controlLoras";
@@ -135,6 +137,11 @@ export function addControlTool<T>(
   });
 }
 const empty = z.object({}).strict();
+addControlTool("magnific_compose_preview", "Preview a saved cut's Magnific desktop composition, including its exact prompt, references and video settings. Read project_get first and supply expectedRevision. Does not upload or generate. Preview expires after ten minutes; unsaved guide captures must be saved first.", magnificComposePreviewSchema, true, previewControlMagnific);
+addControlTool("magnific_compose", "Queue an inspected Magnific desktop composition using previewId and expectedRevision. Uploads references and configures the generator; NEVER presses Generate or spends generation credits. Requires a signed-in desktop board. Reuse operationId; check job_get. A disconnected partial upload is not automatically repeated.", magnificComposeExecuteSchema, false, enqueueControlMagnific, false, true);
+addControlTool("comfy_status", "Check the configured external ComfyUI connection and which image/video workflows are registered. Does not submit a workflow.", empty, true, getControlComfyStatus, false, true);
+addControlTool("comfy_workflow_get", "Read configured workflow input mappings, allowed override keys and reference order without exposing the raw graph or local paths. Configure the API-format workflow in app Settings first.", comfyWorkflowSchema, true, getControlComfyWorkflow);
+addControlTool("comfy_generate", "Queue the configured ComfyUI image/video workflow and attach all selected output files to a project target. Requires expectedRevision from project_get; video targets must be cuts. References accept same-project asset IDs only. Workflow nodes may use paid providers. Reuse operationId; inspect job_get. Cancellation stops waiting, not the external server job.", comfyGenerateSchema, false, enqueueControlComfy, false, true);
 addControlTool("composition_export_video", "Queue the open composition as an MP4 reference video (default 15 seconds, 1920×1080, 24 fps). Requires the matching project/session and expectedRevision. Reuse operationId for retries; inspect the returned task with job_get. Completion requires file and project reference persistence; composition state itself is not committed.", compositionExportVideoSchema, false, enqueueCompositionVideoExport);
 const id = z.string().min(1).max(300);
 addControlTool("mocap_sources_list", "List project-local motion capture sources and included body-analysis engines.", mocapListSchema, true, input => listControlMocap(input.projectId));

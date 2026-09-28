@@ -314,6 +314,15 @@ const CHARACTERS: Tutorial = {
         "보내는 순간 @칩과 --ar 같은 매개변수를 걷어냅니다 — 로컬 모델은 그런 글자를 못 알아듣고 그대로 그림에 그려 넣습니다.",
     },
     {
+      id: "page-characters-comfy",
+      route: P,
+      page: "characters",
+      anchor: "card-comfy-generate",
+      advanceOn: "manual",
+      title: "«컴피로 뽑기» — 연결한 워크플로 사용",
+      body: "설정에서 등록한 ComfyUI 워크플로로 이 카드의 프롬프트와 선택한 레퍼런스를 보냅니다. 참조 목록에서 보낼 파일을 고르고 설정의 순서와 맞추세요. 결과는 카드 폴더에 저장되며 작업 상태를 확인할 수 있습니다. 대기 중지는 서버의 생성을 취소하지 않습니다. 여기서는 단추 위치만 확인하고, 실제 생성은 준비가 끝난 뒤 실행하세요.",
+    },
+    {
       id: "page-characters-images",
       route: P,
       page: "characters",
@@ -581,6 +590,22 @@ const SETTINGS: Tutorial = {
   title: "설정 — 작업 환경",
   summary: "폴더 · API 키 · 작업별 모델 · 생성기 · 엔진 · 로라 · 문구를 정하는 화면입니다. 전부 이 기기에만 저장됩니다.",
   steps: [
+    {
+      id: "page-settings-app-control",
+      route: "/settings",
+      page: "settings",
+      anchor: "settings-app-control",
+      title: "대화로 앱 조종하기",
+      body: "«앱 조종 켜기» 후 대화 앱에 연결 설정을 추가합니다. 프로젝트와 변경 내역을 먼저 읽고 수정하므로 직접 편집한 내용을 이어갈 수 있습니다. Magnific 구성은 미리보기 후 전송하고 유료 생성은 창에서 실행합니다. ComfyUI 생성은 아래에서 등록한 워크플로를 사용하며 결과와 작업 상태를 다시 조회할 수 있습니다.",
+    },
+    {
+      id: "page-settings-comfy-generation",
+      route: "/settings",
+      page: "settings",
+      anchor: "settings-comfy-generation",
+      title: "ComfyUI 이미지·영상 생성",
+      body: "ComfyUI를 켜고 주소와 이미지·영상 각각의 API 형식 워크플로를 등록합니다. 바꿀 노드 입력과 결과 노드를 명시적으로 지정하세요. 일반 편집용 JSON은 실행할 수 없습니다. 카드의 ComfyUI 생성이나 조종기로 실행하면 결과 파일을 프로젝트에 받습니다. 사용하는 모델·노드의 비용과 이용 조건은 해당 워크플로를 따릅니다.",
+    },
     {
       id: "page-settings-profile",
       route: "/settings",

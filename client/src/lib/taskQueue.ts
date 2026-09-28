@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useSyncExternalStore } from "react";
 import { abandonLlmResumes } from "@/lib/llmActivity";
 
@@ -83,6 +84,10 @@ export interface QueueTask {
   operationId?: string;
   requestFingerprint?: string;
   cancelRequestedAt?: number;
+  /** 외부 전송은 수동 재시도로 결과 칸이 지워져도 다시 발주하면 안 됩니다. */
+  externalEffectStartedAt?: number;
+  /** 재접속 때 새 발주 대신 외부 요청 조회·결과 등록을 이어 갈 자료입니다. */
+  externalCheckpoint?: Record<string, unknown>;
   result?: TaskResult;
   /** 앱을 껐다 켜도 이어 갈 수 있게, 그 일에 필요한 재료를 통째로 들고 있습니다. */
   payload: unknown;
@@ -472,6 +477,25 @@ export function setTaskResult(id: string, result: TaskResult): void {
   load();
   if (!tasks.some((task) => task.id === id)) throw new Error("결과를 붙일 작업을 찾지 못했습니다.");
   patch(id, { result: JSON.parse(JSON.stringify(result)) as TaskResult });
+}
+
+/** 시작 기록의 파일 저장을 확인한 뒤에만 외부 부수 효과를 실행합니다. */
+export async function markTaskExternalEffectStarted(id: string): Promise<void> {
+  await whenTaskJournalReady();
+  if (!journalAdapter) throw new Error(t("외부 작업을 받기 전에 앱 작업 기록을 연결해야 합니다."));
+  const task = getTask(id);
+  if (!task) throw new Error(t("외부 전송을 기록할 작업을 찾지 못했습니다."));
+  if (!task.externalEffectStartedAt) patch(id, { externalEffectStartedAt: Date.now() });
+  await flushTaskJournal();
+}
+
+/** result와 달리 수동 재시도에서도 보존합니다. 요청 본문·중복 열쇠는 바꾸지 않습니다. */
+export async function saveTaskExternalCheckpoint(id: string, checkpoint: Record<string, unknown>): Promise<void> {
+  await whenTaskJournalReady();
+  if (!journalAdapter) throw new Error(t("외부 작업을 받기 전에 앱 작업 기록을 연결해야 합니다."));
+  if (!getTask(id)) throw new Error(t("외부 진행을 기록할 작업을 찾지 못했습니다."));
+  patch(id, { externalCheckpoint: JSON.parse(JSON.stringify(checkpoint)) as Record<string, unknown> });
+  await flushTaskJournal();
 }
 
 export function enqueueTask(next: NewTask): string | null {
