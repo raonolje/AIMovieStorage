@@ -15,7 +15,6 @@ use serde::Serialize;
 
 use crate::{ensure_inside, err, extension_allowed, file_fingerprint, LockSafe, Res};
 
-#[cfg(target_os = "windows")]
 /// 클립보드 잠금. OS 클립보드는 하나뿐인데 «구성» 을 여러 개 동시에 돌리면 스레드마다
 /// 열고·비우고·쓰기가 겹칩니다. 한쪽이 EmptyClipboard 로 비운 메모리를 다른 쪽이 계속 쓰면
 /// 힙 손상(STATUS_HEAP_CORRUPTION)입니다 — 실제로 그렇게 죽었습니다(2026-09-08, 구성 여러 개).
@@ -53,6 +52,7 @@ pub fn send_lock() -> &'static tokio::sync::Mutex<()> {
     SEND_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
+#[cfg(target_os = "windows")]
 pub mod magnific_window {
     use windows::core::{BOOL, PWSTR};
     use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
@@ -546,6 +546,33 @@ pub mod magnific_window {
             SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         }
     }
+}
+
+/// The Windows desktop automation API has no macOS implementation yet.
+/// Keep the command signatures buildable and fail before changing a board.
+#[cfg(not(target_os = "windows"))]
+pub mod magnific_window {
+    #[derive(Clone, Copy)]
+    pub struct Handle;
+    #[derive(Clone, Copy)]
+    pub enum Target { Unsupported }
+
+    pub fn target_label(_target: Target) -> &'static str { "Magnific" }
+    pub fn find_target() -> Option<(Handle, Target)> { None }
+    pub fn find_desktop() -> Option<Handle> { None }
+    pub fn bring_to_front(_handle: Handle) {}
+    pub fn is_front(_handle: Handle) -> bool { false }
+    pub fn set_clipboard_files(_paths: &[std::path::PathBuf]) -> Result<(), String> {
+        Err("Magnific 데스크톱 자동 구성은 현재 Windows 전용입니다.".into())
+    }
+    pub fn click_center(_handle: Handle) {}
+    pub fn paste_into_new_node(_handle: Handle, _query: &str) {}
+    pub fn clipboard_sequence() -> u32 { 0 }
+    pub fn read_clipboard_html() -> Option<String> { None }
+    pub fn set_clipboard_html_text(_fragment: &str, _text: &str) -> Result<(), String> {
+        Err("Magnific 데스크톱 자동 구성은 현재 Windows 전용입니다.".into())
+    }
+    pub fn paste() {}
 }
 
 /// 마그니픽 데스크톱 페이지에 CDP(크롬 디버그 프로토콜)로 붙습니다.
@@ -1435,6 +1462,9 @@ pub async fn magnific_compose_auto(
     resolution: Option<String>,
     music_enabled: Option<bool>,
 ) -> Res<ComposeResult> {
+    if !cfg!(target_os = "windows") {
+        return Err("Magnific 데스크톱 자동 구성은 현재 Windows 전용입니다. Mac에서는 Magnific MCP 또는 웹에서 작업해 주세요.".into());
+    }
     if prompt.trim().is_empty() {
         return Err("보낼 프롬프트가 없습니다.".into());
     }
@@ -1895,7 +1925,7 @@ pub async fn send_prompt_to_magnific(text: String) -> Res<String> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = text;
-        Ok("복사했습니다. 이 OS 에서는 창 제어가 없어 마그니픽에서 직접 Ctrl+V 하세요.".into())
+        Ok("복사했습니다. 이 OS 에서는 창 제어가 없어 마그니픽에서 직접 붙여넣으세요(Mac: Command+V).".into())
     }
 }
 
