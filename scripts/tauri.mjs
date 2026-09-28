@@ -1,13 +1,13 @@
 /**
  * 어느 창에서든 Tauri 를 띄웁니다.
  *
- * node scripts/tauri.mjs dev|build [--edition private|public] [--dry-run] [--portable-only]
+ *     node scripts/tauri.mjs dev|build [--edition private|public] [--dry-run] [--portable-only]
  *
  * # 왜 이 파일이 있는가
  *
  * 원래 스크립트는 한 줄짜리였습니다.
  *
- * call "%ProgramFiles(x86)%\...\VsDevCmd.bat" -arch=x64 && set PATH=%USERPROFILE%\.cargo\bin;%PATH% && tauri dev
+ *     call "%ProgramFiles(x86)%\...\VsDevCmd.bat" -arch=x64 && set PATH=%USERPROFILE%\.cargo\bin;%PATH% && tauri dev
  *
  * 여기에 함정이 둘 있습니다.
  *
@@ -27,13 +27,14 @@
  *
  * # 판(edition) — 비공개 / 공개
  *
- *
+ * 라온 2026-09-22: 「패키징할 때 상업용도로 사용할 수 없는 모델(업스케일, 모션캡쳐)들은
+ * 제외하고 패키징해야해.(내꺼에는 그대로 두고..)」.
  *
  * - `private`(기본) — 전체 엔진을 유지하고 `target/private` 에 빌드합니다.
  * - `public` — 저장소 뿌리 `edition.json` 의 제외 엔진을 번들에서 뺍니다. 세 군데가 같이 움직입니다.
- * 1. `VITE_EDITION=public` → 화면 목록에서 빠짐 (`client/src/lib/edition.ts`)
- * 2. `FRAMEFORGE_EDITION=public` → Rust 가 설치·실행을 거절 (`src-tauri/src/edition.rs`)
- * 3. `tauri build --config <덧씌움>` → 워커 스크립트·manifest 가 번들에서 빠짐 (여기)
+ *     1. `VITE_EDITION=public` → 화면 목록에서 빠짐 (`client/src/lib/edition.ts`)
+ *     2. `FRAMEFORGE_EDITION=public` → Rust 가 설치·실행을 거절 (`src-tauri/src/edition.rs`)
+ *     3. `tauri build --config <덧씌움>` → 워커 스크립트·manifest 가 번들에서 빠짐 (여기)
  *
  * 3번이 이 파일의 몫입니다. tauri.conf.json 의 `bundle.resources` 는 `engines/*.py` 같은
  * 글롭인데, 글롭으로는 «이것만 빼고» 를 적을 수 없습니다. 그래서 글롭을 **실제 파일 목록으로
@@ -162,10 +163,29 @@ function stripEditionKeys(env) {
   return cleared;
 }
 
-/** `tauri build` 에 붙일 인자와, 그 덧씌움 파일. 비공개판·dev 는 덧씌움이 없습니다. */
+/** `tauri build` 에 붙일 인자와, 그 덧씌움 파일. */
 function tauriExtraArgs() {
-  if (edition !== "public" || action !== "build")
+  if (action !== "build")
     return { args: [], overlay: null, dropped: [] };
+  // 비공개판을 로컬에서 만들 때 서명 키가 없으면 설치본은 만들어진 뒤
+  // updater 서명 단계에서 실패한다. 서명 키가 있는 빌드는 기존 동작을 유지한다.
+  if (edition === "private") {
+    if (process.env.TAURI_SIGNING_PRIVATE_KEY)
+      return { args: [], overlay: null, dropped: [] };
+    const overlay = { bundle: { createUpdaterArtifacts: false } };
+    const overlayPath = path.join(layout.targetDir, "tauri-private-local.conf.json");
+    if (!dryRun) {
+      mkdirSync(layout.targetDir, { recursive: true });
+      writeFileSync(overlayPath, JSON.stringify(overlay, null, 2));
+    }
+    return {
+      args: ["--config", `"${overlayPath}"`],
+      overlay,
+      overlayPath,
+      dropped: [],
+      installerName: layout.installer,
+    };
+  }
   const conf = JSON.parse(
     readFileSync(path.join(tauriDir, "tauri.conf.json"), "utf8"),
   );
@@ -447,7 +467,7 @@ function packPortable() {
 
     예전에는 실행 파일 이름을 따서 `frameforge_portable.zip` 이었습니다. 릴리스 목록에
     `AIMovieStorage-Public_0.2.0_x64-setup.exe` 와 나란히 놓이니 둘이 다른 앱처럼 보였고,
-    판도 이름에 안 들어가 어느 판인지 몰랐습니다.
+    판도 이름에 안 들어가 어느 판인지 몰랐습니다(라온 2026-09-23).
   */
     const zipName = layout.portable;
     const zipPath = path.join(outDir, zipName);
