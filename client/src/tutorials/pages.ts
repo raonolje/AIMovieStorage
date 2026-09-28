@@ -591,6 +591,14 @@ const SETTINGS: Tutorial = {
   summary: "폴더 · API 키 · 작업별 모델 · 생성기 · 엔진 · 로라 · 문구를 정하는 화면입니다. 전부 이 기기에만 저장됩니다.",
   steps: [
     {
+      id: "page-settings-updates",
+      route: "/settings",
+      page: "settings",
+      anchor: "settings-updates",
+      title: "앱 업데이트 채널",
+      body: "공개판은 GitHub 릴리스, 원본판은 비공개 GitLab 릴리스에서 업데이트합니다. 원본판에서는 GitLab read_api 토큰을 한 번 등록하세요. 새 판이 있으면 서명을 확인한 설치본을 받아 설치합니다. 기존 0.3.6 원본판은 이 기능이 없어 0.3.7을 처음 한 번 수동 설치해야 합니다.",
+    },
+    {
       id: "page-settings-app-control",
       route: "/settings",
       page: "settings",

@@ -28,6 +28,7 @@ import {
 import { useLocation } from "wouter";
 import { ensureTutorialSample } from "@/lib/tutorialSample";
 import { LOCALES, setLocale, useLocale, useT } from "@/lib/i18n";
+import { isMacOS } from "@/lib/platform";
 import { resetTutorials, setTutorialsEnabled, useTutorial } from "@/lib/tutorialStore";
 import { TUTORIALS } from "@/tutorials";
 import MagnificConnectPanel from "@/components/MagnificConnectPanel";
@@ -863,6 +864,11 @@ export default function SettingsPage() {
 
         {/* ── 업스케일 엔진 ─────────────────────────────────────────── */}
         <Section icon={Maximize2} tint="oklch(0.78 0.16 160)" title={t("업스케일 엔진")} anchor="settings-upscale">
+          {isMacOS() && (
+            <p className="mb-3 rounded-lg border border-white/10 p-3 text-xs">
+              {t("Mac에서는 내장 CUDA 업스케일 모델을 사용할 수 없습니다. 외부 ComfyUI 서버를 연결해 사용하세요.")}
+            </p>
+          )}
           <p className="text-[11px] leading-relaxed" style={{ color: "oklch(0.45 0.01 265)" }}>
             엔진은 앱 데이터 폴더 <b>upscale/</b> 에 <b>각자 고정 환경</b>(전용 파이썬 · 고정 버전 코드 ·
             검증한 가중치)으로 설치됩니다. <b>ComfyUI 와 무관</b>합니다 — ComfyUI 를 업데이트하거나 지워도

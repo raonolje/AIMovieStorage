@@ -3,7 +3,8 @@ import { Download, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { checkForUpdate, installUpdate, updatesUnavailable, type UpdateInfo } from "@/lib/appUpdate";
 import { isDesktopApp } from "@/lib/llm";
-import { useT } from "@/lib/i18n";
+import { EDITION } from "@/lib/edition";
+import { invoke } from "@tauri-apps/api/core";
 
 /*
   **새 판이 있으면 여기 뜹니다.**
@@ -21,12 +22,35 @@ import { useT } from "@/lib/i18n";
   받는 동안에는 단추를 잠가 두 번 눌리지 않게 합니다.
 */
 export default function UpdateBanner() {
-  const t = useT();
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [got, setGot] = useState(0);
   const [total, setTotal] = useState<number | null>(null);
+  const [privateTokenSaved, setPrivateTokenSaved] = useState<boolean | null>(null);
+  const [privateToken, setPrivateToken] = useState("");
+
+  useEffect(() => {
+    if (EDITION !== "private" || !isDesktopApp()) return;
+    void invoke<{ saved: boolean }>("get_api_key_status", { provider: "gitlab-update" })
+      .then((status) => setPrivateTokenSaved(status.saved))
+      .catch(() => setPrivateTokenSaved(false));
+  }, []);
+
+  const savePrivateToken = async () => {
+    const value = privateToken.trim();
+    if (!value) return;
+    try {
+      await invoke("save_api_key", { provider: "gitlab-update", key: value });
+      setPrivateToken("");
+      setPrivateTokenSaved(true);
+      const found = await checkForUpdate();
+      setUpdate(found);
+      toast.success(found ? `GitLab 원본판 ${found.version} 이 있습니다.` : "GitLab 원본판이 최신입니다.");
+    } catch (error) {
+      toast.error(`GitLab 업데이트 인증에 실패했습니다: ${error}`);
+    }
+  };
 
   // 켤 때 한 번 조용히 봅니다. 실패해도 알림을 띄우지 않습니다 —
   // 네트워크가 없는 자리에서 켤 때마다 잔소리가 됩니다.
@@ -71,13 +95,21 @@ export default function UpdateBanner() {
     }
   };
 
-  // 원본판에 «최신입니다»라고 답하면 실제 설치 버전과 공개 배포 버전을 혼동하게 됩니다.
   if (updatesUnavailable()) {
-    if (!isDesktopApp()) return null;
+    return null;
+  }
+
+  if (EDITION === "private" && privateTokenSaved === false) {
     return (
-      <p className="max-w-xl text-[11px] leading-relaxed" style={{ color: "oklch(0.60 0.01 265)" }}>
-        {t("비공개 원본판은 공개판 자동 업데이트를 사용하지 않습니다. 원본 저장소에서 만든 비공개 설치본으로 업데이트해 주세요.")}
-      </p>
+      <div data-tour="settings-updates" className="flex max-w-xl flex-wrap items-center gap-2 text-[11px]">
+        <span>GitLab 원본판 업데이트 · read_api 토큰</span>
+        <input type="password" autoComplete="off" value={privateToken}
+          onChange={(event) => setPrivateToken(event.target.value)}
+          placeholder="GitLab 읽기 토큰" aria-label="GitLab 읽기 토큰"
+          className="min-w-40 rounded-md border border-white/15 bg-black/30 px-2 py-1" />
+        <button type="button" onClick={() => void savePrivateToken()} disabled={!privateToken.trim()}
+          className="rounded-md bg-violet-600 px-2 py-1 text-white disabled:opacity-40">등록하고 확인</button>
+      </div>
     );
   }
 
@@ -85,7 +117,7 @@ export default function UpdateBanner() {
 
   if (!update) {
     return (
-      <button
+      <div data-tour="settings-updates" className="flex items-center gap-2"><button
         type="button"
         onClick={look}
         disabled={checking}
@@ -94,12 +126,12 @@ export default function UpdateBanner() {
       >
         <RefreshCw className={`h-3 w-3 ${checking ? "animate-spin" : ""}`} />
         {checking ? "확인 중…" : "업데이트 확인"}
-      </button>
+      </button>{EDITION === "private" && privateTokenSaved && <button type="button" onClick={() => setPrivateTokenSaved(false)} className="text-[10px] text-white/50">GitLab 토큰 교체</button>}</div>
     );
   }
 
   return (
-    <div
+    <div data-tour="settings-updates"
       className="flex flex-wrap items-center gap-3 rounded-lg px-4 py-3"
       style={{ background: "oklch(0.22 0.06 260)", border: "1px solid oklch(0.45 0.14 260 / 50%)" }}
     >

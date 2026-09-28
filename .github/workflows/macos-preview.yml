@@ -1,0 +1,41 @@
+name: macOS 공개판 시험 빌드
+
+on:
+  push:
+    branches: [macos-preview]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: pnpm
+        run: corepack enable
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> src-tauri/target/public
+      - name: 의존성
+        run: pnpm install --frozen-lockfile
+      - name: 공개판 리소스 검증
+        run: |
+          node scripts/tauri-macos.mjs --edition public --dry-run > macos-build-plan.json
+          node --input-type=module -e 'import { readFileSync } from "node:fs"; import { engineIdOf } from "./scripts/release-artifacts.mjs"; const plan = JSON.parse(readFileSync("macos-build-plan.json")); const excluded = JSON.parse(readFileSync("edition.json")).public.excludeEngines; if (plan.overlay.bundle.resources.some(file => excluded.includes(engineIdOf(file)))) process.exit(1)'
+      - name: Apple Silicon DMG 빌드
+        run: node scripts/tauri-macos.mjs --edition public
+      - name: DMG 확인
+        run: |
+          find src-tauri/target/public/release/bundle/dmg -name '*.dmg' -type f -print
+          test "$(find src-tauri/target/public/release/bundle/dmg -name '*.dmg' -type f | wc -l | tr -d ' ')" = 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIMovieStorage-Public-macOS-AppleSilicon-unsigned
+          path: src-tauri/target/public/release/bundle/dmg/*.dmg
+          if-no-files-found: error

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isDesktopApp } from "@/lib/llm";
 import { isEngineIncluded } from "@/lib/edition";
+import { isMacOS } from "@/lib/platform";
 import { queueMirrorWriteAndConfirm, registerMirrorSection, whenAppSettingsReady } from "@/lib/mediaLibrary";
 
 /**
@@ -63,7 +64,7 @@ export const LOCAL_ENGINE_IDS: LocalEngineId[] = (
     "nlf",
     "gvhmr",
   ] as LocalEngineId[]
-).filter(isEngineIncluded);
+).filter((id) => isEngineIncluded(id) && !isMacOS());
 
 /* ────────────────────────── 정밀도 규칙(워커와 한 벌) ────────────────────────── */
 
@@ -214,6 +215,7 @@ function vramNeeds(
 
 /** 이 컴퓨터를 한 번 읽은 것. 못 읽은 값은 null 입니다. */
 export interface HardwareProbe {
+  localModelsSupported?: boolean;
   gpus: { name: string; vramGb: number | null; vendor: string }[];
   ramGb: number | null;
   diskFreeGb: number | null;

@@ -2018,6 +2018,11 @@ pub(crate) fn engines_status(app: AppHandle, family: &'static Family) -> Res<Vec
     let prefetching: Vec<String> = state.prefetching.lock_safe().iter().cloned().collect();
     let mut out = Vec::new();
     for id in family.ids {
+        // Bundled Python workers and model installers currently require CUDA/Windows.
+        // Keep external ComfyUI below available on macOS.
+        if !cfg!(target_os = "windows") {
+            continue;
+        }
         // 공개판에서 빠진 엔진은 목록에 아예 안 실립니다 — manifest 도 번들에 없어서 읽으면 경고만 남습니다.
         if !crate::edition::includes_engine(id) {
             continue;
@@ -2111,6 +2116,9 @@ pub(crate) async fn install_engine_command(
     id: String,
     extra_models: Option<Vec<String>>,
 ) -> Res<()> {
+    if !cfg!(target_os = "windows") {
+        return Err("내장 모델 설치는 현재 Windows/NVIDIA CUDA 전용입니다. Mac에서는 ComfyUI 서버를 사용해 주세요.".into());
+    }
     let engine = known_engine(&id)?.to_string();
     // 같은 엔진을 두 번 설치하면 같은 파일을 두 갈래가 쓰다 망가집니다.
     let cancel = {
@@ -2188,6 +2196,9 @@ pub(crate) fn cancel_install_command(app: AppHandle, id: String) -> Res<()> {
 /// 그동안 `generate_blocking` 은 «받는 중» 으로 물러납니다(설치 중일 때와 같은 문). 실패는
 /// 설치 기록의 `last_error` 에 **적지 않습니다** — 거기 적으면 엔진이 «설치 안 됨» 으로 보입니다.
 pub(crate) async fn prefetch_weights_command(app: AppHandle, id: String) -> Res<()> {
+    if !cfg!(target_os = "windows") {
+        return Err("내장 모델 가중치 받기는 현재 Windows/NVIDIA CUDA 전용입니다.".into());
+    }
     let engine = known_engine(&id)?.to_string();
     let manifest = read_manifest(&app, &engine)?;
     if !manifest.prefetch {
@@ -2439,6 +2450,9 @@ pub async fn upscale_run(
     opts: Option<Value>,
     timeout_secs: Option<u64>,
 ) -> Res<UpscaleResult> {
+    if !cfg!(target_os = "windows") && engine != "comfy" {
+        return Err("내장 업스케일 모델은 현재 Windows/NVIDIA CUDA 전용입니다. Mac에서는 ComfyUI 서버를 사용해 주세요.".into());
+    }
     let engine = known_engine(&engine)?.to_string();
     let target = target.unwrap_or_default();
     let opts = opts.unwrap_or_else(|| json!({}));

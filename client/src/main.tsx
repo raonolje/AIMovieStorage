@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import FirstRunLanguage from "./components/FirstRunLanguage";
 import "./index.css";
 /*
   ── 작업 줄을 먼저 깨웁니다 ─────────────────────────────────────────────
@@ -19,7 +20,7 @@ import "./lib/comfyUiTasks";
 import { resumeTaskQueue } from "./lib/taskQueue";
 import { refreshMagnificStatus } from "./lib/magnificMcp";
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(<FirstRunLanguage><App /></FirstRunLanguage>);
 
 resumeTaskQueue();
 /*

@@ -76,18 +76,17 @@ describe("언제 보는가", () => {
 });
 
 describe("판 가르기", () => {
-  it("업데이터는 공개판에서만 등록됩니다", () => {
+  it("비공개판은 빌드 덧씌움으로 GitLab만 사용합니다", () => {
     /*
       끝점은 공개판 릴리스를 가리킵니다. 비공개판(내 PC용, 모션캡처·업스케일 엔진이 든 판)이
       그것을 받아 깔면 그 엔진들이 사라지거나, 이름이 달라 **엉뚱한 앱이 하나 더 생깁니다.*    */
     const setup = LIB.slice(LIB.indexOf(".setup(|app|"));
     const body = setup.slice(0, setup.indexOf("\n        })"));
-    expect(body).toContain("edition::is_public()");
     expect(body).toContain("tauri_plugin_updater");
-    // 등록 줄이 판 검사 **안쪽**에 있어야 합니다.
-    expect(body.indexOf("is_public()")).toBeLessThan(
-      body.indexOf("tauri_plugin_updater"),
-    );
+    const builder = read("scripts/tauri.mjs");
+    expect(builder).toContain("사용자%2Faistorage/repository/files/aimoviestorage-private-latest.json/raw?ref=main");
+    expect(builder).toContain("edition === \"private\"");
+    expect(builder).toContain("plugins: { updater:");
   });
 });
 

@@ -11,6 +11,8 @@
     "dev:desktop": "node scripts/tauri.mjs dev",
     "build:desktop": "node scripts/tauri.mjs build",
     "build:public": "node scripts/tauri.mjs build --edition public",
+    "build:macos": "node scripts/tauri-macos.mjs --edition private",
+    "build:macos:public": "node scripts/tauri-macos.mjs --edition public",
     "preview": "vite preview --host",
     "check": "tsc --noEmit",
     "test": "vitest run --root .",

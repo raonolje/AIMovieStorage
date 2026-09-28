@@ -3,12 +3,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 const context = vi.hoisted(() => ({ desktop: true, edition: "private" }));
-const calls = vi.hoisted(() => ({ check: vi.fn(), relaunch: vi.fn(), install: vi.fn() }));
+const calls = vi.hoisted(() => ({ check: vi.fn(), relaunch: vi.fn(), install: vi.fn(), invoke: vi.fn() }));
 vi.mock("@/lib/llm", () => ({ isDesktopApp: () => context.desktop }));
 vi.mock("@/lib/edition", () => ({ get EDITION() { return context.edition; } }));
 vi.mock("@/lib/i18n", () => ({ t: (key: string) => key, useT: () => (key: string) => key }));
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: calls.check }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: calls.relaunch }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: calls.invoke }));
 
 import { checkForUpdate, installUpdate, updatesUnavailable } from "./appUpdate";
 import UpdateBanner from "@/components/UpdateBanner";
@@ -23,11 +24,12 @@ beforeEach(() => {
   });
   calls.install.mockResolvedValue(undefined);
   calls.relaunch.mockResolvedValue(undefined);
+  calls.invoke.mockResolvedValue("read-token");
 });
 
 describe("자동 업데이트 실행 경계", () => {
   it.each([
-    { edition: "private", desktop: true, button: false, notice: true },
+    { edition: "private", desktop: true, button: true, notice: false },
     { edition: "public", desktop: true, button: true, notice: false },
     { edition: "public", desktop: false, button: false, notice: false },
   ])("$edition / 데스크톱 $desktop 화면은 해당 판의 안내만 보여 준다", (state) => {
@@ -38,13 +40,12 @@ describe("자동 업데이트 실행 경계", () => {
   });
 
   it.each([
-    { edition: "private", desktop: true },
     { edition: "public", desktop: false },
   ])("$edition / 데스크톱 $desktop 환경은 조회·설치를 호출하지 않는다", async (state) => {
     Object.assign(context, state);
     expect(updatesUnavailable()).toBe(true);
     expect(await checkForUpdate()).toBeNull();
-    await expect(installUpdate()).rejects.toThrow("공개판 데스크톱 앱에서만");
+    await expect(installUpdate()).rejects.toThrow("데스크톱 앱에서만");
     expect(calls.check).not.toHaveBeenCalled();
     expect(calls.install).not.toHaveBeenCalled();
     expect(calls.relaunch).not.toHaveBeenCalled();
@@ -58,5 +59,22 @@ describe("자동 업데이트 실행 경계", () => {
     expect(calls.check).toHaveBeenCalledTimes(2);
     expect(calls.install).toHaveBeenCalledTimes(1);
     expect(calls.relaunch).toHaveBeenCalledTimes(1);
+    expect(calls.check).toHaveBeenCalledWith({ headers: {} });
+    expect(calls.invoke).not.toHaveBeenCalled();
+  });
+
+  it("비공개판은 GitLab 토큰을 조회와 설치 다운로드 모두에 사용한다", async () => {
+    expect(updatesUnavailable()).toBe(false);
+    await checkForUpdate();
+    await installUpdate();
+    expect(calls.check).toHaveBeenCalledWith({ headers: { "PRIVATE-TOKEN": "read-token" } });
+    expect(calls.install).toHaveBeenCalledWith(expect.any(Function), { headers: { "PRIVATE-TOKEN": "read-token" } });
+  });
+
+  it("비공개판에 토큰이 없으면 GitLab에 요청하지 않는다", async () => {
+    calls.invoke.mockResolvedValue(null);
+    expect(await checkForUpdate()).toBeNull();
+    await expect(installUpdate()).rejects.toThrow("GitLab 읽기 토큰");
+    expect(calls.check).not.toHaveBeenCalled();
   });
 });

@@ -80,6 +80,14 @@ export default function LocalEnginesPanel({
     };
   }, []);
 
+  if (probe?.localModelsSupported === false) {
+    return (
+      <p className="rounded-lg border border-white/10 p-3 text-sm leading-relaxed">
+        {t("내장 로컬 모델은 현재 Windows/NVIDIA CUDA 전용입니다. Mac에서는 원격 API 또는 ComfyUI 서버를 사용해 주세요.")}
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-2">
       {!compact && (

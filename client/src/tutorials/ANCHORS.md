@@ -132,6 +132,7 @@
 | 앵커 | 파일 | 요소 (줄 힌트) |
 | --- | --- | --- |
 | `settings-profile` | `SettingsPage.tsx` | `<Section title="프롬프트 작성 프로필">` (L409) |
+| `settings-updates` | `UpdateBanner.tsx` | 설정 상단의 판별 업데이트 버튼 또는 GitLab 토큰 등록 |
 | `settings-app-control` | `AppControlPanel.tsx` | 대화 앱 연결과 조종 기능 안내 |
 | `settings-comfy-generation` | `SettingsPage.tsx` | ComfyUI 이미지·영상 워크플로를 감싸는 `Section` |
 | `settings-folders` | `SettingsPage.tsx` | `<Section title="폴더">` (L458) |

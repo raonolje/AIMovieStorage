@@ -1,4 +1,8 @@
 {
+  "내장 로컬 모델은 현재 Windows/NVIDIA CUDA 전용입니다. Mac에서는 원격 API 또는 ComfyUI 서버를 사용해 주세요.": "Built-in local models currently require Windows and NVIDIA CUDA. On Mac, use a remote API or a ComfyUI server.",
+  "Mac에서는 내장 CUDA 업스케일 모델을 사용할 수 없습니다. 외부 ComfyUI 서버를 연결해 사용하세요.": "Built-in CUDA upscalers are unavailable on Mac. Connect an external ComfyUI server instead.",
+  "앱 업데이트 채널": "App update channel",
+  "공개판은 GitHub 릴리스, 원본판은 비공개 GitLab 릴리스에서 업데이트합니다. 원본판에서는 GitLab read_api 토큰을 한 번 등록하세요. 새 판이 있으면 서명을 확인한 설치본을 받아 설치합니다. 기존 0.3.6 원본판은 이 기능이 없어 0.3.7을 처음 한 번 수동 설치해야 합니다.": "The public edition updates from GitHub releases; the private edition uses private GitLab releases. Register a GitLab read_api token once in the private edition. When a new version is available, the app downloads and verifies the signed installer. The existing private 0.3.6 build cannot update itself, so install 0.3.7 manually once.",
   "화면을 불러오는 중…": "Loading screen…",
   "AI 영상 스토리지": "AI Video Storage",
   "프로젝트": "Projects",

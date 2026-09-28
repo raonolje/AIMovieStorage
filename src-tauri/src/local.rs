@@ -40,6 +40,9 @@ pub async fn local_install_engine(
     id: String,
     extra_models: Option<Vec<String>>,
 ) -> Res<()> {
+    if !cfg!(target_os = "windows") {
+        return Err("내장 로컬 모델은 현재 Windows/NVIDIA CUDA 전용입니다. Mac에서는 원격 API 또는 ComfyUI 서버를 사용해 주세요.".into());
+    }
     install_engine_command(app, id, extra_models).await
 }
 
@@ -55,6 +58,9 @@ pub fn local_cancel_install(app: AppHandle, id: String) -> Res<()> {
 /// 멈추기는 설치와 같은 `local_cancel_install` 이 듣습니다.
 #[tauri::command]
 pub async fn local_prefetch_weights(app: AppHandle, engine: String) -> Res<()> {
+    if !cfg!(target_os = "windows") {
+        return Err("내장 로컬 모델 가중치 받기는 현재 Windows/NVIDIA CUDA 전용입니다.".into());
+    }
     prefetch_weights_command(app, engine).await
 }
 
@@ -86,6 +92,9 @@ pub async fn local_run(
     opts: Option<Value>,
     timeout_secs: Option<u64>,
 ) -> Res<GenerateResult> {
+    if !cfg!(target_os = "windows") {
+        return Err("내장 로컬 모델 생성은 현재 Windows/NVIDIA CUDA 전용입니다. Mac에서는 원격 API 또는 ComfyUI 서버를 사용해 주세요.".into());
+    }
     let engine = known_engine(&engine)?.to_string();
     let opts = opts.unwrap_or_else(|| json!({}));
     let timeout = timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS);
@@ -329,5 +338,6 @@ pub fn probe_hardware(app: AppHandle) -> Res<Value> {
         "ramGb": ram_gb,
         "diskFreeGb": free_gb,
         "enginesDir": engines_dir.to_string_lossy(),
+        "localModelsSupported": cfg!(target_os = "windows"),
     }))
 }

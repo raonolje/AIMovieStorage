@@ -12,6 +12,7 @@ import { checkForUpdate } from "@/lib/appUpdate";
 import { useT } from "@/lib/i18n";
 
 // 프로젝트 목록을 볼 때 편집기·BGM·설정 화면의 코드까지 먼저 읽지 않습니다.
+// 특히 편집기는 구도잡기와 미디어 도구를 끌고 와 초기 화면을 늦춥니다.
 const BgmProjectsPage = lazy(() => import("@/pages/BgmProjectsPage"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
 const NewProjectPage = lazy(() => import("@/pages/NewProjectPage"));

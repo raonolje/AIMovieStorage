@@ -31,6 +31,7 @@ mod edition;
 mod llm;
 mod magnific;
 mod local;
+mod private_update;
 mod lora;
 mod magnific_mcp;
 /// 지운 것을 곧바로 없애지 않고 `.휴지통/` 에 한 단계 둡니다.
@@ -1494,6 +1495,7 @@ pub fn run() {
             local::motion_capture_output,
             local::read_motion_capture,
             local::probe_hardware,
+            private_update::private_update_token,
         ])
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
@@ -1505,24 +1507,10 @@ pub fn run() {
             // 「어느 판이 떴나」 를 로그 첫머리에 남깁니다 — 공개판에서 「엔진이 안 보인다」 는 보고가
             // 오면 이 한 줄로 판 문제인지 설치 문제인지 갈립니다.
             log::info!("판: {}", edition::describe());
-            /*
-              **자동 업데이트는 공개판에서만 켭니다.**
-
-              
-
-              끝점은 공개판 릴리스(`AIMovieStorage-Public_…-setup.exe`)를 가리킵니다.
-              비공개판(내 PC용, 제외 엔진이 들어 있는 판)이 그것을 받아 깔면 **모션캡처·
-              업스케일 엔진이 통째로 사라집니다.** 두 판은 `productName` 이 달라 설치
-              자리도 갈리므로, 덮어쓰는 게 아니라 **엉뚱한 앱이 하나 더 생깁니다.**
-              어느 쪽이든 사고라서 아예 등록하지 않습니다.
-
-              등록하지 않으면 `plugins.updater` 설정도 읽히지 않습니다 — 설정이 잘못돼
-              있어도 비공개판은 그대로 뜹니다(설정을 못 읽으면 앱이 아예 안 뜹니다).
-            */
-            if edition::is_public() {
-                app.handle()
-                    .plugin(tauri_plugin_updater::Builder::new().build())?;
-            }
+            // 빌드 덧씌움이 원본판을 GitLab 전용 endpoint로 바꿉니다.
+            // 공개판은 기본 GitHub endpoint를 그대로 사용합니다.
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
             Ok(())
         })
         .build(tauri::generate_context!())

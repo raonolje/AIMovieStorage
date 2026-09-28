@@ -58,6 +58,15 @@ export const LOCALES: { id: Locale; label: string }[] = [
 /** 다른 옵션과 같은 관례(`ai-video-storage.<이름>.v1`). */
 export const LOCALE_STORAGE_KEY = "ai-video-storage.locale.v1";
 
+/** Existing users with a saved language go straight to their project. */
+export function hasSavedLocale(): boolean {
+  try {
+    return isLocale(storage()?.getItem(LOCALE_STORAGE_KEY));
+  } catch {
+    return false;
+  }
+}
+
 /** `toLocaleDateString` 같은 브라우저 API 에 넘길 BCP-47 태그. 중국어는 간체(대륙) 표기입니다. */
 export function localeTag(locale: Locale): string {
   switch (locale) {

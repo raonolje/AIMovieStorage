@@ -164,14 +164,17 @@ function stripEditionKeys(env) {
 
 /** `tauri build` 에 붙일 인자와, 그 덧씌움 파일. */
 function tauriExtraArgs() {
-  if (action !== "build")
-    return { args: [], overlay: null, dropped: [] };
-  // 로컬 비공개판에는 업데이터 서명 키가 없을 수 있다. 그 경우 설치본을
-  // 완성한 뒤 서명 단계에서 실패하지 않도록 업데이터 산출물만 생략한다.
+  // 비공개판을 로컬에서 만들 때 서명 키가 없으면 설치본은 만들어진 뒤
+  // updater 서명 단계에서 실패한다. 서명 키가 있는 빌드는 기존 동작을 유지한다.
   if (edition === "private") {
-    if (process.env.TAURI_SIGNING_PRIVATE_KEY)
-      return { args: [], overlay: null, dropped: [] };
-    const overlay = { bundle: { createUpdaterArtifacts: false } };
+    // The private installer must never query the public GitHub feed. Keep this
+    // overlay even for unsigned local builds so the compiled app stays isolated.
+    const overlay = {
+      plugins: { updater: { endpoints: [
+        "https://자체 호스팅 Gitea/api/v4/projects/사용자%2Faistorage/repository/files/aimoviestorage-private-latest.json/raw?ref=main",
+      ] } },
+      ...(action === "build" ? { bundle: { createUpdaterArtifacts: !!process.env.TAURI_SIGNING_PRIVATE_KEY } } : {}),
+    };
     const overlayPath = path.join(layout.targetDir, "tauri-private-local.conf.json");
     if (!dryRun) {
       mkdirSync(layout.targetDir, { recursive: true });
@@ -185,6 +188,8 @@ function tauriExtraArgs() {
       installerName: layout.installer,
     };
   }
+  if (action !== "build")
+    return { args: [], overlay: null, dropped: [] };
   const conf = JSON.parse(
     readFileSync(path.join(tauriDir, "tauri.conf.json"), "utf8"),
   );

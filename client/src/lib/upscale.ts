@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isDesktopApp } from "@/lib/llm";
 import { isEngineIncluded } from "@/lib/edition";
+import { isMacOS } from "@/lib/platform";
 
 /**
  * 업스케일 엔진 체계 — 프런트 쪽.
@@ -33,7 +34,7 @@ export type UpscaleEngineId = "seedvr2" | "spandrel" | "nvvfx" | "vosr" | "upsca
  */
 export const UPSCALE_ENGINE_IDS: UpscaleEngineId[] = (
   ["seedvr2", "spandrel", "nvvfx", "vosr", "upscayl", "comfy"] as UpscaleEngineId[]
-).filter(isEngineIncluded);
+).filter((id) => isEngineIncluded(id) && (!isMacOS() || id === "comfy"));
 
 /**
  * 화면에 보이는 이름·용도·라이선스·용량 — Rust 상태에 없는 «사람 말» 은 여기서 듭니다.
