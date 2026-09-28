@@ -2,7 +2,7 @@ name: macOS 공개판 시험 빌드
 
 on:
   push:
-    branches: [macos-preview]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

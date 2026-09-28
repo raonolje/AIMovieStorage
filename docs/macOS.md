@@ -8,6 +8,6 @@ Magnific 데스크톱 창을 자동 조종하는 `구성` 기능도 현재 Windo
 
 macOS 기기에서 `pnpm install --frozen-lockfile` 후 `pnpm build:macos:public`을 실행하면 공개판 DMG가 `src-tauri/target/public/release/bundle/dmg/`에 생성됩니다. 원본 비공개판은 `pnpm build:macos`로 빌드합니다. 공개판은 `edition.json`의 제외 엔진을 번들에서 걸러냅니다. Windows에서 `--dry-run`으로 설정과 제외 목록을 점검할 수 있지만 실제 DMG 빌드는 macOS가 필요합니다.
 
-GitHub 공개 저장소의 `macos-preview` 브랜치는 Apple Silicon 호스팅 러너에서 공개판 DMG를 만들어 Actions 작업 산출물로 보관합니다. 원본 GitLab에는 현재 macOS 러너가 없으므로 비공개판 DMG는 아직 자동 빌드되지 않습니다.
+GitHub 공개 저장소의 `main` 브랜치는 Apple Silicon 호스팅 러너에서 공개판 DMG를 만들어 Actions 작업 산출물로 보관합니다. 원본 GitLab에는 현재 macOS 러너가 없으므로 비공개판 DMG는 아직 자동 빌드되지 않습니다.
 
 배포용 DMG는 Apple Developer ID 서명과 공증이 필요합니다. 이 설정과 Mac 실기기 실행 검증이 끝나기 전까지 시험 산출물을 정식 릴리스나 자동 업데이트 대상으로 올리지 않습니다. Mac 업데이트는 Tauri의 `.app.tar.gz` 서명 파일과 `darwin-aarch64` 플랫폼 항목을 기존 GitLab 업데이트 명세에 추가해야 합니다.
