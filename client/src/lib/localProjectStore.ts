@@ -364,9 +364,14 @@ export async function loadProjects(options: { requiredProjectId?: string } = {})
     앱이 멈추지는 않습니다. 브라우저로 열었으면 곧장 돌아옵니다.
   */
   await whenAppSettingsReady();
-  const stored = readLocalStorage();
+  const usesFiles = canUseProjectFiles();
+  // 최초 이행이 끝난 뒤에는 폴더만 원본입니다. 남겨 둔 브라우저 사본은
+  // 큰 구도·모캡 데이터까지 담을 수 있으므로 매번 파싱하지 않습니다.
+  const stored = !usesFiles || !window.localStorage.getItem(MIGRATED_KEY)
+    ? readLocalStorage()
+    : [];
 
-  if (!canUseProjectFiles()) {
+  if (!usesFiles) {
     cache = stored;
     return cache;
   }

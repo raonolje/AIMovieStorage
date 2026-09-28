@@ -1,20 +1,21 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Route, Switch, useLocation } from "wouter";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { syncPromptDefaults } from "@/lib/promptLibrary";
 import { hookLlmUsage } from "@/lib/llmActivity";
 import ProjectsPage from "@/pages/ProjectsPage";
-import BgmProjectsPage from "@/pages/BgmProjectsPage";
-import SettingsPage from "@/pages/SettingsPage";
-import NewProjectPage from "@/pages/NewProjectPage";
 import NotFound from "@/pages/NotFound";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { PromptDialogHost } from "@/components/PromptDialog";
-import TutorialOverlay from "@/components/tutorial/TutorialOverlay";
 import { allowStorageDirectory } from "@/lib/mediaLibrary";
 import { checkForUpdate } from "@/lib/appUpdate";
-import { initializeAppControl } from "@/lib/appControl";
+import { useT } from "@/lib/i18n";
+
+// 프로젝트 목록을 볼 때 편집기·BGM·설정 화면의 코드까지 먼저 읽지 않습니다.
+const BgmProjectsPage = lazy(() => import("@/pages/BgmProjectsPage"));
+const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
+const NewProjectPage = lazy(() => import("@/pages/NewProjectPage"));
+const TutorialOverlay = lazy(() => import("@/components/tutorial/TutorialOverlay"));
 
 /**
  * 화면 배치.
@@ -24,9 +25,12 @@ import { initializeAppControl } from "@/lib/appControl";
  * 만질 수 있으면 어느 쪽이 맞는지 알 수 없어집니다.
  */
 export default function App() {
+  const t = useT();
   const [, navigate] = useLocation();
   useEffect(() => {
-    void initializeAppControl(navigate).catch(() => undefined);
+    void import("@/lib/appControl")
+      .then(({ initializeAppControl }) => initializeAppControl(navigate))
+      .catch(() => undefined);
   }, [navigate]);
   /*
     저장 폴더를 asset 프로토콜에 열어 둡니다.
@@ -89,7 +93,8 @@ export default function App() {
     고친 문구는 건드리지 않고, 기본값이 바뀌었다는 것만 알립니다.
   */
   useEffect(() => {
-    void syncPromptDefaults()
+    void import("@/lib/promptLibrary")
+      .then(({ syncPromptDefaults }) => syncPromptDefaults())
       .then((result) => {
         if (result.refreshed.length)
           toast.success(`프롬프트 문구 ${result.refreshed.length}개를 새 기본값으로 맞췄습니다.`, {
@@ -108,14 +113,16 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <Switch>
-        <Route path="/" component={ProjectsPage} />
-        <Route path="/bgm" component={BgmProjectsPage} />
-        <Route path="/settings" component={SettingsPage} />
-        <Route path="/new-project" component={NewProjectPage} />
-        <Route path="/project/:id" component={NewProjectPage} />
-        <Route component={NotFound} />
-      </Switch>
+      <Suspense fallback={<div role="status" className="p-8 text-center text-sm text-white/70">{t("화면을 불러오는 중…")}</div>}>
+        <Switch>
+          <Route path="/" component={ProjectsPage} />
+          <Route path="/bgm" component={BgmProjectsPage} />
+          <Route path="/settings" component={SettingsPage} />
+          <Route path="/new-project" component={NewProjectPage} />
+          <Route path="/project/:id" component={NewProjectPage} />
+          <Route component={NotFound} />
+        </Switch>
+      </Suspense>
       <Toaster />
       {/*
         값 입력 창은 **앱 뿌리에 하나만** 둡니다.
@@ -132,7 +139,7 @@ export default function App() {
         구도잡기) 화면마다 두면 화면이 바뀌는 순간 창이 사라졌다 다시 떠서 어디까지 왔는지 잃습니다.
         상태는 `lib/tutorialStore` 가 들고, 설정의 스위치가 꺼져 있으면 아무것도 그리지 않습니다.
       */}
-      <TutorialOverlay />
+      <Suspense fallback={null}><TutorialOverlay /></Suspense>
     </ErrorBoundary>
   );
 }

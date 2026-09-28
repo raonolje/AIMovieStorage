@@ -27,7 +27,9 @@ describe("파일 이행 후 브라우저 거울", () => {
     const previous = values.get(STORAGE);
     const store = await import("./localProjectStore");
     const stringify = vi.spyOn(JSON, "stringify");
+    const getItem = vi.spyOn(window.localStorage, "getItem");
     await store.loadProjects();
+    expect(getItem).not.toHaveBeenCalledWith(STORAGE);
     await store.saveLocalProjectAndConfirm({ ...project.draft, title: "새 제목" }, "p");
     port.write.mockRejectedValueOnce(new Error("디스크 쓰기 실패"));
     expect((await store.saveLocalProjectAndConfirm({ ...project.draft, title: "실패한 제목" }, "p")).outcome).toBe("error");
