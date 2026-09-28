@@ -10,9 +10,21 @@ permissions:
 
 jobs:
   macos:
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: AppleSilicon
+            uname: arm64
+          - runner: macos-15-intel
+            arch: Intel
+            uname: x86_64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - name: 아키텍처 확인
+        run: test "$(uname -m)" = "${{ matrix.uname }}"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -28,7 +40,7 @@ jobs:
         run: |
           node scripts/tauri-macos.mjs --edition public --dry-run > macos-build-plan.json
           node --input-type=module -e 'import { readFileSync } from "node:fs"; import { engineIdOf } from "./scripts/release-artifacts.mjs"; const plan = JSON.parse(readFileSync("macos-build-plan.json")); const excluded = JSON.parse(readFileSync("edition.json")).public.excludeEngines; if (plan.overlay.bundle.resources.some(file => excluded.includes(engineIdOf(file)))) process.exit(1)'
-      - name: Apple Silicon DMG 빌드
+      - name: macOS DMG 빌드
         run: node scripts/tauri-macos.mjs --edition public
       - name: DMG 확인
         run: |
@@ -36,6 +48,6 @@ jobs:
           test "$(find src-tauri/target/public/release/bundle/dmg -name '*.dmg' -type f | wc -l | tr -d ' ')" = 1
       - uses: actions/upload-artifact@v4
         with:
-          name: AIMovieStorage-Public-macOS-AppleSilicon-unsigned
+          name: AIMovieStorage-Public-macOS-${{ matrix.arch }}-unsigned
           path: src-tauri/target/public/release/bundle/dmg/*.dmg
           if-no-files-found: error
