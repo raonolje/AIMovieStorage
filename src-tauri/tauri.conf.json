@@ -63,7 +63,9 @@
       "nsis": {
         "languages": [
           "Korean",
-          "English"
+          "English",
+          "Japanese",
+          "SimpChinese"
         ],
         "displayLanguageSelector": true
       }
