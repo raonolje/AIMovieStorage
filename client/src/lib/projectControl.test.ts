@@ -84,6 +84,23 @@ describe("프로젝트 대화 조종", () => {
     expect(current().scenes[0].cuts[0].promptKo).toBe("인물 클로즈업");
   });
 
+  it("조종기가 한글 칸에 영문 본문을 넣으면 장면·컷에서 거절한다", async () => {
+    const api = await import("./projectControl");
+    current().scenes = [{ ...newScene(), id: "s1", cuts: [] }];
+    const first = await api.getProjectSnapshot("p");
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "scene.update", id: "s1", fields: { storyboardPromptKo: "Korean theatrical political thriller. 인물 서진우.", storyboardPromptEn: "A political thriller" } },
+    ] })).rejects.toMatchObject({ code: "korean_prompt_required" });
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "cut.add", sceneId: "s1", fields: { characterIds: [], promptKo: "A wide shot of 서울 at night", promptEn: "A wide shot of Seoul at night" } },
+    ] })).rejects.toMatchObject({ code: "korean_prompt_required" });
+    expect(current().scenes[0].cuts).toEqual([]);
+    await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "scene.update", id: "s1", fields: { storyboardPromptKo: "서울의 밤거리를 따라 카메라가 이동한다.", storyboardPromptEn: "The camera moves along a street in Seoul at night." } },
+    ] });
+    expect(current().scenes[0].storyboardPromptKo).toContain("서울의 밤거리");
+  });
+
   it("조종기가 만든 캐릭터는 한글·영문과 선택한 레퍼런스 시트 칸을 함께 저장한다", async () => {
     const api = await import("./projectControl");
     const first = await api.getProjectSnapshot("p");

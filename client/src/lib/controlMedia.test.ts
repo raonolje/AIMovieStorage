@@ -53,6 +53,32 @@ beforeEach(() => {
 });
 
 describe("외부 생성의 저장·취소·재전송", () => {
+  it("조종기의 인물 그림 생성은 카드의 시트 구성을 실제 입력과 결과 기록에 잇는다", async () => {
+    const { q, media } = await prepare();
+    const character = draft().characters[0];
+    character.blueprint = ["body-front", "face-front", "face-eyes"];
+    character.promptKo = "검은 머리의 주인공";
+    character.promptEn = "The lead actor with dark hair";
+    character.negativeEn = "changing identity";
+    const accepted = await media.enqueueControlGeneration({
+      ...request, target: { kind: "character", id: character.id }, options: { prompt: "The lead actor with dark hair" },
+    });
+    expect((await finish(q, accepted.jobId)).status).toBe("done");
+    const actual = state.run.mock.calls[0][0].opts;
+    expect(actual.prompt).toContain("Character reference blueprint: 3 panels");
+    expect(actual.prompt).toContain("eye shape");
+    expect(actual.negative).toBe("changing identity");
+    expect(draft().characters[0].generatedImages[0]).toMatchObject({ promptKo: "검은 머리의 주인공", promptEn: actual.prompt });
+    expect(request.options.prompt).toBe("숲 속 여행자");
+  });
+
+  it("로컬 그림 엔진에서 읽지 않는 인물 레퍼런스 이미지는 생성 전에 거절한다", async () => {
+    const { media } = await prepare();
+    await expect(media.enqueueControlGeneration({ ...request, target: { kind: "character", id: "c" }, imageAssetId: "img" }))
+      .rejects.toThrow("기존 이미지 편집을 지원하지 않습니다");
+    expect(state.run).not.toHaveBeenCalled();
+  });
+
   it("같은 외부 결과의 재등록은 기존 ID를 반환하고 수동 편집을 유지한다", async () => {
     const { media } = await prepare();
     const target = { kind: "cut", id: "k" } as const;

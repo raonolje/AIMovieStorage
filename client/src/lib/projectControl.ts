@@ -155,12 +155,23 @@ function checkCutReferences(draft: ProjectDraft, fields: z.infer<typeof cutField
   if (fields.characterIds?.some((value) => !draft.characters.some((item) => item.id === value))) throw new ProjectControlError("invalid_reference", "컷에서 참조할 인물을 찾지 못했습니다.");
   if (fields.backgroundId && !draft.backgrounds.some((item) => item.id === fields.backgroundId)) throw new ProjectControlError("invalid_reference", "컷에서 참조할 장소를 찾지 못했습니다.");
 }
+function checkKoreanPrompt(value: string, field: string) {
+  if (!value.trim()) return;
+  // @파일명·모델 ID에는 영문이 섞일 수 있습니다. 그 부분을 빼고 본문이
+  // 대부분 영어면 한글 칸을 채웠다고 보지 않습니다.
+  const prose = value.replace(/@[^\s,;]+/g, "");
+  const korean = (prose.match(/[가-힣]/g) ?? []).length;
+  const latin = (prose.match(/[A-Za-z]/g) ?? []).length;
+  if (!korean || korean / (korean + latin) < 0.4)
+    throw new ProjectControlError("korean_prompt_required", `${field}에는 한국어로 쓴 프롬프트를 넣어 주세요.`);
+}
 function checkCutPromptLanguages(current: ReturnType<typeof newCut>, fields: z.infer<typeof cutFields>) {
   const next = { ...current, ...fields };
   for (const [ko, en] of [["promptKo", "promptEn"], ["negativeKo", "negativeEn"], ["videoPromptKo", "videoPromptEn"]] as const) {
     if (!(ko in fields) && !(en in fields)) continue;
     if (Boolean(next[ko]?.trim()) !== Boolean(next[en]?.trim()))
       throw new ProjectControlError("bilingual_prompt_required", `컷의 ${ko}와 ${en}을 함께 채우거나 함께 비워 주세요.`);
+    checkKoreanPrompt(next[ko] ?? "", `컷의 ${ko}`);
   }
 }
 function checkCharacterPromptLanguages(current: Character, fields: z.infer<typeof characterFields>) {
@@ -169,7 +180,15 @@ function checkCharacterPromptLanguages(current: Character, fields: z.infer<typeo
     if (!(ko in fields) && !(en in fields)) continue;
     if (Boolean(next[ko]?.trim()) !== Boolean(next[en]?.trim()))
       throw new ProjectControlError("bilingual_prompt_required", `캐릭터의 ${ko}와 ${en}을 함께 채우거나 함께 비워 주세요.`);
+    checkKoreanPrompt(next[ko] ?? "", `캐릭터의 ${ko}`);
   }
+}
+function checkScenePromptLanguages(current: ReturnType<typeof newScene>, fields: z.infer<typeof sceneFields>) {
+  if (!("storyboardPromptKo" in fields) && !("storyboardPromptEn" in fields)) return;
+  const next = { ...current, ...fields };
+  if (Boolean(next.storyboardPromptKo?.trim()) !== Boolean(next.storyboardPromptEn?.trim()))
+    throw new ProjectControlError("bilingual_prompt_required", "장면의 스토리보드 한글·영문 프롬프트를 함께 채우거나 함께 비워 주세요.");
+  checkKoreanPrompt(next.storyboardPromptKo ?? "", "장면의 스토리보드 한글 프롬프트");
 }
 
 /** 새 ID는 호출 바깥에서 정합니다. React가 같은 갱신 함수를 다시 계산해도 다른 카드를 만들면 안 됩니다. */
@@ -195,8 +214,15 @@ export function applyProjectCommands(current: ProjectDraft, commands: ProjectCom
       }) };
       case "background.add": return { ...draft, backgrounds: [...draft.backgrounds, { ...newBackground(command.fields.spaceKind), ...command.fields, id: command.id! }] };
       case "background.update": return { ...draft, backgrounds: replaceById(draft.backgrounds, command.id, (item) => { checkOwnerRename(item, command.fields.name); return { ...item, ...command.fields }; }) };
-      case "scene.add": return { ...draft, scenes: [...draft.scenes, { ...newScene(), ...command.fields, id: command.id!, cuts: [] }] };
-      case "scene.update": return { ...draft, scenes: replaceById(draft.scenes, command.id, (item) => ({ ...item, ...command.fields })) };
+      case "scene.add": {
+        const base = newScene();
+        checkScenePromptLanguages(base, command.fields);
+        return { ...draft, scenes: [...draft.scenes, { ...base, ...command.fields, id: command.id!, cuts: [] }] };
+      }
+      case "scene.update": return { ...draft, scenes: replaceById(draft.scenes, command.id, (item) => {
+        checkScenePromptLanguages(item, command.fields);
+        return { ...item, ...command.fields };
+      }) };
       case "cut.add":
         checkCutReferences(draft, command.fields);
         checkCutPromptLanguages(newCut(1), command.fields);

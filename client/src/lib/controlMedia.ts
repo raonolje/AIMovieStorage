@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { relinkCharacterBlueprintPrompts } from "./characterBlueprintPrompt";
 import { validateLocalControlOptions } from "./localControlCapabilities";
 import { structureSourceSchema } from "./localStructureControl";
 import { controlLoraSelectionSchema, resolveControlLoras } from "./controlLoras";
@@ -218,6 +219,7 @@ export async function attachControlMediaResult(
   path: string,
   name: string,
   video = false,
+  prompts?: { promptKo?: string; promptEn?: string },
 ) {
   let assetId: string = uid();
   const asset: GeneratedImageAsset = {
@@ -226,6 +228,7 @@ export async function attachControlMediaResult(
     filePath: path,
     thumb: assetSrc(path),
     file: null,
+    ...(prompts ? { promptKo: prompts.promptKo, promptEn: prompts.promptEn } : {}),
   };
   const outcome = await writeProjectAndConfirm(projectId, (current) => {
     controlMediaTarget(current, target);
@@ -294,6 +297,8 @@ function validateGeneration(raw: unknown) {
   if (engine.kind === "video" && input.target.kind !== "cut")
     throw new Error("영상 결과는 컷에 붙입니다.");
   if (input.imageAssetId) assetOf(input.projectId, input.imageAssetId, "image");
+  if (engine.kind === "image" && input.imageAssetId)
+    throw new Error("이 로컬 그림 엔진은 기존 이미지 편집을 지원하지 않습니다. 인물 얼굴을 유지하려면 참조 편집 결과를 등록해 주세요.");
   if (input.motionMaskAssetId)
     assetOf(input.projectId, input.motionMaskAssetId, "image");
   const referenceAssets = input.referenceAssetIds?.map((assetId) => assetOf(input.projectId, assetId));
@@ -366,6 +371,13 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
   const kind = LOCAL_ENGINE_CATALOG[input.engine].kind;
   if (kind !== "image" && kind !== "video")
     throw new Error("지원하지 않는 생성 종류입니다.");
+  // 조종기가 카드 프롬프트와 별도의 생성 문장을 보낼 수 있습니다. 인물 시트의 칸이
+  // 실제 워커 입력에서 빠지면 화면에 9칸이 선택돼 있어도 한 장짜리 초상이 나옵니다.
+  const character = input.target.kind === "character"
+    ? draft.characters.find((item) => item.id === input.target.id) : undefined;
+  const sheetPrompt = character
+    ? relinkCharacterBlueprintPrompts({ ...character, promptEn: input.options.prompt }).promptEn
+    : input.options.prompt;
   const references = input.referenceAssetIds
     ?.map((id) => assetOf(input.projectId, id))
     .map((asset) => {
@@ -410,7 +422,8 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
     assetType: kind === "video" ? "scene-video" : target.assetType,
     opts: {
       ...input.options,
-      prompt: withLoraTriggers(input.options.prompt, loras),
+      prompt: withLoraTriggers(sheetPrompt, loras),
+      negative: input.options.negative ?? character?.negativeEn,
       loras,
       control,
       structure_control: structureControl,
@@ -435,6 +448,7 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
     made.path,
     made.name,
     kind === "video",
+    character ? { promptKo: character.promptKo, promptEn: withLoraTriggers(sheetPrompt, loras) } : undefined,
   );
   return { paths: [made.path], assetIds: [assetId], data: { attached: true, seconds: made.seconds, meta: made.meta, ...controlSources } };
 });
