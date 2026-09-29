@@ -9,7 +9,7 @@ Use this skill when the user wants to create or continue an AIMovieStorage drama
 
 ## Connect and inspect
 
-The desktop app must be running with **Settings → 대화로 앱 조종하기 → 앱 조종 켜기**. Connect Codex to the app's local `aimoviestorage` MCP server using the command shown in that Settings screen. The installed skill does not configure Codex MCP or start the app for the user. Check the connected server's `tools/list` and `app_status`; available commands depend on the installed edition and version. If it is unavailable, say what connection step is missing, and continue any useful offline preparation.
+The desktop app must be running. App Control starts automatically unless the user turned it off in **Settings → 대화로 앱 조종하기**; if off, use **앱 조종 켜기**. Connect Codex to the app's local `aimoviestorage` MCP server using the command shown in that Settings screen. The installed skill does not configure Codex MCP or start the app for the user. Check the connected server's `tools/list` and `app_status`; available commands depend on the installed edition and version. If it is unavailable, say what connection step is missing, and continue any useful offline preparation.
 
 Start each work session with `projects_list`, then `project_get` for the chosen project. Read current IDs, values, and revision before editing. After the user edits in the app, read `project_changes` or `composition_changes` since the last revision; if history is incomplete, get a fresh full snapshot. Incorporate those edits instead of replaying stale commands. Pass the current `expectedRevision` to writes. A revision conflict means read again and re-plan, not blind retry.
 

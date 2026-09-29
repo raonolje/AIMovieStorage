@@ -7,6 +7,10 @@ import { registerProjectNavigation } from "./projectControl";
 
 let start: Promise<void> | undefined;
 let error: string | null = null;
+const AUTOSTART_KEY = "ai-video-storage.app-control-autostart.v1";
+export function rememberAppControlEnabled(enabled: boolean) {
+  window.localStorage.setItem(AUTOSTART_KEY, String(enabled));
+}
 let readyResolve: () => void;
 let readyReject: (reason: unknown) => void;
 const ready = new Promise<void>((resolve, reject) => {
@@ -56,6 +60,15 @@ export function initializeAppControl(
           .catch(() => undefined);
       },
     );
+    // 첫 설치에서는 조종기를 바로 켭니다. 사용자가 설정에서 끄면 다음 실행에도
+    // 그 선택을 지킵니다. 리스너보다 먼저 열면 첫 MCP 요청이 시간 초과됩니다.
+    if (window.localStorage.getItem(AUTOSTART_KEY) !== "false") {
+      try {
+        await invoke("control_enable", { enabled: true });
+      } catch (reason) {
+        error = String(reason);
+      }
+    }
     readyResolve();
   })().catch((reason) => {
     error = String(reason);

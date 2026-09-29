@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Check, Copy, Plug, RefreshCw } from "lucide-react";
 import { useT } from "@/lib/i18n";
 import { isDesktopApp } from "@/lib/llm";
-import { whenAppControlReady } from "@/lib/appControl";
+import { rememberAppControlEnabled, whenAppControlReady } from "@/lib/appControl";
 
 interface ControlStatus {
   enabled: boolean;
@@ -25,7 +25,7 @@ export default function AppControlPanel() {
   useEffect(() => {
     if (!desktop) return;
     let alive = true;
-    void invoke<ControlStatus>("control_status")
+    void whenAppControlReady().then(() => invoke<ControlStatus>("control_status"))
       .then((next) => {
         if (alive) setStatus(next);
       })
@@ -60,6 +60,7 @@ export default function AppControlPanel() {
       const result = await invoke<{ enabled: boolean }>("control_enable", {
         enabled,
       });
+      rememberAppControlEnabled(result.enabled);
       setStatus((current) =>
         current ? { ...current, enabled: result.enabled } : current,
       );
