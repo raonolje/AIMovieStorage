@@ -2,6 +2,7 @@ import { diffControlValues } from "./controlChanges";
 import { copyJsonWithinLimit, sameImmutableJson } from "./immutableJson";
 import { controlDetailSchema, projectControlValue, type ControlDetail } from "./controlProjection";
 import { z } from "zod";
+import { relinkCutCharacterPrompts } from "@/lib/cutCharacterLinks";
 import { loadProjects, listLocalProjects, getLocalProject, saveLocalProjectAndConfirm } from "@/lib/localProjectStore";
 import { readProject, writeProjectAndConfirm } from "@/lib/projectWrite";
 import { newProjectDraft, newCharacter, newBackground, newScene, newCut, uid, type ProjectDraft, type Character, type Background } from "@/lib/projectTypes";
@@ -24,7 +25,8 @@ export const projectCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("background.update"), id, fields: backgroundFields }).strict(),
   z.object({ type: z.literal("scene.add"), id: id.optional(), fields: sceneFields }).strict(),
   z.object({ type: z.literal("scene.update"), id, fields: sceneFields }).strict(),
-  z.object({ type: z.literal("cut.add"), id: id.optional(), sceneId: id, fields: cutFields }).strict(),
+  // 인물이 없는 컷도 [] 를 명시합니다. 빠뜨린 요청을 조용히 저장하면 시트·@태그가 끊깁니다.
+  z.object({ type: z.literal("cut.add"), id: id.optional(), sceneId: id, fields: cutFields.extend({ characterIds: z.array(id).max(100) }) }).strict(),
   z.object({ type: z.literal("cut.update"), id, sceneId: id, fields: cutFields }).strict(),
 ]);
 export const projectReadSchema = z.object({ projectId: id, detail: controlDetailSchema }).strict();
@@ -167,10 +169,14 @@ export function applyProjectCommands(current: ProjectDraft, commands: ProjectCom
       case "scene.update": return { ...draft, scenes: replaceById(draft.scenes, command.id, (item) => ({ ...item, ...command.fields })) };
       case "cut.add":
         checkCutReferences(draft, command.fields);
-        return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => ({ ...scene, cuts: [...scene.cuts, { ...newCut(scene.cuts.length + 1), ...command.fields, id: command.id! }] })) };
+        return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => ({ ...scene, cuts: [...scene.cuts, relinkCutCharacterPrompts({ ...newCut(scene.cuts.length + 1), ...command.fields, id: command.id! }, draft.characters, draft.backgrounds)] })) };
       case "cut.update":
         checkCutReferences(draft, command.fields);
-        return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => ({ ...scene, cuts: replaceById(scene.cuts, command.id, (cut) => ({ ...cut, ...command.fields })) })) };
+        return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => ({ ...scene, cuts: replaceById(scene.cuts, command.id, (cut) => {
+          const next = { ...cut, ...command.fields };
+          // 인물을 고른 요청에만 잇습니다. 길이·대사 수정만으로 옛 컷의 잘못된 캐스팅을 확정하지 않습니다.
+          return command.fields.characterIds ? relinkCutCharacterPrompts(next, draft.characters, draft.backgrounds) : next;
+        }) })) };
     }
   }, current);
 }

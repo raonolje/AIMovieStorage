@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildCutVideoPrompt } from "@/lib/cutVideoPrompt";
-import { summarizeCompositionCamera } from "@/lib/composition";
+import { normalizeComposition, summarizeCompositionCamera } from "@/lib/composition";
 import { newBackground, newCharacter, newCut } from "@/lib/projectTypes";
 import {
   ageEnOf,
@@ -134,6 +134,18 @@ describe("cutRequestPayload — 컷 그림", () => {
 });
 
 describe("cutSwapPeople · cutLinkInput — @태그 잇기 재료", () => {
+  it("구도에 한 명만 있어도 컷에서 고른 나머지 인물의 시트를 빠뜨리지 않는다", () => {
+    const composition = normalizeComposition({ characters: [{
+      characterId: "c1", position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, pose: "stand",
+    }] });
+    const swaps = cutSwapPeople({ ...cut, composition }, [jinwoo, hana]);
+    expect(swaps.map((item) => item.characterId)).toEqual(["c1", "c2"]);
+    expect(swaps[0].side).not.toBeNull();
+    expect(swaps[1].side).toBeNull();
+    // 구도에 남아 있지만 컷에서는 선택을 푼 사람의 시트는 다시 붙이지 않습니다.
+    expect(cutSwapPeople({ ...cut, characterIds: ["c2"], composition }, [jinwoo, hana]).map((item) => item.characterId)).toEqual(["c2"]);
+  });
+
   it("구도가 없으면 컷에 고른 인물 순서대로, 고른 시트와 별칭을 든다", () => {
     const swaps = cutSwapPeople(cut, [jinwoo, hana]);
     expect(swaps.map((item) => item.name)).toEqual(["서진우", "서하나"]);

@@ -572,7 +572,8 @@ export function cutSwapPeople(cut: Cut, characters: Character[]): CutSwapPerson[
     if (source) return { name: source.name, gender: source.gender };
     const mannequin = (cut.composition?.mannequins || []).find((item) => item.id === id);
     return mannequin ? { name: mannequin.name, gender: mannequin.gender } : undefined;
-  });
+  }).filter((person) =>
+    !characters.some((item) => item.id === person.characterId) || cut.characterIds.includes(person.characterId));
   /*
     구도를 끈 컷에는 «구도에 놓인 인물» 이 없습니다. 그때는 컷에 고른 인물을 그대로 씁니다 —
     색 이름(«파란 사람»)은 구도 그림이 있어야 뜻이 있으니 구도 쪽에만 있습니다.
@@ -587,6 +588,12 @@ export function cutSwapPeople(cut: Cut, characters: Character[]): CutSwapPerson[
         name: item.name || `인물 ${index + 1}`,
         side: null,
       }));
+  // 구도에 마네킹만 있거나 인물 일부가 빠져도 컷에서 고른 사람의 시트는 전부 전달합니다.
+  // 예전에는 구도 인물이 한 명이라도 있으면 나머지 선택 인물은 @연결에서 사라졌습니다.
+  for (const item of cutCharacters) {
+    if (base.some((person) => person.characterId === item.id)) continue;
+    base.push({ characterId: item.id, hex: "", color: { ko: "", en: "" }, index: base.length, name: item.name || `인물 ${base.length + 1}`, side: null });
+  }
   return base.map((person) => {
     const source = characters.find((item) => item.id === person.characterId);
     const sheetPaths = source ? cutCharacterRefs(cut, source.id, source.generatedImages) : [];

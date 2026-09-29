@@ -13,6 +13,8 @@ import { buildRulePrompt } from "@/lib/rulePrompt";
 import { summarizeBlueprint } from "@/lib/blueprint";
 import { appendPromptHistory, describeRunConditions } from "@/lib/promptHistory";
 import { autoRealism } from "@/lib/autoRealism";
+import { relinkCutCharacterPrompts } from "@/lib/cutCharacterLinks";
+import { tagCharacterNames } from "@/lib/compositionLegend";
 import { buildCutVideoPrompt } from "@/lib/cutVideoPrompt";
 import type { SpaceKind } from "@/lib/blueprint";
 import {
@@ -110,6 +112,8 @@ export interface BootstrapCut {
   description: string;
   /** 이름으로만 옵니다. id 는 초안에 얹을 때 맞춥니다. */
   characterNames: string[];
+  /** 빈 배열을 명시한 컷은 인물이 없는 컷입니다. 씬 전체 인물로 채우지 않습니다. */
+  characterNamesProvided?: boolean;
   backgroundName: string;
   /**
    * 이 컷이 몇 초짜리인가.
@@ -502,6 +506,7 @@ function parseCut(bag: Bag): BootstrapCut {
     title: str(bag, ["title", "제목", "name", "label"]),
     description: str(bag, ["description", "설명", "action", "summary", "요약", "line", "한줄"]),
     characterNames: strList(bag, ["characters", "characterNames", "등장인물", "인물", "cast"]),
+    characterNamesProvided: ["characters", "characterNames", "등장인물", "인물", "cast"].some((key) => key in bag),
     backgroundName: str(bag, ["background", "backgroundName", "배경", "location", "장소"]),
     seconds: toCutSeconds(str(bag, ["seconds", "duration", "길이", "초", "durationSeconds"])),
     vfx: str(bag, ["vfx", "effects", "효과", "이펙트"]),
@@ -756,6 +761,7 @@ function buildBackground(
 function buildCuts(
   scene: BootstrapScene,
   characterId: (name: string) => string | undefined,
+  knownCharacterNames: string[],
   backgroundId: (name: string) => string | undefined,
   /** 3단계 결과에서 이 씬의 컷들 — 없으면 구도·프롬프트를 비워 둡니다. */
   shots: BootstrapShotCut[] | undefined,
@@ -768,13 +774,34 @@ function buildCuts(
 ): Cut[] {
   return scene.cuts.map((cut, index) => {
     const created = newCut(index + 1);
-    const names = cut.characterNames.length ? cut.characterNames : scene.characterNames;
     const background = backgroundId(cut.backgroundName) ?? backgroundId(scene.backgroundName);
     /*
       3단계가 있으면 **구도를 세우고 프롬프트를 채웁니다**.
       번호로 짝을 맞춥니다 — 답이 컷을 빠뜨렸으면 그 컷만 비고 나머지는 들어갑니다.
     */
     const plan = shots?.find((item) => item.order === index + 1);
+    /*
+      2단계가 컷의 characters 를 빠뜨리면 예전에는 씬 전체 인물로 물러서거나 빈 컷을
+      저장했습니다. 3단계가 실제 화면에 세운 사람을 우선 잇고, 그마저 없을 때만 컷의
+      제목·설명·대사에서 카드 이름을 찾습니다. 명시적인 [] 는 무인물 컷으로 존중합니다.
+    */
+    const named = [...cut.characterNames, ...(plan?.people ?? []).map((person) => person.name)];
+    const description = `${cut.title}\n${cut.description}\n${cut.acting}`;
+    const mentioned = !cut.characterNamesProvided && !plan && !named.length
+      ? knownCharacterNames.filter((name, index) => name.length > 1 && tagCharacterNames(description, [{ name, tag: `@cast${index}` }]).includes(`@cast${index}`))
+      : [];
+    const namedCandidates = [...new Set([
+      ...named,
+      ...mentioned,
+      ...(!cut.characterNamesProvided && !plan && !named.length && !mentioned.length ? scene.characterNames : []),
+    ])];
+    const seenIds = new Set<string>();
+    const names = namedCandidates.filter((name) => {
+      const id = characterId(name);
+      if (!id || seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    });
     const people = (plan?.people ?? [])
       .map((person) => {
         const id = characterId(person.name);
@@ -860,7 +887,7 @@ function buildCuts(
       title: cut.title,
       description: cut.description,
       // 이름으로 못 찾으면 비워 둡니다. 엉뚱한 인물을 넣는 것보다 낫습니다.
-      characterIds: names.map((name) => characterId(name)).filter((id): id is string => Boolean(id)),
+      characterIds: [...new Set(names.map((name) => characterId(name)).filter((id): id is string => Boolean(id)))],
       ...(background ? { backgroundId: background } : {}),
       // 빈 값은 **안 넣습니다.** 넣으면 `newCut` 의 기본값을 빈 문자열로 덮어씁니다.
       ...(cut.seconds ? { plannedSeconds: cut.seconds } : {}),
@@ -984,18 +1011,31 @@ export function applyBootstrapToDraft(
   */
   const idByName = (list: { id: string; name: string }[]) => {
     const table = new Map<string, string>();
+    const ambiguous = new Set<string>();
     for (const item of list) {
       const key = item.name.trim();
       if (key && !table.has(key)) table.set(key, item.id);
     }
-    return (name: string) => table.get((name || "").trim());
+    for (const item of list) {
+      const key = item.name.trim();
+      // 카드 이름에 배역·별명이 괄호로 붙어도 대본의 본명으로 찾습니다.
+      const short = key.replace(/\s*[（(].*$/, "").trim();
+      if (short && short !== key) {
+        if (table.has(short) && table.get(short) !== item.id) ambiguous.add(short);
+        else table.set(short, item.id);
+      }
+    }
+    return (name: string) => {
+      const key = (name || "").trim();
+      return ambiguous.has(key) ? undefined : table.get(key);
+    };
   };
   const characterId = idByName(characters);
   const backgroundId = idByName(backgrounds);
 
   /** 인물 이름 → 키(cm). 카메라 거리를 재는 잣대입니다(없으면 170). */
   const heightOf = (name: string) =>
-    characters.find((item) => item.name.trim() === (name || "").trim())?.heightCm ?? 170;
+    characters.find((item) => item.id === characterId(name))?.heightCm ?? 170;
 
   const madeScenes: Scene[] = details.scenes.map((scene, index) => ({
     id: uid(),
@@ -1008,6 +1048,7 @@ export function applyBootstrapToDraft(
     cuts: buildCuts(
       scene,
       characterId,
+      [...new Set(characters.flatMap((item) => [item.name.trim(), item.name.replace(/\s*[（(].*$/, "").trim()]).filter(Boolean))],
       backgroundId,
       (result.shots?.scenes.find((item) => item.title.trim() === scene.title.trim()) ??
         result.shots?.scenes[index])?.cuts,
@@ -1015,7 +1056,7 @@ export function applyBootstrapToDraft(
       current.aspect?.image,
       // 작품 스타일 — 「실사인가 그림인가」 가 질감 칸을 가릅니다.
       replace ? outline.styles : [...new Set([...current.styles, ...outline.styles])],
-    ),
+    ).map((cut) => relinkCutCharacterPrompts(cut, characters, backgrounds)),
   }));
 
   /** 덧붙이기에서는 비어 있는 칸만 채웁니다. 적어 둔 것을 덮어쓰지 않습니다. */

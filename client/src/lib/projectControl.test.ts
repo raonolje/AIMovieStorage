@@ -40,6 +40,32 @@ function gate() { let resolve!: () => void; const promise = new Promise<void>((d
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("프로젝트 대화 조종", () => {
+  it("새 컷에 인물 목록이 빠지면 얼굴 참조 없이 저장하지 않는다", async () => {
+    const api = await import("./projectControl");
+    current().scenes = [{ ...newScene(), id: "s1", cuts: [] }];
+    const first = await api.getProjectSnapshot("p");
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "cut.add", sceneId: "s1", fields: { title: "서진우가 들어온다" } },
+    ] })).rejects.toMatchObject({ code: "invalid_request" });
+    expect(current().scenes[0].cuts).toEqual([]);
+  });
+
+  it("조종기가 인물 ID와 프롬프트를 함께 보내면 대표 시트 @참조까지 저장한다", async () => {
+    const api = await import("./projectControl");
+    current().characters = [{ ...newCharacter(), id: "c1", name: "서진우", generatedImages: [{
+      id: "g1", name: "서진우_001", thumb: "", file: null, filePath: "C:/작품/서진우_001.png", isPrimary: true,
+    }] }];
+    current().scenes = [{ ...newScene(), id: "s1", cuts: [] }];
+    const first = await api.getProjectSnapshot("p");
+    await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "cut.add", sceneId: "s1", fields: { characterIds: ["c1"], promptEn: "Seo Jinwoo opens the list", videoPromptEn: "Seo Jinwoo turns to camera" } },
+    ] });
+    const cut = current().scenes[0].cuts[0];
+    expect(cut.characterIds).toEqual(["c1"]);
+    expect(cut.promptEn).toContain("@서진우_001");
+    expect(cut.videoPromptEn).toContain("@서진우_001");
+  });
+
   it("5인 긴 구도는 요약 조회·수정에서 키를 줄이되 원본 키와 전체 리비전 검사를 유지한다", async () => {
     const api = await import("./projectControl");
     const composition = normalizeComposition();

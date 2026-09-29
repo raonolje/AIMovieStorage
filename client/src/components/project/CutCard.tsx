@@ -64,6 +64,7 @@ import {
 } from "@/lib/cutVideoPrompt";
 import { findMotionMask } from "@/lib/motionMask";
 import { cutVideoLinkInput, magnificCutVideoReferences } from "@/lib/cutVideoReferences";
+import { relinkCutCharacterPrompts } from "@/lib/cutCharacterLinks";
 import { useT } from "@/lib/i18n";
 import { cutToggleLabel, cutTogglesEnglish } from "@/lib/cutStyle";
 /*
@@ -1669,13 +1670,14 @@ export default function CutCard({
                       accent={PICK_ACCENT.character}
                       onClick={() =>
                         // 값이 아니라 갱신 함수로 — 프롬프트를 기다리는 동안 눌러도 답이 지워지지 않게.
-                        patchCut((current) => ({
+                        patchCut((current) => relinkCutCharacterPrompts({
+                          ...current,
                           characterIds: current.characterIds.includes(entity.id)
                             ? current.characterIds.filter(
                                 (id) => id !== entity.id,
                               )
                             : [...current.characterIds, entity.id],
-                        }))
+                        }, characters, backgrounds))
                       }
                     />
                   );
