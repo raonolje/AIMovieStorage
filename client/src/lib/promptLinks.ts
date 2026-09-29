@@ -49,6 +49,12 @@ export interface PromptLinkInput {
   people: PromptLinkPerson[];
   /** 영상 전용 외형 참조. 이미지 프롬프트는 이 값을 넘기지 않습니다. */
   representativeImagePath?: string;
+  /** 이어지는 컷의 직전 대표영상. 그림 생성 프롬프트에는 넣지 않습니다. */
+  continuityVideoPath?: string;
+  /** 앞 대표영상의 마지막 프레임. 이어 찍기에서만 사용합니다. */
+  continuityEndFramePath?: string;
+  /** 인물의 대표 음성. 이름이 같아도 인물 이미지 태그로 바꾸지 않습니다. */
+  voiceReferencePaths?: string[];
   /** 구도 캡처. 있으면 참고 줄 맨 앞에 둡니다. */
   guidePath?: string;
   /** 배경 판. */
@@ -67,6 +73,8 @@ export interface PromptLinkInput {
 /** 참고 줄의 머리말. 이 글자로 옛 줄을 찾아 통째로 갈아 끼웁니다. */
 const HEAD_KO = "참고 그림:";
 const HEAD_EN = "Reference images:";
+const CONTINUITY_KO = "앞 컷 연결:";
+const CONTINUITY_EN = "Previous shot continuity:";
 
 /*
   ── 그림이 아직 없는 것들의 «자리» ────────────────────────────────────
@@ -106,13 +114,16 @@ const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&
 /** 꼬리 줄의 머리말로 시작하는가 — 「참고 그림:」 「아직 그림 없음:」 과 그 영문. */
 const isTailHead = (line: string) => {
   const head = line.trimStart();
-  return [HEAD_KO, HEAD_EN, PENDING_KO, PENDING_EN, OPTIONAL_KO, OPTIONAL_EN].some(prefix => head.startsWith(prefix));
+  return [HEAD_KO, HEAD_EN, PENDING_KO, PENDING_EN, OPTIONAL_KO, OPTIONAL_EN, CONTINUITY_KO, CONTINUITY_EN].some(prefix => head.startsWith(prefix));
 };
 
 /** 지금 걸려 있는 태그 전부. 본문 토큰이 살아 있는지 판별할 때 씁니다. */
 function livingTags(input: PromptLinkInput): Set<string> {
   const all = new Set<string>();
   if (input.representativeImagePath) all.add(tagOf(input.representativeImagePath));
+  if (input.continuityVideoPath) all.add(tagOf(input.continuityVideoPath));
+  if (input.continuityEndFramePath) all.add(tagOf(input.continuityEndFramePath));
+  input.voiceReferencePaths?.forEach((path) => all.add(tagOf(path)));
   if (input.guidePath) all.add(tagOf(input.guidePath));
   if (input.backgroundPath) all.add(tagOf(input.backgroundPath));
   input.people.forEach((person) =>
@@ -331,7 +342,10 @@ export function relinkPromptText(
   const optional = missingSheets.length
     ? `${lang === "ko" ? OPTIONAL_KO : OPTIONAL_EN} ${missingSheets.map(person => oneLine(displayName(person, lang))).join(" / ")}`
     : "";
-  const tail = [linkLine(input, lang), pendingLine(input, lang), optional].filter(Boolean);
+  const continuity = input.continuityVideoPath
+    ? `${lang === "ko" ? CONTINUITY_KO : CONTINUITY_EN} ${lang === "ko" ? "대표영상" : "selected video"} ${tagOf(input.continuityVideoPath)}${input.continuityEndFramePath ? ` / ${lang === "ko" ? "마지막 프레임·이 컷 첫 프레임" : "final frame / this shot's first frame"} ${tagOf(input.continuityEndFramePath)}` : ""}`
+    : "";
+  const tail = [linkLine(input, lang), continuity, pendingLine(input, lang), optional].filter(Boolean);
   if (!tail.length) return linked;
   return linked ? `${linked}\n\n${tail.join("\n")}` : tail.join("\n");
 }

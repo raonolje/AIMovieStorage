@@ -42,6 +42,7 @@ import {
 } from "@/lib/promptPayloads";
 import type { Background, Character, Cut, ProjectDraft, Scene } from "@/lib/projectTypes";
 import { cutVideoLinkInput } from "@/lib/cutVideoReferences";
+import { relinkContinuityTags, resolveCutContinuity } from "@/lib/cutContinuity";
 import { withCutVideoPrompt } from "@/lib/cutVideoPromptHistory";
 
 /**
@@ -426,6 +427,7 @@ async function writeCut(
   // ── 영상 — 규칙 뼈대 위에 LLM 이 상황·환경·동작을 채웁니다(컷 카드의 「프롬프트 작성」(영상) 과 같은 길).
   const skeletonInput = cutVideoSkeletonInput({
     cut,
+    continuity: resolveCutContinuity(scene, cut),
     characters: draft.characters,
     cutCharacters,
     background,
@@ -458,10 +460,13 @@ async function writeCut(
   });
   const wrote = await writeProject(project(), (current) =>
     patchCutIn(current, target.sceneId, target.cutId, (now) => {
-      const link = cutVideoLinkInput(now, linkInputOf(current, now));
+      const liveScene = current.scenes.find(item => item.id === target.sceneId)!;
+      const continuity = resolveCutContinuity(liveScene, now);
+      const link = cutVideoLinkInput(now, linkInputOf(current, now), continuity, current.characters);
+      const source = (text: string) => continuity ? relinkContinuityTags(text, continuity.sourceCut, continuity.video) : text;
       return withCutVideoPrompt(now, {
-        ko: relinkPromptText(result.ko, link, "ko"),
-        en: relinkPromptText(result.en, link, "en"),
+        ko: relinkPromptText(source(result.ko), link, "ko"),
+        en: relinkPromptText(source(result.en), link, "en"),
       }, HOW);
     }),
   );

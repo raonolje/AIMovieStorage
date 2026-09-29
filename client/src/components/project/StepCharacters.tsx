@@ -4,6 +4,8 @@ import { HOLDS_ENTITY_CARD } from "@/lib/useTutorialPanel";
 import { TUTORIAL_CARD_EVENT, type TutorialCardWant } from "@/lib/tutorialStore";
 import { PackageOpen, Plus, Trash2, User } from "lucide-react";
 import CharacterProfilePanel from "@/components/CharacterProfilePanel";
+import CharacterVoicePanel from "@/components/project/CharacterVoicePanel";
+import { applyVoiceChange } from "@/lib/characterVoice";
 import GeneratedImageShelf from "@/components/project/GeneratedImageShelf";
 import EntityLineagePanel from "@/components/project/EntityLineagePanel";
 import EntitySheetComposer from "@/components/project/EntitySheetComposer";
@@ -375,6 +377,7 @@ export default function StepCharacters({
             <CharacterCard
               character={openCharacter}
               draft={draft}
+              onVoicePatch={(update) => onChange((current) => applyVoiceChange(current, openCharacter.id, update))}
               rootIndex={
                 draft.characters.findIndex(
                   (item) => item.id === openCharacter.id,
@@ -510,6 +513,8 @@ export default function StepCharacters({
  */
 export function CharacterCard({
   character,
+  draft,
+  onVoicePatch,
   rootIndex = 1,
   open,
   onPatch,
@@ -520,6 +525,7 @@ export function CharacterCard({
 }: {
   character: Character;
   draft: ProjectDraft;
+  onVoicePatch?: (update: (current: Character) => Partial<Character>) => void;
   /** 계보 패널의 번호와 같은 번호. 「①」 로 뜹니다 */
   rootIndex?: number;
   open: boolean;
@@ -670,7 +676,7 @@ export function CharacterCard({
             // 6000×6000 시트의 빈 자리에 찍혀서, 영상 모델이 이 인물을 연기할 때 읽습니다.
             // 「배치상 이미지 분석 위가 낫다」 — 분석·프롬프트보다 앞에 둡니다.
             beforeAnalysis={
-              <CharacterProfilePanel
+              <div className="space-y-3"><CharacterProfilePanel
                 profile={character.profile}
                 onChange={(profile) => onPatch(() => ({ profile }))}
                 basics={{
@@ -683,7 +689,7 @@ export function CharacterCard({
                 projectContext={projectContext?.facts ?? null}
                 projectName={projectName}
                 images={card.referenceSources()}
-              />
+              />{!folder && <CharacterVoicePanel character={character} draft={draft} projectName={projectName} onPatch={onPatch} onVoicePatch={onVoicePatch} />}</div>
             }
             // 기본 정보는 레퍼런스 스트립 **오른쪽**에 놓입니다.
             // 설계서(05, 「캐릭터 원본 편집 창」)가 정한 좌우 배치입니다.

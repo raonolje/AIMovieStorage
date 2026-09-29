@@ -65,6 +65,8 @@ import {
 } from "@/lib/cutVideoPrompt";
 import { findMotionMask } from "@/lib/motionMask";
 import { cutVideoLinkInput, magnificCutVideoReferences } from "@/lib/cutVideoReferences";
+import { resolveCutContinuity, relinkContinuityTags } from "@/lib/cutContinuity";
+import { ensureVoicePrompt } from "@/lib/characterVoice";
 import { relinkCutCharacterPrompts } from "@/lib/cutCharacterLinks";
 import { useT } from "@/lib/i18n";
 import { cutToggleLabel, cutTogglesEnglish } from "@/lib/cutStyle";
@@ -102,6 +104,7 @@ import type {
   Background,
   Character,
   Cut,
+  Scene,
 } from "@/lib/projectTypes";
 import type { RoomPreset } from "@/lib/roomPreset";
 import type { VisualAsset } from "@/lib/visualAsset";
@@ -156,6 +159,8 @@ const PICK_ACCENT = {
 export default function CutCard({
   tutorialOpen,
   cut,
+  scene,
+  scenes,
   index,
   sceneTitle,
   sceneSummary,
@@ -179,6 +184,8 @@ export default function CutCard({
   onRemoveRoomPreset,
 }: {
   cut: Cut;
+  scene: Scene;
+  scenes: Scene[];
   index: number;
   sceneTitle: string;
   sceneSummary: string;
@@ -653,9 +660,10 @@ export default function CutCard({
         { promptKo: cut.promptKo, promptEn: cut.promptEn },
         input,
       );
-      const videoInput = cutVideoLinkInput(cut, input);
-      const videoPromptKo = relinkPromptText(cut.videoPromptKo ?? "", videoInput, "ko");
-      const videoPromptEn = relinkPromptText(cut.videoPromptEn ?? "", videoInput, "en");
+      const videoInput = cutVideoLinkInput(cut, input, continuity, characters);
+      const source = (text: string) => continuity ? relinkContinuityTags(text, continuity.sourceCut, continuity.video) : text;
+      const videoPromptKo = relinkPromptText(source(cut.videoPromptKo ?? ""), videoInput, "ko");
+      const videoPromptEn = relinkPromptText(source(cut.videoPromptEn ?? ""), videoInput, "en");
       const videoChanged =
         videoPromptKo !== (cut.videoPromptKo ?? "") ||
         videoPromptEn !== (cut.videoPromptEn ?? "");
@@ -782,6 +790,10 @@ export default function CutCard({
   const [magnificVideoResolution, setMagnificVideoResolution] = useState<MagnificVideoResolution>("1080p");
   const [magnificMusicChoice, setMagnificMusicChoice] = useState<boolean | null>(null);
   const magnificMusicEnabled = magnificMusicChoice ?? Boolean(cut.composition && musicOf(cut.composition));
+  let continuity: ReturnType<typeof resolveCutContinuity> = null;
+  let continuityError = "";
+  try { continuity = resolveCutContinuity(scene, cut); }
+  catch (error) { continuityError = error instanceof Error ? error.message : String(error); }
   // 인물 id → 이름, 이름 → 연기 기준은 영상 뼈대 재료(`cutVideoSkeletonInput`) 안에서 짓습니다 — 일괄 생성과 같은 규칙.
   const videoSeconds = cutVideoSecondsOf(cut);
   const heroImage = heroImageOf(cut);
@@ -809,6 +821,8 @@ export default function CutCard({
    */
   const localVideoRefs = useMemo(() => {
     const out: { kind: "image" | "video" | "audio"; path: string }[] = [];
+    if (continuity?.videoPath) out.push({ kind: "video", path: continuity.videoPath });
+    if (continuity?.mode === "continue" && continuity.endFramePath) out.push({ kind: "image", path: continuity.endFramePath });
     if (useRefVideo && cut.refVideoPath) out.push({ kind: "video", path: cut.refVideoPath });
     if (heroImage?.filePath) out.push({ kind: "image", path: heroImage.filePath });
     for (const person of cutCharacters) {
@@ -837,6 +851,8 @@ export default function CutCard({
     heroImage?.filePath,
     cutCharacters,
     background,
+    continuity?.videoPath,
+    continuity?.endFramePath,
   ]);
 
   /**
@@ -847,6 +863,8 @@ export default function CutCard({
   const videoSkeleton = () => {
     const skeletonInput = cutVideoSkeletonInput({
       cut,
+      continuity,
+      scenes,
       characters,
       cutCharacters,
       background,
@@ -868,14 +886,18 @@ export default function CutCard({
    * 재료를 못 모아도 지은 글은 넣습니다. 값이 아니라 함수로 — 기다리는 사이 도착한 답을 지우면 안 됩니다.
    */
   const keepVideoPrompt = async (made: { ko: string; en: string }) => {
-    const input = await gatherLinkInput().then(link => cutVideoLinkInput(cut, link)).catch(() => undefined);
+    const input = await gatherLinkInput().then(link => cutVideoLinkInput(cut, link, continuity, characters)).catch(() => undefined);
+    const source = (text: string) => continuity ? relinkContinuityTags(text, continuity.sourceCut, continuity.video) : text;
     patchCut((current) => withCutVideoPrompt(current, {
-      ko: input ? relinkPromptText(made.ko, input, "ko") : made.ko,
-      en: input ? relinkPromptText(made.en, input, "en") : made.en,
+      ko: ensureVoicePrompt(input ? relinkPromptText(source(made.ko), input, "ko") : made.ko,
+        { cut: current, scenes, characters, lang: "ko" }),
+      en: ensureVoicePrompt(input ? relinkPromptText(source(made.en), input, "en") : made.en,
+        { cut: current, scenes, characters, lang: "en" }),
     }, "영상 프롬프트 작성"));
   };
 
   const applyVideoPrompt = async () => {
+    if (continuityError) { toast.error(continuityError); return; }
     const { skeleton } = videoSkeleton();
     await keepVideoPrompt(skeleton);
     toast.success(`컷 ${cut.order} 영상 프롬프트를 만들었습니다.`, {
@@ -894,6 +916,7 @@ export default function CutCard({
   const [videoBusy, setVideoBusy] = useState(false);
   const runVideoPrompt = async () => {
     if (videoBusy) return;
+    if (continuityError) { toast.error(continuityError); return; }
     if ([cut.videoPromptKo, cut.videoPromptEn].some((text) => text?.trim())) {
       const ok = await confirmDialog({
         title: "지금 영상 프롬프트를 새로 받을까요?",
@@ -945,6 +968,7 @@ export default function CutCard({
    */
   const sendCutVideoToMagnific = async (prompt: string, lang: "ko" | "en") => {
     if (sendingVideo) return;
+    if (continuityError) { toast.error(continuityError); return; }
     if (!prompt.trim()) {
       toast.error("보낼 영상 프롬프트가 없습니다.", {
         description: "「영상 프롬프트」 를 먼저 눌러 주세요.",
@@ -960,9 +984,9 @@ export default function CutCard({
         영상이 카메라 움직임과 타이밍을 통째로 들고 있어 가장 강해야 합니다.
         영상이 없으면 구도 그림이 그 자리를 대신합니다(움직임은 글로만 갑니다).
       */
-      const paths = magnificCutVideoReferences(cut, references, useRefVideo, magnificMusicEnabled);
+      const paths = magnificCutVideoReferences(cut, references, useRefVideo, magnificMusicEnabled, continuity, characters);
       const composedPrompt = buildCutVideoMagnificPrompt({
-        cut, characters, background, summary, useComposition, useRefVideo, musicEnabled: magnificMusicEnabled, videoSeconds, prompt, lang, refs,
+        cut, continuity, characters, scenes, background, summary, useComposition, useRefVideo, musicEnabled: magnificMusicEnabled, videoSeconds, prompt, lang, refs,
       });
       await composeInMagnific({
         kind: "video",
@@ -1678,7 +1702,7 @@ export default function CutCard({
                                 (id) => id !== entity.id,
                               )
                             : [...current.characterIds, entity.id],
-                        }, characters, backgrounds))
+                        }, characters, backgrounds, scene))
                       }
                     />
                   );
@@ -1884,6 +1908,9 @@ export default function CutCard({
           */}
           <CutVideoSection
             cut={cut}
+            firstCut={scene.cuts[0]?.id === cut.id}
+            continuity={continuity}
+            continuityError={continuityError}
             videoModel={videoModel}
             magnificVideoResolution={magnificVideoResolution}
             onMagnificVideoResolutionChange={setMagnificVideoResolution}
@@ -1920,6 +1947,7 @@ export default function CutCard({
 
           <CutVideoShelf
             videos={cut.videos || []}
+            ownerName={sceneFolderName(sceneTitle, index)}
 
             onChange={(update) =>
               patchCut((current) => ({ videos: update(current.videos || []) }))

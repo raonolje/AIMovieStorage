@@ -400,6 +400,7 @@ export async function chooseStorageDirectory(startAt?: string): Promise<string |
  */
 export type ProjectAssetType =
   | "character-reference"
+  | "character-voice"
   | "character-generated"
   | "background-reference"
   | "background-generated"
@@ -948,11 +949,12 @@ export async function listOwnerFiles(options: {
  */
 export async function deleteCutFiles(
   projectName: string,
-  cut: { images?: { filePath?: string }[]; videos?: { filePath?: string }[] },
+  cut: { images?: { filePath?: string }[]; videos?: { filePath?: string; endFramePath?: string }[] },
 ): Promise<void> {
   const paths = [
     ...(cut.images || []).map((item) => item.filePath),
     ...(cut.videos || []).map((item) => item.filePath),
+    ...(cut.videos || []).map((item) => item.endFramePath),
   ].filter((path): path is string => Boolean(path));
   await Promise.all(paths.map((path) => deleteProjectMediaFile(projectName, path)));
 }

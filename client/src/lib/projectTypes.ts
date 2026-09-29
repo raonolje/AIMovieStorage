@@ -297,6 +297,11 @@ export interface Character extends PromptWorkflowState<
   build: "slim" | "average" | "athletic" | "broad";
   kind: "human" | "animal" | "creature";
   description: string;
+  /** 대사 첫 등장 때 사용할 목소리 연출 기준. 실제 음성에서 자동 추정하지 않습니다. */
+  voiceDescription?: string;
+  voiceDescriptionEn?: string;
+  /** 대표 영상에서 사람이 이 인물의 대사 구간을 골라 추출한 음성. */
+  voiceReferences?: CharacterVoiceReference[];
   refType: "none" | "upload";
   thumb: string | null;
   thumbFile: File | null;
@@ -333,6 +338,17 @@ export interface Character extends PromptWorkflowState<
   sheetLayouts?: SheetLayout[];
   /** 프로젝트 배치도의 칸에 이 인물의 어느 그림을 넣었는지 */
   sheetFills?: SheetFills;
+}
+
+export interface CharacterVoiceReference {
+  id: string;
+  operationId?: string;
+  filePath: string;
+  sourceVideoId: string;
+  sourceCutId: string;
+  startSeconds: number;
+  endSeconds: number;
+  isPrimary?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -413,14 +429,18 @@ export interface SceneVideoAsset {
    *
    * 그림 선반의 «별» 과 같은 뜻이고, 한 선반에 하나뿐입니다.
    */
-  isPrimary?: boolean;
+    isPrimary?: boolean;
+    /** 대표영상에서 추출해 저장한 마지막 프레임. 다음 컷의 첫 프레임으로 씁니다. */
+    endFramePath?: string;
 }
 
 export interface Cut {
   id: string;
   order: number;
   title: string;
-  description: string;
+    description: string;
+    /** 앞 컷 대표영상과의 관계. 순서가 바뀌면 현재 앞 컷을 다시 읽습니다. */
+    cutContinuity?: "independent" | "continue" | "same-space-new-angle";
   /** 이 컷에 나오는 인물들 */
   characterIds: string[];
   backgroundId?: string;

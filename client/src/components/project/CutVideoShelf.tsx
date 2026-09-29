@@ -12,6 +12,7 @@ import {
 } from "@/lib/mediaLibrary";
 import type { SceneVideoAsset } from "@/lib/projectTypes";
 import { useT } from "@/lib/i18n";
+import { saveVideoEndFrame } from "@/lib/videoEndFrame";
 
 /**
  * 컷에 붙은 영상들. 밖(마그니픽·Kling·Veo)에서 뽑아 온 mp4 를 두는 자리입니다.
@@ -106,10 +107,24 @@ export default function CutVideoShelf({
    * **대표를 하나만** 세웁니다. 그림 선반의 «별» 과 같은 규칙입니다 — 둘이면 어느 것이
    * 그 장면인지 알 수 없어, 스토리보드나 내보내기가 아무거나 집습니다.
    */
-  const setPrimary = (id: string) =>
-    onChange((current) =>
-      current.map((item) => ({ ...item, isPrimary: item.id === id ? !item.isPrimary : false })),
-    );
+  const setPrimary = async (id: string) => {
+    const selected = videos.find(item => item.id === id);
+    if (!selected || selected.isPrimary) {
+      onChange(current => current.map(item => ({ ...item, isPrimary: false })));
+      return;
+    }
+    let endFramePath = selected.endFramePath;
+    if (!endFramePath && selected.filePath && projectName) {
+      try {
+        endFramePath = await saveVideoEndFrame({ videoPath: selected.filePath, projectName,
+          ownerName: safeFileName(ownerName || label), stem: selected.name });
+      } catch (error) {
+        toast.error(`마지막 프레임 준비 실패: ${String(error)}`);
+      }
+    }
+    onChange(current => current.map(item => ({ ...item, isPrimary: item.id === id,
+      ...(item.id === id && endFramePath ? { endFramePath } : {}) })));
+  };
 
   /** 크게 볼 영상. 선반의 칸은 작아서 얼굴이 안 보입니다. */
   const [big, setBig] = useState<SceneVideoAsset | null>(null);
@@ -148,6 +163,7 @@ export default function CutVideoShelf({
       const deleted = await deleteProjectMediaFile(projectName, video.filePath);
       if (!deleted) toast.error(t("폴더의 파일은 지우지 못했습니다. 직접 지워 주세요."));
     }
+    if (video.endFramePath) await deleteProjectMediaFile(projectName, video.endFramePath);
   };
 
   return (
@@ -227,7 +243,7 @@ export default function CutVideoShelf({
               <button
                 type="button"
                 title={video.isPrimary ? t("대표에서 내립니다") : t("이 영상을 대표로")}
-                onClick={() => setPrimary(video.id)}
+                onClick={() => void setPrimary(video.id)}
                 className="rounded-full p-1"
                 style={{
                   background: "oklch(0 0 0 / 72%)",

@@ -154,6 +154,23 @@ beforeEach(() => {
 });
 
 describe("Magnific 데스크톱 조종의 미리보기와 실행", () => {
+  it("이어지는 컷은 앞 컷 대표영상 선택을 기다리고 @영상·끝 프레임을 실제 구성에 넣는다", async () => {
+    const { control } = await prepare();
+    const first = cut();
+    const second = { ...newCut(2), id: "next", cutContinuity: "continue" as const,
+      videoPromptEn: "Continue the dramatic action." };
+    state.draft!.scenes[0].cuts.push(second);
+    const nextRequest = { ...request, cutId: "next" };
+    await expect(control.previewControlMagnific(nextRequest)).rejects.toThrow("대표영상을 먼저 선택");
+    first.videos = [{ id: "primary", name: "앞컷_001", filePath: "/library/작품/앞컷_001.mp4",
+      endFramePath: "/library/작품/앞컷_001_마지막프레임.png", isPrimary: true }];
+    const preview = await control.previewControlMagnific(nextRequest);
+    expect(preview.prompt).toContain("@앞컷_001");
+    expect(preview.prompt).toContain("@앞컷_001_마지막프레임");
+    expect(preview.references.map(ref => ref.tag)).toEqual(["@앞컷_001", "@앞컷_001_마지막프레임"]);
+    first.videos[0].isPrimary = false;
+    await expect(control.previewControlMagnific(nextRequest)).rejects.toThrow("대표영상을 먼저 선택");
+  });
   it("인물 카드의 구성은 앱에 저장된 모델·@참조만 올리고 생성 버튼을 누르지 않는다", async () => {
     const { q, control } = await prepare();
     const character = state.draft!.characters[0];

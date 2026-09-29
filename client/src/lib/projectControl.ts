@@ -3,6 +3,7 @@ import { copyJsonWithinLimit, sameImmutableJson } from "./immutableJson";
 import { controlDetailSchema, projectControlValue, type ControlDetail } from "./controlProjection";
 import { z } from "zod";
 import { relinkCutCharacterPrompts } from "@/lib/cutCharacterLinks";
+import { ensureVoicePrompt } from "@/lib/characterVoice";
 import { relinkCharacterBlueprintPrompts } from "@/lib/characterBlueprintPrompt";
 import { BACKGROUND_BLUEPRINT_GROUPS, CHARACTER_BLUEPRINT_GROUPS } from "@/lib/blueprint";
 import { appendPromptHistory } from "@/lib/promptHistory";
@@ -39,10 +40,10 @@ const projectFields = z.object({ title: name.optional(), logline: text.optional(
   eraUnspecified: z.boolean().optional(),
 }).strict();
 const workflowFields = { referenceMode: z.enum(["none", "keep", "blend"]).optional(), analysis: text.optional(), analysisEn: text.optional(), firstReferencePromptKo: text.optional(), firstReferencePromptEn: text.optional(), firstReferenceModel: imageModel.optional() };
-const characterFields = z.object({ name: name.optional(), role: text.optional(), gender: text.optional(), description: text.optional(), heightCm: z.number().finite().min(1).max(1000).optional(), build: z.enum(["slim", "average", "athletic", "broad"]).optional(), kind: z.enum(["human", "animal", "creature"]).optional(), blueprint: characterBlueprint.optional(), promptModel: imageModel.optional(), ...workflowFields, ...prompts }).strict();
+const characterFields = z.object({ name: name.optional(), role: text.optional(), gender: text.optional(), description: text.optional(), voiceDescription: text.optional(), voiceDescriptionEn: text.optional(), heightCm: z.number().finite().min(1).max(1000).optional(), build: z.enum(["slim", "average", "athletic", "broad"]).optional(), kind: z.enum(["human", "animal", "creature"]).optional(), blueprint: characterBlueprint.optional(), promptModel: imageModel.optional(), ...workflowFields, ...prompts }).strict();
 const backgroundFields = z.object({ name: name.optional(), location: text.optional(), description: text.optional(), spaceKind: z.enum(["interior", "exterior", "mixed"]).optional(), usage: z.enum(["wall", "dome"]).optional(), panoramaSpace: roomSize.optional(), exteriorSpace: roomSize.optional(), faceMarkSourceId: id.optional(), blueprint: backgroundBlueprint.optional(), promptModel: imageModel.optional(), ...workflowFields, ...prompts }).strict();
 const sceneFields = z.object({ title: text.optional(), summary: text.optional(), storyboardPromptKo: text.optional(), storyboardPromptEn: text.optional() }).strict();
-const cutFields = z.object({ title: text.optional(), description: text.optional(), acting: text.optional(), actingEn: text.optional(), backgroundMotion: text.optional(), backgroundMotionEn: text.optional(), vfx: text.optional(), vfxEn: text.optional(), plannedSeconds: z.number().finite().positive().max(3600).optional(), characterIds: z.array(id).max(100).optional(), backgroundId: id.optional(), characterRefs: z.record(id, z.array(z.string().min(1).max(4000)).max(8)).optional(), styleTags: z.array(z.string().min(1).max(200)).max(100).optional(), techniques: z.array(z.string().min(1).max(200)).max(100).optional(), useComposition: z.boolean().optional(), useRefVideo: z.boolean().optional(), videoPromptKo: text.optional(), videoPromptEn: text.optional(), ...prompts }).strict();
+const cutFields = z.object({ cutContinuity: z.enum(["independent", "continue", "same-space-new-angle"]).optional(), title: text.optional(), description: text.optional(), acting: text.optional(), actingEn: text.optional(), backgroundMotion: text.optional(), backgroundMotionEn: text.optional(), vfx: text.optional(), vfxEn: text.optional(), plannedSeconds: z.number().finite().positive().max(3600).optional(), characterIds: z.array(id).max(100).optional(), backgroundId: id.optional(), characterRefs: z.record(id, z.array(z.string().min(1).max(4000)).max(8)).optional(), styleTags: z.array(z.string().min(1).max(200)).max(100).optional(), techniques: z.array(z.string().min(1).max(200)).max(100).optional(), useComposition: z.boolean().optional(), useRefVideo: z.boolean().optional(), videoPromptKo: text.optional(), videoPromptEn: text.optional(), ...prompts }).strict();
 const referenceOwner = z.object({ kind: z.enum(["character", "background"]), id }).strict();
 const sheetPlacement = z.object({ id, kind: z.enum(["image", "profile"]).optional(),
   x: z.number().int().min(0).max(12000), y: z.number().int().min(0).max(12000),
@@ -471,8 +472,14 @@ export function applyProjectCommands(current: ProjectDraft, commands: ProjectCom
         checkCutReferences(draft, command.fields);
         checkCutPromptLanguages(newCut(1), command.fields);
         return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => {
+          if (!scene.cuts.length && command.fields.cutContinuity && command.fields.cutContinuity !== "independent")
+            throw new ProjectControlError("invalid_continuity", "첫 컷은 앞 컷과 연결할 수 없습니다.");
           const base = newCut(scene.cuts.length + 1);
-          const next = relinkCutCharacterPrompts({ ...base, ...command.fields, id: command.id! }, draft.characters, draft.backgrounds);
+          const added = { ...base, ...command.fields, id: command.id! };
+          const next = relinkCutCharacterPrompts(added, draft.characters, draft.backgrounds,
+            { ...scene, cuts: [...scene.cuts, added] });
+          if (next.videoPromptKo?.trim()) next.videoPromptKo = ensureVoicePrompt(next.videoPromptKo, { cut: next, scenes: draft.scenes.map(item => item.id === scene.id ? { ...scene, cuts: [...scene.cuts, next] } : item), characters: draft.characters, lang: "ko" });
+          if (next.videoPromptEn?.trim()) next.videoPromptEn = ensureVoicePrompt(next.videoPromptEn, { cut: next, scenes: draft.scenes.map(item => item.id === scene.id ? { ...scene, cuts: [...scene.cuts, next] } : item), characters: draft.characters, lang: "en" });
           const recorded = recordControlPrompt(base, next, command.fields);
           const video = "videoPromptKo" in command.fields || "videoPromptEn" in command.fields
             ? withCutVideoPrompt(base, { ko: recorded.videoPromptKo || "", en: recorded.videoPromptEn || "" }, "대화 조종기") : {};
@@ -482,17 +489,27 @@ export function applyProjectCommands(current: ProjectDraft, commands: ProjectCom
         checkCutReferences(draft, command.fields);
         return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => ({ ...scene, cuts: replaceById(scene.cuts, command.id, (cut) => {
           checkCutPromptLanguages(cut, command.fields);
+          if (scene.cuts[0]?.id === cut.id && command.fields.cutContinuity && command.fields.cutContinuity !== "independent")
+            throw new ProjectControlError("invalid_continuity", "첫 컷은 앞 컷과 연결할 수 없습니다.");
           const next = { ...cut, ...command.fields };
-          // 인물을 고른 요청에만 잇습니다. 길이·대사 수정만으로 옛 컷의 잘못된 캐스팅을 확정하지 않습니다.
-          const linked = command.fields.characterIds ? relinkCutCharacterPrompts(next, draft.characters, draft.backgrounds) : next;
+          // 프롬프트·연결 방식 변경도 앱과 같은 @참조로 저장합니다. 길이·대사 수정은 기존 글을 건드리지 않습니다.
+          const needsLinks = command.fields.characterIds || "videoPromptKo" in command.fields
+            || "videoPromptEn" in command.fields || "cutContinuity" in command.fields;
+          const linked = needsLinks ? relinkCutCharacterPrompts(next, draft.characters, draft.backgrounds,
+            { ...scene, cuts: scene.cuts.map(item => item.id === cut.id ? next : item) }) : next;
+          if (linked.videoPromptKo?.trim() && needsLinks) linked.videoPromptKo = ensureVoicePrompt(linked.videoPromptKo, { cut: linked, scenes: draft.scenes.map(item => item.id === scene.id ? { ...scene, cuts: scene.cuts.map(entry => entry.id === cut.id ? linked : entry) } : item), characters: draft.characters, lang: "ko" });
+          if (linked.videoPromptEn?.trim() && needsLinks) linked.videoPromptEn = ensureVoicePrompt(linked.videoPromptEn, { cut: linked, scenes: draft.scenes.map(item => item.id === scene.id ? { ...scene, cuts: scene.cuts.map(entry => entry.id === cut.id ? linked : entry) } : item), characters: draft.characters, lang: "en" });
           const recorded = recordControlPrompt(cut, linked, command.fields);
           const video = "videoPromptKo" in command.fields || "videoPromptEn" in command.fields
             ? withCutVideoPrompt(cut, { ko: recorded.videoPromptKo || "", en: recorded.videoPromptEn || "" }, "대화 조종기") : {};
           return { ...recorded, ...video };
         }) })) };
-      case "cut.move": return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => ({
-        ...scene, cuts: moveById(scene.cuts, command.id, command.position).map((cut, order) => ({ ...cut, order: order + 1 })),
-      })) };
+      case "cut.move": return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => {
+        const moved = moveById(scene.cuts, command.id, command.position);
+        if (moved[0]?.cutContinuity && moved[0].cutContinuity !== "independent")
+          throw new ProjectControlError("invalid_continuity", "이어지는 컷을 첫 번째로 옮기려면 먼저 독립 컷으로 바꾸세요.");
+        return { ...scene, cuts: moved.map((cut, order) => ({ ...cut, order: order + 1 })) };
+      }) };
     }
   }, current);
 }

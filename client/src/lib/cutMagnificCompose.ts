@@ -8,10 +8,13 @@ import {
   cutLinkInput,
 } from "./promptPayloads";
 import { cutVideoLinkInput, magnificCutAudioReference } from "./cutVideoReferences";
+import { continuityPromptLine, relinkContinuityTags, type CutContinuity } from "./cutContinuity";
 import { heroImageOf, formatVideoSeconds } from "./cutVideoPrompt";
 import { relinkPromptText, splitLinkTail } from "./promptLinks";
 import { cutComposeLines } from "./cutComposeLines";
 import type { Background, Character, Cut } from "./projectTypes";
+import type { Scene } from "./projectTypes";
+import { ensureVoicePrompt } from "./characterVoice";
 import type { VisualAsset } from "./visualAsset";
 import type { CompositionCameraSummary } from "./composition";
 
@@ -141,7 +144,9 @@ export type CutMagnificRefs = ReturnType<typeof gatherStoredCutMagnificRefs>;
 /** 영상 참조·대표 그림·소품 문구를 화면과 조종기에서 따로 만들지 않습니다. */
 export function buildCutVideoMagnificPrompt(input: {
   cut: Cut;
+  continuity?: CutContinuity | null;
   characters: Character[];
+  scenes?: readonly Scene[];
   background?: Background;
   summary: CompositionCameraSummary;
   useComposition: boolean;
@@ -168,6 +173,7 @@ export function buildCutVideoMagnificPrompt(input: {
     input.refs;
   const ko = lang === "ko";
   const lines: string[] = [];
+  if (input.continuity) lines.push(continuityPromptLine(input.continuity, lang));
   if (useRefVideo && cut.refVideoPath)
     lines.push(
       ko
@@ -209,7 +215,7 @@ export function buildCutVideoMagnificPrompt(input: {
     );
   // 새 대표 그림이 생기면 옛 «아직 없음» 꼬리도 갱신합니다. 사용자 본문은 유지합니다.
   const body = relinkPromptText(
-    prompt.trim(),
+    input.continuity ? relinkContinuityTags(ensureVoicePrompt(prompt.trim(), { cut, scenes: input.scenes, characters, lang }), input.continuity.sourceCut, input.continuity.video) : ensureVoicePrompt(prompt.trim(), { cut, scenes: input.scenes, characters, lang }),
     cutVideoLinkInput(
       cut,
       cutLinkInput({
@@ -220,7 +226,7 @@ export function buildCutVideoMagnificPrompt(input: {
         useComposition,
         guidePath,
         backgroundPath,
-      }),
+      }), input.continuity, characters,
     ),
     lang,
   );

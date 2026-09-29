@@ -263,6 +263,7 @@ fn asset_layout(category: &str) -> (&'static str, Option<&'static str>, bool) {
     match category {
         // (윗 폴더, 아랫 폴더, 파일 이름에 ref_ 를 붙이는가)
         "character-reference" => ("character", Some("ref"), true),
+        "character-voice" => ("character", Some("voice"), false),
         "character-generated" => ("character", None, false),
         "background-reference" => ("background", Some("ref"), true),
         "background-generated" => ("background", None, false),
@@ -396,6 +397,60 @@ fn save_project_asset(request: SaveAssetRequest) -> Res<String> {
         .map_err(|e| err("파일을 쓰지 못했습니다", e))?;
 
     Ok(path.to_string_lossy().to_string())
+}
+
+/// 대표 영상에서 사용자가 지정한 한 인물의 대사 구간만 WAV로 보관합니다.
+/// 인물 식별은 자동 추측하지 않습니다. 다중 화자 영상에서는 구간을 직접 골라야 합니다.
+#[tauri::command]
+fn extract_character_voice(
+    base_directory: String,
+    project_name: String,
+    character_name: String,
+    source_path: String,
+    start_seconds: f64,
+    end_seconds: f64,
+) -> Res<String> {
+    if !start_seconds.is_finite() || !end_seconds.is_finite()
+        || start_seconds < 0.0 || end_seconds - start_seconds < 2.0
+        || end_seconds - start_seconds > 30.0
+    {
+        return Err("음성 구간은 2초 이상, 30초 이하로 지정하세요.".into());
+    }
+    if character_name.trim().is_empty() {
+        return Err("캐릭터 이름이 필요합니다.".into());
+    }
+    let root = project_root(&base_directory, &project_name);
+    let source = ensure_inside(&root, Path::new(&source_path))?;
+    let ext = source.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !["mp4", "mov", "webm", "m4v", "mkv", "avi"].contains(&ext.as_str()) {
+        return Err("프로젝트 안의 영상 파일만 음성 원본으로 쓸 수 있습니다.".into());
+    }
+    let dir = owner_dir(&base_directory, &project_name, "character-voice", &character_name);
+    ensure_dir(&dir)?;
+    let target = next_numbered_path(&dir, &format!("{}_voice", safe_name(&character_name)), "wav");
+    #[cfg(target_os = "windows")]
+    let ffmpeg = {
+        let known = Path::new(r"C:\ffmpeg\bin\ffmpeg.exe");
+        if known.is_file() { known.as_os_str().to_owned() } else { "ffmpeg.exe".into() }
+    };
+    #[cfg(not(target_os = "windows"))]
+    let ffmpeg = std::ffi::OsString::from("ffmpeg");
+    let output = std::process::Command::new(ffmpeg)
+        .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-ss"])
+        .arg(start_seconds.to_string())
+        .arg("-i").arg(&source)
+        .arg("-t").arg((end_seconds - start_seconds).to_string())
+        .args(["-vn", "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", "-y"])
+        .arg(&target)
+        .output()
+        .map_err(|e| format!("FFmpeg를 실행하지 못했습니다. FFmpeg 설치 또는 PATH를 확인하세요: {e}"))?;
+    let valid = output.status.success() && fs::metadata(&target).map(|m| m.len() > 44).unwrap_or(false);
+    if !valid {
+        let _ = fs::remove_file(&target);
+        let detail = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("음성 구간을 추출하지 못했습니다. 영상의 오디오 트랙과 구간을 확인하세요: {}", detail.trim()));
+    }
+    Ok(target.to_string_lossy().to_string())
 }
 
 /// 이미 **디스크에 있는 파일**을 프로젝트 폴더로 옮겨 담습니다.
@@ -1415,6 +1470,7 @@ pub fn run() {
             control::control_write_journal,
             choose_storage_directory,
             save_project_asset,
+            extract_character_voice,
             asset_upload::begin_project_asset_upload,
             asset_upload::append_project_asset_upload,
             asset_upload::finish_project_asset_upload,

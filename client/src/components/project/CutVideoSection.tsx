@@ -10,6 +10,7 @@ import type { Cut, GeneratedImageAsset } from "@/lib/projectTypes";
 import type { MagnificVideoResolution } from "@/lib/magnificCompose";
 import { useT } from "@/lib/i18n";
 import { musicOf } from "@/lib/compositionEdit";
+import { continuityPromptLine, relinkContinuityTags, type CutContinuity } from "@/lib/cutContinuity";
 
 /**
  * **컷을 영상으로 뽑는 칸.**
@@ -22,6 +23,9 @@ import { musicOf } from "@/lib/compositionEdit";
  */
 export default function CutVideoSection({
   cut,
+  firstCut,
+  continuity,
+  continuityError,
   videoModel,
   magnificVideoResolution,
   onMagnificVideoResolutionChange,
@@ -44,6 +48,9 @@ export default function CutVideoSection({
   sendCutVideoToMagnific,
 }: {
   cut: Cut;
+  firstCut: boolean;
+  continuity: CutContinuity | null;
+  continuityError: string;
   videoModel?: string;
   magnificVideoResolution: MagnificVideoResolution;
   onMagnificVideoResolutionChange: (value: MagnificVideoResolution) => void;
@@ -94,6 +101,16 @@ export default function CutVideoSection({
           <p className="text-[11px] font-semibold text-white">
             영상 프롬프트
           </p>
+          <label className="flex items-center gap-1 text-[10px] text-muted-foreground" data-tour="cut-video-continuity">
+            <span>{t("앞 컷 연결")}</span>
+            <select aria-label={t("앞 컷 연결")} value={cut.cutContinuity || "independent"}
+              onChange={event => patchCut({ cutContinuity: event.target.value as Cut["cutContinuity"] })}
+              className="rounded border border-white/10 bg-black/20 px-1.5 py-1 text-white">
+              <option value="independent">{t("독립 컷")}</option>
+              <option value="continue" disabled={firstCut}>{t("끝 프레임에서 이어 찍기")}</option>
+              <option value="same-space-new-angle" disabled={firstCut}>{t("같은 공간·새 구도")}</option>
+            </select>
+          </label>
           <p
             className="min-w-0 flex-1 truncate text-[10px]"
             style={{ color: "oklch(0.45 0.01 265)" }}
@@ -110,7 +127,7 @@ export default function CutVideoSection({
           <button
             type="button"
             onClick={() => void runVideoPrompt()}
-            disabled={videoBusy || !apiReady}
+            disabled={videoBusy || !apiReady || Boolean(continuityError)}
             title={
               !apiReady
                 ? "설정에서 API 키를 넣어야 씁니다. 「영상 프롬프트」 는 지금도 됩니다"
@@ -129,7 +146,7 @@ export default function CutVideoSection({
             type="button"
             onClick={applyVideoPrompt}
             data-tour="cut-video-prompt"
-            disabled={!cut.composition}
+            disabled={!cut.composition || Boolean(continuityError)}
             title={
               cut.composition
                 ? "구도의 카메라 무빙·인물·소품에서 영상 프롬프트를 만듭니다"
@@ -148,14 +165,18 @@ export default function CutVideoSection({
             인물이 같습니다 — 글만 주면 컷마다 다른 사람이 나옵니다.
             로라는 설정의 목록에서 켜 둔 것이 전부 함께 들어갑니다(멀티 로라).
           */}
+          <fieldset disabled={Boolean(continuityError)} title={continuityError || undefined} className="contents">
           <LocalGenerateButton
             kind="video"
             label="로컬 영상"
             seconds={videoSeconds}
-            firstFrame={heroImage?.filePath}
+            firstFrame={continuity?.mode === "continue" ? continuity.endFramePath : heroImage?.filePath}
             references={localVideoRefs}
             motionMask={motionMask?.filePath || undefined}
-            prompt={{ ko: cut.videoPromptKo, en: cut.videoPromptEn }}
+            prompt={{
+              ko: continuity ? `${continuityPromptLine(continuity, "ko")}\n\n${relinkContinuityTags(cut.videoPromptKo || "", continuity.sourceCut, continuity.video)}` : cut.videoPromptKo,
+              en: continuity ? `${continuityPromptLine(continuity, "en")}\n\n${relinkContinuityTags(cut.videoPromptEn || "", continuity.sourceCut, continuity.video)}` : cut.videoPromptEn,
+            }}
             projectName={projectName}
             assetType="scene-video"
             ownerName={sceneFolderName(sceneTitle, index)}
@@ -169,8 +190,14 @@ export default function CutVideoSection({
               }))
             }
           />
+          </fieldset>
 
 </div>
+        {continuityError && <p className="text-[10px] text-amber-300" role="status">{continuityError}</p>}
+        {continuity && <p className="text-[10px] text-cyan-300" role="status">
+          {t("앞 컷 {order} 대표영상 연결됨: @{name}", { order: continuity.sourceCut.order, name: continuity.video.name.replace(/\.[^.]+$/, "") })}
+          {continuity.mode === "continue" ? t(" · 마지막 프레임을 첫 프레임으로 사용") : t(" · 같은 공간에서 새 구도")}
+        </p>}
 
         {/*
           ── 구도잡기에서 뽑은 영상 고르기 ────────────────────────────

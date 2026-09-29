@@ -53,6 +53,23 @@ beforeEach(() => {
 });
 
 describe("외부 생성의 저장·취소·재전송", () => {
+  it("조종기 영상 생성은 앞 대표 선택 후 실제 영상·끝 프레임을 워커 입력에 연결한다", async () => {
+    const { q, media } = await prepare();
+    const first = draft().scenes[0].cuts[0];
+    draft().scenes[0].cuts.push({ ...newCut(2), id: "next", cutContinuity: "continue" });
+    const input = { ...request, target: { kind: "cut", id: "next" }, engine: "minimaxh3", operationId: "next-1",
+      options: { prompt: "Continue the scene", seconds: 5, reference_video_range: "first5s" } };
+    await expect(media.enqueueControlGeneration(input)).rejects.toThrow("대표영상을 먼저 선택");
+    first.videos = [{ id: "approved", name: "앞컷", filePath: "p/앞컷.mp4", isPrimary: true,
+      endFramePath: "p/앞컷_마지막프레임.png" }];
+    const accepted = await media.enqueueControlGeneration(input);
+    expect((await finish(q, accepted.jobId)).status).toBe("done");
+    expect(state.run.mock.calls[0][0].opts).toMatchObject({
+      image: "p/앞컷_마지막프레임.png",
+      references: [{ kind: "video", path: "p/앞컷.mp4" }, { kind: "image", path: "p/앞컷_마지막프레임.png" }],
+    });
+    expect(state.run.mock.calls[0][0].opts.prompt).toContain("@앞컷");
+  });
   it("조종기의 인물 그림 생성은 카드의 시트 구성을 실제 입력과 결과 기록에 잇는다", async () => {
     const { q, media } = await prepare();
     const character = draft().characters[0];

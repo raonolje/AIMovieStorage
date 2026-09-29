@@ -11,6 +11,8 @@ import { cutToggleLabel, cutTogglesEnglish } from "@/lib/cutStyle";
 import { autoRealism, isCloseUp } from "@/lib/autoRealism";
 import { buildCutPrompt } from "@/lib/cutPrompt";
 import { cutVideoSecondsOf, dedupePhrases, heroImageOf, type CutVideoPrompt, type CutVideoPromptInput } from "@/lib/cutVideoPrompt";
+import { voicePromptLines } from "@/lib/characterVoice";
+import { continuityPromptLine } from "@/lib/cutContinuity";
 import { videoRuleIdOf } from "@/lib/modelRules";
 import { appendPromptHistory, describeRunConditions } from "@/lib/promptHistory";
 import type { PromptLinkInput } from "@/lib/promptLinks";
@@ -896,6 +898,8 @@ export function characterActingOf(characters: Character[]): Record<string, strin
 
 export interface CutVideoSkeletonInput {
   cut: Cut;
+  scenes?: readonly import("./projectTypes").Scene[];
+  continuity?: import("./cutContinuity").CutContinuity | null;
   /** 프로젝트 인물 전부 — 구도에 선 사람을 이름으로 부르는 데 씁니다. */
   characters: Character[];
   /** 이 컷에 나오는 인물들. */
@@ -928,6 +932,9 @@ export function cutVideoSkeletonInput(input: CutVideoSkeletonInput): CutVideoPro
     manual: tags,
   });
   return {
+    voiceLinesKo: voicePromptLines({ cut, scenes: input.scenes, characters, lang: "ko" }),
+    voiceLinesEn: voicePromptLines({ cut, scenes: input.scenes, characters, lang: "en" }),
+    continuity: input.continuity,
     title: cut.title,
     description: cut.description,
     // 구도를 끄면 카메라·자리도 글에서 뺍니다 — 안 올린 배치도를 설명해 봐야 생성기가 맞출 것이 없습니다.
@@ -1015,6 +1022,14 @@ export function cutVideoRequestPayload(input: {
     aspect: skeletonInput.aspect ?? null,
     modelId: skeletonInput.modelId ?? null,
     hasRefVideo: skeletonInput.hasRefVideo ? "yes" : "no",
+    previousCut: skeletonInput.continuity ? {
+      mode: skeletonInput.continuity.mode,
+      video: `@${fileStemOf(skeletonInput.continuity.videoPath)}`,
+      endFrame: skeletonInput.continuity.endFramePath ? `@${fileStemOf(skeletonInput.continuity.endFramePath)}` : null,
+      instructionKo: continuityPromptLine(skeletonInput.continuity, "ko"),
+      instructionEn: continuityPromptLine(skeletonInput.continuity, "en"),
+    } : null,
+    voiceRules: { ko: skeletonInput.voiceLinesKo || [], en: skeletonInput.voiceLinesEn || [] },
     hasRepresentativeImage: skeletonInput.hasRepresentativeImage ? "yes" : "no",
     style: tags.map(cutToggleLabel),
     lookEn: skeletonInput.lookEn || null,

@@ -40,6 +40,22 @@ function gate() { let resolve!: () => void; const promise = new Promise<void>((d
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("프로젝트 대화 조종", () => {
+  it("조종기에서 영상 프롬프트를 직접 고쳐도 앞 컷 대표영상과 끝 프레임의 @태그를 저장한다", async () => {
+    const api = await import("./projectControl");
+    current().scenes = [{ ...newScene(), id: "scene", cuts: [
+      { ...newCut(1), id: "first", videos: [{ id: "movie", name: "앞영상", filePath: "C:/project/앞영상.mp4",
+        endFramePath: "C:/project/앞영상_마지막.png", isPrimary: true }] },
+      { ...newCut(2), id: "next", cutContinuity: "continue" },
+    ] }];
+    const first = await api.getProjectSnapshot("p");
+    await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "cut.update", sceneId: "scene", id: "next", fields: {
+        videoPromptKo: "앞 컷의 행동을 이어간다.", videoPromptEn: "Continue the action.",
+      } },
+    ] });
+    expect(current().scenes[0].cuts[1].videoPromptKo).toContain("앞 컷 연결: 대표영상 @앞영상");
+    expect(current().scenes[0].cuts[1].videoPromptEn).toContain("@앞영상_마지막");
+  });
   it("공용 시트 배치도와 캐릭터별 이미지 채우기를 앱 저장 형식으로 나눈다", async () => {
     const api = await import("./projectControl");
     current().characters = [{ ...newCharacter(), id: "actor", name: "서아", generatedImages: [

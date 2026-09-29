@@ -5,6 +5,7 @@ const mock = vi.hoisted(() => ({
   importFile: vi.fn(),
   write: vi.fn(),
   revision: "r1",
+  endFrame: vi.fn(),
 }));
 vi.mock("./mediaLibrary", () => ({
   assetSrc: (path: string) => `asset://${path}`,
@@ -27,6 +28,7 @@ vi.mock("./projectWrite", () => ({
   writeProjectAndConfirm: mock.write,
 }));
 vi.mock("./projectTypes", () => ({ uid: () => "new-asset" }));
+vi.mock("./videoEndFrame", () => ({ saveVideoEndFrame: mock.endFrame }));
 
 import { registerControlMedia, setControlAssetPrimary } from "./controlAssetRegistration";
 
@@ -34,6 +36,7 @@ beforeEach(() => {
   mock.draft = { title: "Test", characters: [], backgrounds: [], scenes: [{ cuts: [{ id: "cut-1", images: [], videos: [] }] }] };
   mock.revision = "r1";
   mock.importFile.mockReset().mockResolvedValue({ path: "C:/project/result.png", name: "result" });
+  mock.endFrame.mockReset().mockResolvedValue("C:/project/result_마지막프레임.png");
   mock.write.mockReset().mockImplementation(async (_id: string, update: (draft: unknown) => object) => {
     mock.draft = { ...mock.draft, ...update(mock.draft) };
     return { persisted: true };
@@ -41,6 +44,18 @@ beforeEach(() => {
 });
 
 describe("chat asset registration", () => {
+  it("영상 후보는 자동 대표가 되지 않고 명시 선택 때 마지막 프레임을 함께 저장한다", async () => {
+    mock.importFile.mockResolvedValue({ path: "C:/project/result.mp4", name: "result" });
+    const target = { kind: "cut", id: "cut-1" };
+    const added = await registerControlMedia({ projectId: "p", expectedRevision: "r1", operationId: "movie-1",
+      target, sourcePath: "C:/chat/result.mp4" });
+    expect(added).toMatchObject({ primary: false });
+    expect(mock.endFrame).not.toHaveBeenCalled();
+    await setControlAssetPrimary({ projectId: "p", expectedRevision: "r1", target, assetId: "new-asset" });
+    expect(mock.draft.scenes[0].cuts[0].videos[0]).toMatchObject({ isPrimary: true,
+      endFramePath: "C:/project/result_마지막프레임.png" });
+    expect(mock.endFrame).toHaveBeenCalledOnce();
+  });
   it("copies a candidate once, stores its prompt, and keeps a single representative", async () => {
     const request = { projectId: "p", expectedRevision: "r1", operationId: "op-1",
       target: { kind: "cut", id: "cut-1" }, sourcePath: "C:/chat/result.png", promptEn: "concert wide shot" };

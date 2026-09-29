@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newCut } from "./projectTypes";
+import { newCharacter, newCut } from "./projectTypes";
 import { cutVideoLinkInput, magnificCutVideoReferences } from "./cutVideoReferences";
 import { relinkPromptText } from "./promptLinks";
 
@@ -48,5 +48,16 @@ describe("Magnific 컷 영상 참조", () => {
     expect(removed).not.toContain("Optional individual sheets");
     expect(removed).not.toContain("representative image");
     expect(removed).toContain("Not yet generated: Mina / Yuna / Harin / Jiyu");
+  });
+
+  it("인물 음성 @태그를 이미지 재연결에서 지우지 않는다", () => {
+    const character = { ...newCharacter(), id: "voice-person", name: "Voice QA", voiceReferences: [{
+      id: "voice-1", filePath: "C:/project/character/Voice QA/voice/Voice QA_voice_001.wav",
+      sourceCutId: "cut-1", sourceVideoId: "video-1", startSeconds: 0, endSeconds: 3, isPrimary: true,
+    }] };
+    const shot = { ...newCut(1), characterIds: [character.id] };
+    const link = cutVideoLinkInput(shot, { people: [{ name: character.name, paths: [] }] }, null, [character]);
+    const prompt = "Use @Voice QA_voice_001 as the voice reference for Voice QA's dialogue.";
+    expect(relinkPromptText(prompt, link, "en")).toContain("@Voice QA_voice_001");
   });
 });

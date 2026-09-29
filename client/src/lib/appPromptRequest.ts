@@ -4,6 +4,8 @@ import { summarizeCompositionCamera } from "@/lib/composition";
 import { buildCutPrompt } from "@/lib/cutPrompt";
 import { buildCutVideoPrompt } from "@/lib/cutVideoPrompt";
 import { cutVideoLinkInput } from "@/lib/cutVideoReferences";
+import { ensureVoicePrompt } from "@/lib/characterVoice";
+import { relinkContinuityTags, resolveCutContinuity } from "@/lib/cutContinuity";
 import { projectContextOf } from "@/lib/projectContext";
 import { relinkPromptText } from "@/lib/promptLinks";
 import {
@@ -110,7 +112,8 @@ export function appPromptRequest(draft: ProjectDraft, target: AppPromptTarget): 
   };
   const useRefVideo = cut.useRefVideo !== false && Boolean(cut.refVideoPath);
   const skeletonInput = cutVideoSkeletonInput({
-    cut, characters: draft.characters, cutCharacters, background, context,
+    cut, scenes: draft.scenes, characters: draft.characters, cutCharacters, background, context,
+    continuity: resolveCutContinuity(scene, cut),
     useComposition, useRefVideo, aspect: draft.aspect?.video || draft.aspect?.image,
     videoModel: draft.magnific?.videoModel,
   });
@@ -167,10 +170,12 @@ export function applyAppPromptResult(draft: ProjectDraft, target: AppPromptTarge
           useComposition, ...cutLinkPaths(cut, background, useComposition),
         });
         if (target.kind === "cutVideo") {
-          const videoLink = cutVideoLinkInput(cut, link);
+          const continuity = resolveCutContinuity(scene, cut);
+          const videoLink = cutVideoLinkInput(cut, link, continuity, draft.characters);
+          const source = (text: string) => continuity ? relinkContinuityTags(text, continuity.sourceCut, continuity.video) : text;
           return { ...cut, ...withCutVideoPrompt(cut, {
-            ko: relinkPromptText(result.ko, videoLink, "ko"),
-            en: relinkPromptText(result.en, videoLink, "en"),
+            ko: ensureVoicePrompt(relinkPromptText(source(result.ko), videoLink, "ko"), { cut, scenes: draft.scenes, characters: draft.characters, lang: "ko" }),
+            en: ensureVoicePrompt(relinkPromptText(source(result.en), videoLink, "en"), { cut, scenes: draft.scenes, characters: draft.characters, lang: "en" }),
           }, "대화 조종기 · 프롬프트 작성") };
         }
         const linked = {

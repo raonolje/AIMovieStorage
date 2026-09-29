@@ -260,6 +260,8 @@ export async function borrowCards(request: BorrowRequest): Promise<BorrowResult>
         고른 그림» 만 가져오고, 변형은 이쪽에서 새로 만듭니다.
       */
       references: [],
+      // 음성도 원본 프로젝트의 파일입니다. 이 작품에서 새 대표 영상으로 다시 추출합니다.
+      voiceReferences: [],
       variations,
       /*
         **저쪽 작품의 파일을 가리키는 칸은 전부 비웁니다.**

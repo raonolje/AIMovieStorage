@@ -62,7 +62,7 @@ function ownerOf(filePath: string | undefined, top: string): string {
   if (!filePath) return "";
   const parts = filePath.split(/[\\/]/).filter(Boolean);
   let index = parts.length - 2;
-  if (parts[index] === "ref" || parts[index] === SIX_FACES_DIR) index -= 1;
+  if (parts[index] === "ref" || parts[index] === "voice" || parts[index] === SIX_FACES_DIR) index -= 1;
   if (index < 1) return "";
   return parts[index - 1] === top ? parts[index] || "" : "";
 }
@@ -80,6 +80,7 @@ interface Owner {
 }
 
 type ImageBag = {
+  voiceReferences?: { filePath?: string }[];
   references?: { filePath?: string }[];
   generatedImages?: { filePath?: string }[];
   variations?: ImageBag[];
@@ -95,6 +96,7 @@ type ImageBag = {
  */
 function imagesOf(entity: ImageBag): { filePath?: string }[] {
   return [
+    ...(entity.voiceReferences || []),
     ...(entity.references || []),
     ...(entity.generatedImages || []),
     ...(entity.variations || []).flatMap(imagesOf),
@@ -382,6 +384,7 @@ export function applyMovedPaths(draft: ProjectDraft, moved: Map<string, string>)
 
   type Image = { filePath?: string; name?: string; faceSet?: string };
   type Bag = {
+    voiceReferences?: Image[];
     references?: Image[];
     generatedImages?: Image[];
     variations?: Bag[];
@@ -411,6 +414,7 @@ export function applyMovedPaths(draft: ProjectDraft, moved: Map<string, string>)
     const bag = entity as Bag;
     return {
       ...entity,
+      ...(bag.voiceReferences ? { voiceReferences: bag.voiceReferences.map(follow) } : {}),
       references: (bag.references || []).map(follow),
       generatedImages: (bag.generatedImages || []).map(follow),
       ...(bag.variations ? { variations: bag.variations.map((item) => walk(item)) } : {}),

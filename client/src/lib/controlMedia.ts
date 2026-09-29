@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { continuityPromptLine, relinkContinuityTags, resolveCutContinuity } from "./cutContinuity";
 import { mediaTargetSchema } from "./controlMediaTargetSchema";
 export { mediaTargetSchema } from "./controlMediaTargetSchema";
 import { relinkCharacterBlueprintPrompts } from "./characterBlueprintPrompt";
@@ -145,6 +146,7 @@ export function listControlAssets(projectId: string): ControlAsset[] {
       "guideImagePath",
       "plateImagePath",
       "refVideoPath",
+      "endFramePath",
       "coverPath",
     ]) {
       if (typeof entry[field] === "string") {
@@ -232,9 +234,9 @@ export async function attachControlMediaResult(
   const outcome = await writeProjectAndConfirm(projectId, (current) => {
     controlMediaTarget(current, target);
     // 외부 생성 완료 뒤 앱이 재시작되어도 같은 결과 파일을 두 번 등록하지 않습니다.
-    const currentAssets = target.kind === "cut"
+    const currentAssets: { id: string; filePath?: string }[] = target.kind === "cut"
       ? current.scenes.flatMap(scene => scene.cuts).filter(cut => cut.id === target.id)
-          .flatMap(cut => video ? cut.videos : cut.images)
+          .flatMap(cut => video ? cut.videos.map(item => ({ id: item.id, filePath: item.filePath })) : cut.images.map(item => ({ id: item.id, filePath: item.filePath })))
       : (target.kind === "character" ? current.characters : current.backgrounds)
           .filter(item => item.id === target.id).flatMap(item => item.generatedImages);
     const existing = currentAssets.find(item => item.filePath === path);
@@ -295,12 +297,25 @@ function validateGeneration(raw: unknown) {
     throw new Error("이 명령은 이미지와 영상 엔진용입니다.");
   if (engine.kind === "video" && input.target.kind !== "cut")
     throw new Error("영상 결과는 컷에 붙입니다.");
+  const continuity = engine.kind === "video" && input.target.kind === "cut"
+    ? (() => { const scene = draft.scenes.find(item => item.cuts.some(cut => cut.id === input.target.id));
+      const cut = scene?.cuts.find(item => item.id === input.target.id);
+      return scene && cut ? resolveCutContinuity(scene, cut) : null; })()
+    : null;
   if (input.imageAssetId) assetOf(input.projectId, input.imageAssetId, "image");
   if (engine.kind === "image" && input.imageAssetId)
     throw new Error("이 로컬 그림 엔진은 기존 이미지 편집을 지원하지 않습니다. 인물 얼굴을 유지하려면 참조 편집 결과를 등록해 주세요.");
   if (input.motionMaskAssetId)
     assetOf(input.projectId, input.motionMaskAssetId, "image");
-  const referenceAssets = input.referenceAssetIds?.map((assetId) => assetOf(input.projectId, assetId));
+  const referenceAssets = input.referenceAssetIds?.map((assetId) => assetOf(input.projectId, assetId)) || [];
+  const referenceVideoRange = input.options.reference_video_range ?? (continuity && input.engine === "minimaxh3" ? "full" : undefined);
+  if (continuity && input.engine === "minimaxh3") {
+    if (!referenceAssets.some(asset => asset.path === continuity.videoPath))
+      referenceAssets.unshift(assetOf(input.projectId, continuity.video.id, "video"));
+    if (continuity.mode === "continue" && continuity.endFramePath && !referenceAssets.some(asset => asset.path === continuity.endFramePath))
+      referenceAssets.splice(1, 0, assetOf(input.projectId, `${continuity.video.id}:endFramePath`, "image"));
+  }
+  if (referenceAssets.length > 12) throw new Error("앞 컷 연결을 포함한 레퍼런스는 최대 12개입니다. 다른 참조를 줄여 주세요.");
   referenceAssets?.forEach((asset) => {
     if (asset.kind === "other")
       throw new Error("이 에셋은 생성 레퍼런스로 쓸 수 없습니다.");
@@ -323,14 +338,14 @@ function validateGeneration(raw: unknown) {
     })() } : {}),
     seconds: input.options.seconds,
     references: referenceAssets,
-    reference_video_range: input.options.reference_video_range,
+    reference_video_range: referenceVideoRange,
   });
   if (!controlCheck.ok) throw new Error(controlCheck.message);
   if (input.poseSource) {
     const source = mocapSourcesOf(projectFolderName(input.projectId, draft.title)).find(item => item.id === input.poseSource!.sourceId);
     if (!source?.resultPath) throw new Error("현재 프로젝트에 저장된 모캡 분석 결과가 없습니다.");
   }
-  return { input, draft };
+  return { input, draft, continuity, referenceAssets, referenceVideoRange };
 }
 export async function enqueueControlGeneration(raw: unknown) {
   const { input, draft } = validateGeneration(raw);
@@ -365,7 +380,7 @@ export async function enqueueControlUpscale(raw: unknown) {
 }
 registerTaskRunner("control.generate", async (raw, report, task) => {
   if (isStopping(task.id)) return;
-  const { input, draft } = validateGeneration(raw);
+  const { input, draft, continuity, referenceAssets, referenceVideoRange } = validateGeneration(raw);
   const target = controlMediaTarget(draft, input.target);
   const kind = LOCAL_ENGINE_CATALOG[input.engine].kind;
   if (kind !== "image" && kind !== "video")
@@ -377,8 +392,9 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
   const sheetPrompt = character
     ? relinkCharacterBlueprintPrompts({ ...character, promptEn: input.options.prompt }).promptEn
     : input.options.prompt;
-  const references = input.referenceAssetIds
-    ?.map((id) => assetOf(input.projectId, id))
+  const generationPrompt = continuity
+    ? `${continuityPromptLine(continuity, "en")}\n\n${relinkContinuityTags(sheetPrompt, continuity.sourceCut, continuity.video)}` : sheetPrompt;
+  const references = referenceAssets
     .map((asset) => {
       if (asset.kind === "other")
         throw new Error("이 에셋은 생성 레퍼런스로 쓸 수 없습니다.");
@@ -421,15 +437,16 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
     assetType: kind === "video" ? "scene-video" : target.assetType,
     opts: {
       ...input.options,
-      prompt: withLoraTriggers(sheetPrompt, loras),
+      ...(referenceVideoRange ? { reference_video_range: referenceVideoRange } : {}),
+      prompt: withLoraTriggers(generationPrompt, loras),
       negative: input.options.negative ?? character?.negativeEn,
       loras,
       control,
       structure_control: structureControl,
       references,
-      image: input.imageAssetId
+      image: (continuity?.mode === "continue" ? continuity.endFramePath : undefined) ?? (input.imageAssetId
         ? assetOf(input.projectId, input.imageAssetId, "image").path
-        : undefined,
+        : undefined),
       motion_mask: input.motionMaskAssetId
         ? assetOf(input.projectId, input.motionMaskAssetId, "image").path
         : undefined,

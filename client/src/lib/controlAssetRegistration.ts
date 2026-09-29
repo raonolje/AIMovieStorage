@@ -5,6 +5,7 @@ import { checkKoreanPrompt, getProjectSnapshot, ProjectControlError } from "./pr
 import { projectFolderName } from "./localProjectStore";
 import { readProject, writeProjectAndConfirm } from "./projectWrite";
 import { uid, type GeneratedImageAsset, type SceneVideoAsset } from "./projectTypes";
+import { saveVideoEndFrame } from "./videoEndFrame";
 import { appendPromptHistory } from "./promptHistory";
 import { withCutVideoPrompt } from "./cutVideoPromptHistory";
 
@@ -81,16 +82,19 @@ export async function registerControlMedia(raw: unknown) {
   if (latest.revision !== input.expectedRevision)
     throw new ProjectControlError("revision_conflict", "파일 복사 중 프로젝트가 바뀌었습니다. 복사된 파일을 확인하고 최신 상태에서 다시 요청하세요.", { actualRevision: latest.revision, copiedPath: imported.path });
   const assetId = uid();
+  const registeredEndFrame = video && input.makePrimary
+    ? await saveVideoEndFrame({ videoPath: imported.path, projectName,
+        ownerName: destination.ownerName, stem: imported.name }) : undefined;
   const provenance = { importOperationId: input.operationId, importSourcePath: input.sourcePath,
     promptKo: input.promptKo, promptEn: input.promptEn };
   const outcome = await writeProjectAndConfirm(input.projectId, current => {
     controlMediaTarget(current, input.target);
     const assets = shelf(current, input.target, video);
-    const primary = input.makePrimary ?? !assets.length;
+    const primary = input.makePrimary ?? (video ? false : !assets.length);
     const image: GeneratedImageAsset = { id: assetId, name: imported.name, filePath: imported.path,
       thumb: assetSrc(imported.path), file: null, isPrimary: primary, ...provenance };
     const movie: SceneVideoAsset = { id: assetId, name: imported.name, filePath: imported.path,
-      isPrimary: primary, ...provenance };
+      isPrimary: primary, endFramePath: registeredEndFrame, ...provenance };
     if (input.target.kind === "cut") return { ...current, scenes: current.scenes.map(scene => ({ ...scene,
       cuts: scene.cuts.map(cut => cut.id !== input.target.id ? cut : video
         ? { ...cut, videos: [...cut.videos.map(item => primary ? { ...item, isPrimary: false } : item), movie],
@@ -110,7 +114,7 @@ export async function registerControlMedia(raw: unknown) {
   });
   if (!outcome.persisted) throw new ProjectControlError("save_failed", "파일은 복사했지만 프로젝트 등록을 확인하지 못했습니다.", { copiedPath: imported.path });
   return { assetId, path: imported.path, reused: false, persisted: true,
-    cardPromptUpdated: updateCardPrompt, primary: input.makePrimary ?? !shelf(draft, input.target, video).length };
+    cardPromptUpdated: updateCardPrompt, primary: input.makePrimary ?? (video ? false : !shelf(draft, input.target, video).length) };
 }
 
 /** 선반마다 대표 한 장만 남깁니다. */
@@ -125,8 +129,16 @@ export async function setControlAssetPrimary(raw: unknown) {
     .find(cut => cut.id === input.target.id)?.videos.some(item => item.id === input.assetId) === true;
   if (!shelf(draft, input.target, video).some(item => item.id === input.assetId))
     throw new ProjectControlError("asset_not_found", "해당 대상의 이미지 또는 영상을 찾지 못했습니다.");
+  const selected = video && input.target.kind === "cut"
+    ? draft.scenes.flatMap(scene => scene.cuts).find(cut => cut.id === input.target.id)?.videos.find(item => item.id === input.assetId)
+    : undefined;
+  const target = controlMediaTarget(draft, input.target);
+  const endFramePath = selected?.filePath && !selected.endFramePath
+    ? await saveVideoEndFrame({ videoPath: selected.filePath, projectName: projectFolderName(input.projectId, draft.title),
+        ownerName: target.ownerName, stem: selected.name }) : selected?.endFramePath;
   const outcome = await writeProjectAndConfirm(input.projectId, current => {
-    const select = <T extends { id: string; isPrimary?: boolean }>(items: T[]) => items.map(item => ({ ...item, isPrimary: item.id === input.assetId }));
+    const select = <T extends { id: string; isPrimary?: boolean; endFramePath?: string }>(items: T[]) => items.map(item => ({ ...item,
+      isPrimary: item.id === input.assetId, ...(item.id === input.assetId && endFramePath ? { endFramePath } : {}) }));
     if (input.target.kind === "cut") return { ...current, scenes: current.scenes.map(scene => ({ ...scene,
       cuts: scene.cuts.map(cut => cut.id !== input.target.id ? cut : video
         ? { ...cut, videos: select(cut.videos) } : { ...cut, images: select(cut.images) }) })) };

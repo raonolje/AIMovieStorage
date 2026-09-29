@@ -128,6 +128,7 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
     const composition = await import("./compositionControl");
     const media = await import("./controlMedia");
     const registration = await import("./controlAssetRegistration");
+    const voice = await import("./controlVoice");
     const mocap = await import("./controlMocap");
     const applyMocap = await import("./compositionMocapControl");
     const exportVideo = await import("./compositionVideoExport");
@@ -144,6 +145,7 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
       ["composition_apply", composition.compositionApplyRequestSchema], ["composition_commit", composition.compositionSessionRequestSchema],
       ["media_generate", media.generateMediaSchema], ["media_upscale", media.upscaleMediaSchema],
       ["media_register", registration.mediaRegisterSchema], ["asset_set_primary", registration.assetSetPrimarySchema],
+      ["voice_extract", voice.voiceExtractSchema], ["voice_select", voice.voiceSelectSchema],
       ["mocap_analyze", mocap.mocapAnalyzeSchema], ["mocap_track_hands", mocap.mocapHandsSchema],
       ["mocap_result", mocap.mocapResultSchema],
       ["composition_apply_mocap", applyMocap.compositionApplyMocapSchema],

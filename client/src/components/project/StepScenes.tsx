@@ -334,6 +334,8 @@ function SceneCard({
               key={cut.id}
               tutorialOpen={cut.id === tutorialCutId}
               cut={cut}
+              scene={scene}
+              scenes={draft.scenes}
               index={index}
               sceneTitle={scene.title}
               sceneSummary={scene.summary}

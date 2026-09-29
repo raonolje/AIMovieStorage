@@ -15,6 +15,7 @@ import { musicOf } from "./compositionEdit";
 import { targetModelOf } from "./modelRules";
 import { cutVideoSecondsOf } from "./cutVideoPrompt";
 import { magnificCutVideoReferences } from "./cutVideoReferences";
+import { resolveCutContinuity } from "./cutContinuity";
 import {
   gatherStoredCutMagnificRefs,
   buildCutImageMagnificPrompt,
@@ -229,6 +230,7 @@ export async function previewControlMagnific(raw: unknown) {
     cut.useComposition !== false &&
     Boolean(cut.composition || cut.guideImage || cut.guideImagePath);
   const useRefVideo = cut.useRefVideo !== false && Boolean(cut.refVideoPath);
+  const continuity = request.kind === "video" ? resolveCutContinuity(scene, cut) : null;
   // 미리보기에서 data URL을 파일로 쓰거나 구도 저장을 실행하면 read-only 계약이 깨집니다.
   if (
     useComposition &&
@@ -285,7 +287,7 @@ export async function previewControlMagnific(raw: unknown) {
   const musicEnabled = request.kind === "video" && (request.musicEnabled ?? Boolean(cut.composition && musicOf(cut.composition)));
   const referencePaths =
     request.kind === "video"
-      ? magnificCutVideoReferences(cut, refs.references, useRefVideo, musicEnabled)
+      ? magnificCutVideoReferences(cut, refs.references, useRefVideo, musicEnabled, continuity, draft.characters)
       : refs.references;
   checkPaths(referencePaths, baseDirectory, projectFolder);
   if (request.promptMode === "exact") {
@@ -308,7 +310,9 @@ export async function previewControlMagnific(raw: unknown) {
         : request.kind === "video"
           ? buildCutVideoMagnificPrompt({
               cut,
+              continuity,
               characters: draft.characters,
+              scenes: draft.scenes,
               background,
               summary: summarizeCompositionCamera(cut.composition, {
                 heightsCm: Object.fromEntries(

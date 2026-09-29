@@ -7,6 +7,7 @@ import { modelRuleOf, negativeStyleOf, speaksDialogue } from "@/lib/modelRules";
 import { shapeDialogue } from "@/lib/dialogueShape";
 import { plainify } from "@/lib/naturalPrompt";
 import type { Cut, GeneratedImageAsset } from "@/lib/projectTypes";
+import { continuityPromptLine, type CutContinuity } from "@/lib/cutContinuity";
 
 /**
  * 컷 하나를 **영상으로** 뽑는 프롬프트.
@@ -26,6 +27,10 @@ import type { Cut, GeneratedImageAsset } from "@/lib/projectTypes";
  * «그 움직임을 따르되 사람과 재질은 이렇게» 쪽으로 비켜섭니다.
  */
 export interface CutVideoPromptInput {
+  voiceLinesKo?: string[];
+  voiceLinesEn?: string[];
+  /** 바로 앞 컷의 대표영상. API·조종기·카드가 같은 규칙으로 받습니다. */
+  continuity?: CutContinuity | null;
   /** 대사·연기 지시(`Cut.acting`). 있으면 효과보다 앞에 실립니다. */
   acting?: string;
   /**
@@ -190,6 +195,12 @@ export function buildCutVideoPrompt(
     ko.push(what);
     en.push(what);
   }
+  if (input.continuity) {
+    ko.push(continuityPromptLine(input.continuity, "ko"));
+    en.push(continuityPromptLine(input.continuity, "en"));
+  }
+  ko.push(...(input.voiceLinesKo || []));
+  en.push(...(input.voiceLinesEn || []));
 
   const appearanceKo = input.hasRepresentativeImage ? "대표 그림과 실제로 첨부된 개별 인물 시트" : "인물 시트";
   const appearanceEn = input.hasRepresentativeImage ? "representative image and any individual character sheets actually attached" : "character sheets";
