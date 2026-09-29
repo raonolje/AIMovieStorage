@@ -1,11 +1,11 @@
 ---
 name: aimoviestorage-control
-description: Control AIMovieStorage from Codex to create or continue film and music-video projects, including Korean requests such as "사용자올제 국호 프로젝트 만들어줘"; register prompts, images, and videos in the app.
+description: Control AIMovieStorage from Codex to create or continue film and music-video projects, including Korean requests such as "라온올제 국호 프로젝트 만들어줘"; register prompts, images, and videos in the app.
 ---
 
 # AIMovieStorage project work
 
-Use this skill when the user wants to create or continue an AIMovieStorage drama, music video, scene, or shot from a Codex chat. The short Korean request "사용자올제 <이름> 프로젝트 만들어줘" means to work in the AIMovieStorage project named <이름>; "이어줘" means to continue it. First inspect the app and continue an existing matching project instead of creating a duplicate. Ask which project only if the app lists several plausible matches and the choice changes the work.
+Use this skill when the user wants to create or continue an AIMovieStorage drama, music video, scene, or shot from a Codex chat. The short Korean request "라온올제 <이름> 프로젝트 만들어줘" means to work in the AIMovieStorage project named <이름>; "이어줘" means to continue it. First inspect the app and continue an existing matching project instead of creating a duplicate. Ask which project only if the app lists several plausible matches and the choice changes the work.
 
 ## Connect and inspect
 
@@ -13,7 +13,7 @@ The desktop app must be running with **Settings → 대화로 앱 조종하기 �
 
 Start each work session with `projects_list`, then `project_get` for the chosen project. Read current IDs, values, and revision before editing. After the user edits in the app, read `project_changes` or `composition_changes` since the last revision; if history is incomplete, get a fresh full snapshot. Incorporate those edits instead of replaying stale commands. Pass the current `expectedRevision` to writes. A revision conflict means read again and re-plan, not blind retry.
 
-Before generating images or videos, read `creation_options` for the project's actual app routes and selected models. If the user has not chosen a model or route, ask once for the image and video choices that the work needs; do not ask again for every cut. Offer local generation, the app's Magnific «구성», and configured ComfyUI only where available. If the user says to decide everything, choose from the app's current settings and task needs, then state which model and route you chose. A prior choice persists for this project until the user changes it. Do not infer lower cost or better quality without a measured comparison.
+Before generating images or videos, read `creation_options` for the project's actual app routes and selected models. If the user has not chosen a model or route, ask once for the image and video choices that the work needs; do not ask again for every cut. Offer local generation, the app's Magnific «구성», and configured ComfyUI only where available. If the user says to decide everything, choose from the app's current settings and task needs, then state which model and route you chose. Save an image model on each relevant character/background with `project_update` (`character.update`/`background.update`, `fields.promptModel`); save a video model with `project.update`, `fields.videoModel`. Read the new revision back before `prompt_prepare` or Magnific composition, so the app's prompt rules and generator use that choice. A prior choice persists for this project until the user changes it. For local generation, pass the chosen `engine` to `media_generate`; for ComfyUI, select an actual configured workflow. Do not infer lower cost or better quality without a measured comparison.
 
 ## Build and verify
 

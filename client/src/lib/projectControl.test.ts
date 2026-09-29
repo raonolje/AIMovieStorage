@@ -40,6 +40,23 @@ function gate() { let resolve!: () => void; const promise = new Promise<void>((d
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("프로젝트 대화 조종", () => {
+  it("선택한 이미지·영상 모델을 앱 카드와 프로젝트 설정에 저장한다", async () => {
+    const api = await import("./projectControl");
+    current().characters = [{ ...newCharacter(), id: "c1", name: "서아" }];
+    const first = await api.getProjectSnapshot("p");
+    const result = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "project.update", fields: { videoModel: "seedance-2.5" } },
+      { type: "character.update", id: "c1", fields: { promptModel: "gpt-image" } },
+      { type: "background.add", id: "b1", fields: { name: "무대", promptModel: "nano-banana" } },
+    ] });
+    expect(result.persisted).toBe(true);
+    expect(current().magnific?.videoModel).toBe("seedance-2.5");
+    expect(current().characters[0].promptModel).toBe("gpt-image");
+    expect(current().backgrounds[0].promptModel).toBe("nano-banana");
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: result.revision, commands: [
+      { type: "character.update", id: "c1", fields: { promptModel: "unknown-image" } },
+    ] })).rejects.toMatchObject({ code: "invalid_request" });
+  });
   it("앱 요청문으로 받은 답을 조종기로 적용하면 이전 판과 새 판을 같은 이력에 남긴다", async () => {
     const api = await import("./projectControl");
     current().characters = [{ ...newCharacter(), id: "c1", name: "서진우", promptKo: "기존 한글 프롬프트", promptEn: "previous English prompt" }];

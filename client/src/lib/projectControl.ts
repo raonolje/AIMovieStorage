@@ -9,6 +9,8 @@ import { appendPromptHistory } from "@/lib/promptHistory";
 import { withStoryboardPrompt } from "@/lib/storyboardPromptHistory";
 import { applyAppPromptResult } from "@/lib/appPromptRequest";
 import { withCutVideoPrompt } from "@/lib/cutVideoPromptHistory";
+import { IMAGE_ONLY_MODELS } from "@/lib/promptLibrary";
+import { targetModelOf } from "@/lib/modelRules";
 import { loadProjects, listLocalProjects, getLocalProject, saveLocalProjectAndConfirm } from "@/lib/localProjectStore";
 import { readProject, writeProjectAndConfirm } from "@/lib/projectWrite";
 import { newProjectDraft, newCharacter, newBackground, newScene, newCut, uid, type ProjectDraft, type Character, type Background } from "@/lib/projectTypes";
@@ -19,9 +21,11 @@ const name = z.string().trim().min(1).max(300);
 const prompts = { promptKo: text.optional(), promptEn: text.optional(), negativeKo: text.optional(), negativeEn: text.optional() };
 const characterBlueprintIds = new Set(CHARACTER_BLUEPRINT_GROUPS.flatMap((group) => group.options.map((item) => item.id)));
 const characterBlueprint = z.array(z.string().refine((value) => characterBlueprintIds.has(value), "모르는 캐릭터 구성 항목입니다.")).max(100);
-const projectFields = z.object({ title: name.optional(), logline: text.optional(), synopsis: text.optional(), tone: text.optional(), runtime: text.optional(), storyboardNote: text.optional() }).strict();
-const characterFields = z.object({ name: name.optional(), role: text.optional(), gender: text.optional(), description: text.optional(), heightCm: z.number().finite().min(1).max(1000).optional(), build: z.enum(["slim", "average", "athletic", "broad"]).optional(), kind: z.enum(["human", "animal", "creature"]).optional(), blueprint: characterBlueprint.optional(), ...prompts }).strict();
-const backgroundFields = z.object({ name: name.optional(), location: text.optional(), description: text.optional(), spaceKind: z.enum(["interior", "exterior"]).optional(), ...prompts }).strict();
+const imageModel = z.string().refine((value) => IMAGE_ONLY_MODELS.some((model) => model.id === value), "앱에서 지원하는 이미지 모델을 고르세요.");
+const videoModel = z.string().refine((value) => targetModelOf(value)?.kind === "video", "앱에서 지원하는 영상 모델을 고르세요.");
+const projectFields = z.object({ title: name.optional(), logline: text.optional(), synopsis: text.optional(), tone: text.optional(), runtime: text.optional(), storyboardNote: text.optional(), videoModel: videoModel.optional() }).strict();
+const characterFields = z.object({ name: name.optional(), role: text.optional(), gender: text.optional(), description: text.optional(), heightCm: z.number().finite().min(1).max(1000).optional(), build: z.enum(["slim", "average", "athletic", "broad"]).optional(), kind: z.enum(["human", "animal", "creature"]).optional(), blueprint: characterBlueprint.optional(), promptModel: imageModel.optional(), ...prompts }).strict();
+const backgroundFields = z.object({ name: name.optional(), location: text.optional(), description: text.optional(), spaceKind: z.enum(["interior", "exterior"]).optional(), promptModel: imageModel.optional(), ...prompts }).strict();
 const sceneFields = z.object({ title: text.optional(), summary: text.optional(), storyboardPromptKo: text.optional(), storyboardPromptEn: text.optional() }).strict();
 const cutFields = z.object({ title: text.optional(), description: text.optional(), acting: text.optional(), actingEn: text.optional(), backgroundMotion: text.optional(), backgroundMotionEn: text.optional(), vfx: text.optional(), vfxEn: text.optional(), plannedSeconds: z.number().finite().positive().max(3600).optional(), characterIds: z.array(id).max(100).optional(), backgroundId: id.optional(), useComposition: z.boolean().optional(), useRefVideo: z.boolean().optional(), videoPromptKo: text.optional(), videoPromptEn: text.optional(), ...prompts }).strict();
 export const appPromptTargetSchema = z.discriminatedUnion("kind", [
@@ -225,7 +229,10 @@ function recordControlPrompt<T extends { promptKo?: string; promptEn?: string; n
 /** 새 ID는 호출 바깥에서 정합니다. React가 같은 갱신 함수를 다시 계산해도 다른 카드를 만들면 안 됩니다. */
 export function applyProjectCommands(current: ProjectDraft, commands: ProjectCommand[]): ProjectDraft {
   return commands.reduce((draft, command) => {
-    if (command.type === "project.update") return { ...draft, ...command.fields };
+    if (command.type === "project.update") {
+      const { videoModel: chosenVideoModel, ...fields } = command.fields;
+      return { ...draft, ...fields, ...(chosenVideoModel === undefined ? {} : { magnific: { ...draft.magnific, videoModel: chosenVideoModel } }) };
+    }
     if (command.type !== "prompt.apply" && command.type.endsWith(".add")) {
       if (!command.id) throw new ProjectControlError("invalid_request", "추가할 대상의 열쇠가 없습니다.");
       checkNewId(draft, command.id);
@@ -339,8 +346,8 @@ export async function createProjectControl(input: unknown) {
   if (working.has(projectId)) throw new ProjectControlError("project_busy", "이 프로젝트를 만드는 중입니다. 같은 요청으로 다시 확인해 주세요.");
   working.add(projectId);
   try {
-    const { operationId: _operation, detail: _detail, ...fields } = request;
-    const fingerprint = JSON.stringify(fields);
+    const { operationId: _operation, detail: _detail, videoModel: chosenVideoModel, ...fields } = request;
+    const fingerprint = JSON.stringify({ ...fields, videoModel: chosenVideoModel });
     const existing = getLocalProject(projectId);
     if (existing) {
       if ((existing.draft as unknown as CreationDraft).controllerCreation?.fingerprint !== fingerprint) throw new ProjectControlError("operation_conflict", "같은 생성 요청 열쇠에 다른 내용이 들어왔습니다.");
@@ -348,7 +355,9 @@ export async function createProjectControl(input: unknown) {
       if (confirmation.outcome !== "written" && confirmation.outcome !== "same") throw new ProjectControlError("save_failed", "새 프로젝트의 파일 저장을 확인하지 못했습니다.", { outcome: confirmation.outcome });
       return { ...snapshot(projectId, observe(projectId, requireDraft(projectId)), request.detail), persisted: true, reused: true };
     }
-    const draft: CreationDraft = { ...newProjectDraft(), ...fields, controllerCreation: { fingerprint } };
+    const draft: CreationDraft = { ...newProjectDraft(), ...fields,
+      ...(chosenVideoModel === undefined ? {} : { magnific: { videoModel: chosenVideoModel } }),
+      controllerCreation: { fingerprint } };
     const saved = await saveLocalProjectAndConfirm(draft, projectId);
     if (saved.outcome !== "written" && saved.outcome !== "same") throw new ProjectControlError("save_failed", "새 프로젝트를 저장하지 못했습니다.", { outcome: saved.outcome });
     return { ...snapshot(projectId, observe(projectId, requireDraft(projectId), "controller"), request.detail), persisted: true, reused: false };
