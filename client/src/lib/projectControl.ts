@@ -3,6 +3,8 @@ import { copyJsonWithinLimit, sameImmutableJson } from "./immutableJson";
 import { controlDetailSchema, projectControlValue, type ControlDetail } from "./controlProjection";
 import { z } from "zod";
 import { relinkCutCharacterPrompts } from "@/lib/cutCharacterLinks";
+import { relinkCharacterBlueprintPrompts } from "@/lib/characterBlueprintPrompt";
+import { CHARACTER_BLUEPRINT_GROUPS } from "@/lib/blueprint";
 import { loadProjects, listLocalProjects, getLocalProject, saveLocalProjectAndConfirm } from "@/lib/localProjectStore";
 import { readProject, writeProjectAndConfirm } from "@/lib/projectWrite";
 import { newProjectDraft, newCharacter, newBackground, newScene, newCut, uid, type ProjectDraft, type Character, type Background } from "@/lib/projectTypes";
@@ -11,8 +13,10 @@ const id = z.string().min(1).max(200);
 const text = z.string().max(100_000);
 const name = z.string().trim().min(1).max(300);
 const prompts = { promptKo: text.optional(), promptEn: text.optional(), negativeKo: text.optional(), negativeEn: text.optional() };
+const characterBlueprintIds = new Set(CHARACTER_BLUEPRINT_GROUPS.flatMap((group) => group.options.map((item) => item.id)));
+const characterBlueprint = z.array(z.string().refine((value) => characterBlueprintIds.has(value), "모르는 캐릭터 구성 항목입니다.")).max(100);
 const projectFields = z.object({ title: name.optional(), logline: text.optional(), synopsis: text.optional(), tone: text.optional(), runtime: text.optional(), storyboardNote: text.optional() }).strict();
-const characterFields = z.object({ name: name.optional(), role: text.optional(), gender: text.optional(), description: text.optional(), heightCm: z.number().finite().min(1).max(1000).optional(), build: z.enum(["slim", "average", "athletic", "broad"]).optional(), kind: z.enum(["human", "animal", "creature"]).optional(), ...prompts }).strict();
+const characterFields = z.object({ name: name.optional(), role: text.optional(), gender: text.optional(), description: text.optional(), heightCm: z.number().finite().min(1).max(1000).optional(), build: z.enum(["slim", "average", "athletic", "broad"]).optional(), kind: z.enum(["human", "animal", "creature"]).optional(), blueprint: characterBlueprint.optional(), ...prompts }).strict();
 const backgroundFields = z.object({ name: name.optional(), location: text.optional(), description: text.optional(), spaceKind: z.enum(["interior", "exterior"]).optional(), ...prompts }).strict();
 const sceneFields = z.object({ title: text.optional(), summary: text.optional(), storyboardPromptKo: text.optional(), storyboardPromptEn: text.optional() }).strict();
 const cutFields = z.object({ title: text.optional(), description: text.optional(), acting: text.optional(), actingEn: text.optional(), backgroundMotion: text.optional(), backgroundMotionEn: text.optional(), vfx: text.optional(), vfxEn: text.optional(), plannedSeconds: z.number().finite().positive().max(3600).optional(), characterIds: z.array(id).max(100).optional(), backgroundId: id.optional(), useComposition: z.boolean().optional(), useRefVideo: z.boolean().optional(), videoPromptKo: text.optional(), videoPromptEn: text.optional(), ...prompts }).strict();
@@ -159,6 +163,14 @@ function checkCutPromptLanguages(current: ReturnType<typeof newCut>, fields: z.i
       throw new ProjectControlError("bilingual_prompt_required", `컷의 ${ko}와 ${en}을 함께 채우거나 함께 비워 주세요.`);
   }
 }
+function checkCharacterPromptLanguages(current: Character, fields: z.infer<typeof characterFields>) {
+  const next = { ...current, ...fields };
+  for (const [ko, en] of [["promptKo", "promptEn"], ["negativeKo", "negativeEn"]] as const) {
+    if (!(ko in fields) && !(en in fields)) continue;
+    if (Boolean(next[ko]?.trim()) !== Boolean(next[en]?.trim()))
+      throw new ProjectControlError("bilingual_prompt_required", `캐릭터의 ${ko}와 ${en}을 함께 채우거나 함께 비워 주세요.`);
+  }
+}
 
 /** 새 ID는 호출 바깥에서 정합니다. React가 같은 갱신 함수를 다시 계산해도 다른 카드를 만들면 안 됩니다. */
 export function applyProjectCommands(current: ProjectDraft, commands: ProjectCommand[]): ProjectDraft {
@@ -169,8 +181,18 @@ export function applyProjectCommands(current: ProjectDraft, commands: ProjectCom
       checkNewId(draft, command.id);
     }
     switch (command.type) {
-      case "character.add": return { ...draft, characters: [...draft.characters, { ...newCharacter(), ...command.fields, id: command.id! }] };
-      case "character.update": return { ...draft, characters: replaceById(draft.characters, command.id, (item) => { checkOwnerRename(item, command.fields.name); return { ...item, ...command.fields }; }) };
+      case "character.add": {
+        const base = newCharacter();
+        checkCharacterPromptLanguages(base, command.fields);
+        return { ...draft, characters: [...draft.characters, relinkCharacterBlueprintPrompts({ ...base, ...command.fields, id: command.id! })] };
+      }
+      case "character.update": return { ...draft, characters: replaceById(draft.characters, command.id, (item) => {
+        checkOwnerRename(item, command.fields.name);
+        checkCharacterPromptLanguages(item, command.fields);
+        const next = { ...item, ...command.fields };
+        return command.fields.blueprint || "promptKo" in command.fields || "promptEn" in command.fields
+          ? relinkCharacterBlueprintPrompts(next) : next;
+      }) };
       case "background.add": return { ...draft, backgrounds: [...draft.backgrounds, { ...newBackground(command.fields.spaceKind), ...command.fields, id: command.id! }] };
       case "background.update": return { ...draft, backgrounds: replaceById(draft.backgrounds, command.id, (item) => { checkOwnerRename(item, command.fields.name); return { ...item, ...command.fields }; }) };
       case "scene.add": return { ...draft, scenes: [...draft.scenes, { ...newScene(), ...command.fields, id: command.id!, cuts: [] }] };

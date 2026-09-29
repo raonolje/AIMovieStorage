@@ -60,6 +60,8 @@ Codex에서는 스킬 이름을 길게 적지 않고 `사용자올제 국호 프
 
 `cut.add`는 화면에 사람이 없는 컷도 `characterIds: []`를 명시해야 합니다. 인물이 있다면 먼저 `project_get`에서 캐릭터 ID를 확인해 이 배열에 넣으세요. 컷 제목·대사에 이름만 적고 ID를 빠뜨리면 생성 프롬프트의 인물 시트와 `@` 참조가 연결되지 않으므로 요청을 거절합니다. `cut.update`로 등장인물을 바꾸면 기존 프롬프트의 참조 부분도 함께 갱신되며, 저장 후 컷의 `characterIds`와 프롬프트를 다시 읽어 확인하세요.
 
+LLM 조종기로 인물을 추가하거나 수정할 때는 `character.add` / `character.update`의 `blueprint`에 화면의 캐릭터 레퍼런스 구성 항목 ID를 넣습니다. 별도 선택이 없으면 앱의 기본 구성을 씁니다. 조종기는 선택한 칸 설명을 한글·영문 프롬프트에 함께 잇고, 구성이 바뀌면 옛 설명을 교체합니다. `promptKo`/`promptEn` 및 `negativeKo`/`negativeEn`은 한 쌍으로 채웁니다. 저장 후 `project_get`에서 선택 항목과 두 프롬프트를 확인하고, 이미지 생성·대표 이미지 지정까지 완료해야 인물 레퍼런스가 실제 컷에 이어집니다.
+
 컷의 이미지·네거티브·영상 프롬프트는 각각 한글과 영문을 한 쌍으로 보냅니다(`promptKo`/`promptEn`, `negativeKo`/`negativeEn`, `videoPromptKo`/`videoPromptEn`). LLM 조종기가 한쪽만 적어 다른 쪽을 비워 두는 요청은 거절합니다. 기존 컷에서 한글만 빠졌다면 `cut.update`로 그 칸을 보완하고 영문과 `@` 참조를 그대로 보존하세요.
 
 BGM 작업은 `bgm_projects_list` → `bgm_get` / `bgm_create` → `bgm_update` → `bgm_generate` 순서로 이어갑니다. 생성 결과는 BGM 곡에 연결됩니다. 구도 타임라인에 새 음악 파일을 가져오는 작업은 아직 별도 MCP 명령에 없습니다.

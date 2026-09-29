@@ -84,6 +84,28 @@ describe("프로젝트 대화 조종", () => {
     expect(current().scenes[0].cuts[0].promptKo).toBe("인물 클로즈업");
   });
 
+  it("조종기가 만든 캐릭터는 한글·영문과 선택한 레퍼런스 시트 칸을 함께 저장한다", async () => {
+    const api = await import("./projectControl");
+    const first = await api.getProjectSnapshot("p");
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "character.add", id: "c1", fields: { name: "아이샤", promptEn: "Aisha in a teal blazer" } },
+    ] })).rejects.toMatchObject({ code: "bilingual_prompt_required" });
+    const saved = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "character.add", id: "c1", fields: { name: "아이샤", promptKo: "청록색 재킷을 입은 아이샤", promptEn: "Aisha in a teal blazer", blueprint: ["body-front", "face-front", "face-eyes"] } },
+    ] });
+    const character = current().characters[0];
+    expect(character.blueprint).toEqual(["body-front", "face-front", "face-eyes"]);
+    expect(character.promptKo).toContain("캐릭터 레퍼런스 구성: 3칸");
+    expect(character.promptKo).toContain("눈·시선");
+    expect(character.promptEn).toContain("Character reference blueprint: 3 panels");
+    expect(character.promptEn).toContain("eye shape");
+    await api.updateProjectControl({ projectId: "p", expectedRevision: saved.revision, commands: [
+      { type: "character.update", id: "c1", fields: { blueprint: ["body-front", "body-back"] } },
+    ] });
+    expect(current().characters[0].promptEn).toContain("Character reference blueprint: 2 panels");
+    expect(current().characters[0].promptEn).not.toContain("eye shape");
+  });
+
   it("5인 긴 구도는 요약 조회·수정에서 키를 줄이되 원본 키와 전체 리비전 검사를 유지한다", async () => {
     const api = await import("./projectControl");
     const composition = normalizeComposition();
@@ -175,13 +197,14 @@ describe("프로젝트 대화 조종", () => {
     const api = await import("@/lib/projectControl");
     const first = await api.getProjectSnapshot("p");
     const result = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
-      { type: "character.add", id: "c1", fields: { name: "주인공", promptEn: "a traveler" } },
+      { type: "character.add", id: "c1", fields: { name: "주인공", promptKo: "여행자", promptEn: "a traveler" } },
       { type: "background.add", id: "b1", fields: { name: "숲" } },
       { type: "scene.add", id: "s1", fields: { title: "등장" } },
       { type: "cut.add", id: "k1", sceneId: "s1", fields: { title: "걸어온다", characterIds: ["c1"], backgroundId: "b1", promptKo: "숲 속을 걷는 여행자", promptEn: "A traveler walks through a forest" } },
     ] });
     expect(result.persisted).toBe(true);
-    expect(current().characters[0]).toMatchObject({ id: "c1", promptEn: "a traveler", generatedImages: [] });
+    expect(current().characters[0]).toMatchObject({ id: "c1", generatedImages: [] });
+    expect(current().characters[0].promptEn).toContain("a traveler");
     expect(current().scenes[0].cuts).toHaveLength(1);
     expect(current().scenes[0].cuts[0]).toMatchObject({ id: "k1", characterIds: ["c1"], backgroundId: "b1" });
     const changes = await api.getProjectChanges({ projectId: "p", sinceRevision: first.revision });
