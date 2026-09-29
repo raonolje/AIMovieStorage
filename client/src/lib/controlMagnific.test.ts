@@ -9,6 +9,7 @@ import {
   type ProjectDraft,
 } from "./projectTypes";
 import { parseMagnificCatalog } from "./magnificCatalog";
+import { CUBEMAP_CHIP_ID } from "./blueprint";
 
 const state = vi.hoisted(() => ({
   draft: null as ProjectDraft | null,
@@ -153,6 +154,50 @@ beforeEach(() => {
 });
 
 describe("Magnific 데스크톱 조종의 미리보기와 실행", () => {
+  it("인물 카드의 구성은 앱에 저장된 모델·@참조만 올리고 생성 버튼을 누르지 않는다", async () => {
+    const { q, control } = await prepare();
+    const character = state.draft!.characters[0];
+    character.promptModel = "nano-banana";
+    character.promptEn = "Keep the face from @identity.";
+    character.references = [
+      { id: "ref1", name: "identity", thumb: "", file: null, filePath: "/library/작품/identity.png" },
+      { id: "ref2", name: "unused", thumb: "", file: null, filePath: "/library/작품/unused.png" },
+    ];
+    const preview = await control.previewControlMagnificSheet({
+      projectId: "p", expectedRevision: "r1", target: { kind: "character", id: "c0" },
+    });
+    expect(preview).toMatchObject({ model: "imagen-nano-banana-2", paidGeneration: false });
+    expect(preview.references.map(ref => ref.name)).toEqual(["identity.png"]);
+    expect(state.native).not.toHaveBeenCalled();
+    const job = await control.enqueueControlMagnific({
+      projectId: "p", expectedRevision: "r1", previewId: preview.previewId, operationId: "sheet",
+    });
+    expect((await finish(q, job.jobId)).status).toBe("done");
+    expect(state.native).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: character.promptEn, paths: ["/library/작품/identity.png"], model: "imagen-nano-banana-2",
+    }));
+  });
+  it("배경 전개도 구성은 카드의 4:3 비율과 틀 참조를 유지한다", async () => {
+    const { q, control } = await prepare();
+    const background = state.draft!.backgrounds[0];
+    background.blueprint = [CUBEMAP_CHIP_ID];
+    background.promptModel = "nano-banana";
+    background.promptEn = "Fill the six-face template @room_template.";
+    background.references = [
+      { id: "template", name: "room_template", thumb: "", file: null, filePath: "/library/작품/room_template.png" },
+    ];
+    const preview = await control.previewControlMagnificSheet({
+      projectId: "p", expectedRevision: "r1", target: { kind: "background", id: "b" },
+    });
+    expect(preview).toMatchObject({ aspectRatio: "4:3", paidGeneration: false });
+    const job = await control.enqueueControlMagnific({
+      projectId: "p", expectedRevision: "r1", previewId: preview.previewId, operationId: "room",
+    });
+    expect((await finish(q, job.jobId)).status).toBe("done");
+    expect(state.native).toHaveBeenCalledWith(expect.objectContaining({
+      aspectRatio: "4:3", paths: ["/library/작품/room_template.png"],
+    }));
+  });
   it("본문 그대로 모드는 명시 본문만 전송하고 Unicode 글자·공백 단어 수를 재며 참조·해상도 검사는 유지한다", async () => {
     const { q, control } = await prepare();
     await expect(

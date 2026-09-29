@@ -1,8 +1,8 @@
-import { pickedCharacterRefs } from "@/lib/promptPayloads";
 import { useMemo, useState } from "react";
 import { Clapperboard, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import PromptResultPanels from "@/components/PromptResultPanels";
+import PromptHistoryShelf from "@/components/PromptHistoryShelf";
 import CutVideoShelf from "@/components/project/CutVideoShelf";
 import SheetPreview from "@/components/project/SheetPreview";
 import { useProjectMedia } from "@/components/project/ProjectMediaContext";
@@ -23,13 +23,10 @@ import { LlmRequestButton } from "@/components/LlmRequestButton";
 import { requestPromptFromLlm } from "@/lib/promptRequest";
 import { useApiReady } from "@/lib/useApiReady";
 
-import { cutVideoSecondsOf } from "@/lib/cutVideoPrompt";
-import { cameraMovesOf } from "@/lib/compositionEdit";
-import { describeCameraMoves } from "@/lib/cameraMoves";
-import { characterLegend, objectLegend } from "@/lib/compositionLegend";
+import { storyboardLockNames, storyboardRequestData, storyboardSwaps } from "@/lib/storyboardPromptRequest";
 import { sceneFolderName } from "@/lib/projectNames";
 import type { Background, Character, Scene } from "@/lib/projectTypes";
-import type { StoryboardSwap } from "@/lib/storyboardSheet";
+import { withStoryboardPrompt } from "@/lib/storyboardPromptHistory";
 
 /**
  * 장면 **스토리보드** — 컷 대표 그림을 6000×6000 한 장으로 굽고, 그 한 장으로 영상까지.
@@ -78,10 +75,7 @@ export default function SceneStoryboard({
    * 하나만 잠그면 「얼굴은 같은데 옷이 바뀐다」 가 됩니다. 이름을 박아야 그 사람으로 걸립니다.
    */
   const lockNames = useMemo(
-    () =>
-      [...new Set(scene.cuts.flatMap((cut) => cut.characterIds || []))]
-        .map((id) => characters?.find((item) => item.id === id)?.name)
-        .filter((name): name is string => Boolean(name)),
+    () => storyboardLockNames(scene, characters),
     [scene.cuts, characters],
   );
   const [baking, setBaking] = useState(false);
@@ -109,78 +103,7 @@ export default function SceneStoryboard({
    * 마네킹을 그대로 그립니다. 칸에서 찾는 길은 **색**이고(캡처에 이름표가 안 나갑니다),
    * 그릴 근거는 **@시트**입니다.
    */
-  const swaps = useMemo<StoryboardSwap[]>(() => {
-    const out: StoryboardSwap[] = [];
-    const seen = new Set<string>();
-    const tagOf = (path?: string) => (path ? `@${fileStem(path)}` : undefined);
-
-    for (const cell of cells) {
-      const cut = cell.cut;
-      // 인물 — 구도에 선 사람은 색으로, 아니면 이름으로.
-      const legend = characterLegend(cut.composition, (id) => {
-        const source = characters.find((item) => item.id === id);
-        return source ? { name: source.name, gender: source.gender } : undefined;
-      });
-      const ids = legend.length
-        ? legend.map((item) => item.characterId)
-        : cut.characterIds;
-      for (const id of ids) {
-        if (seen.has(`c:${id}`)) continue;
-        const source = characters.find((item) => item.id === id);
-        if (!source) continue;
-        seen.add(`c:${id}`);
-        // 전부 뺀 인물([])은 시트 없이 이름만 — 규칙은 `pickedCharacterRefs` 한 곳.
-        const picked = pickedCharacterRefs(cut, id);
-        const auto =
-          (source.generatedImages ?? []).find((item) => item.isCompositeSheet) ??
-          (source.generatedImages ?? []).find((item) => item.isPrimary);
-        out.push({
-          kind: "character",
-          name: source.name || "인물",
-          color: legend.find((item) => item.characterId === id)?.color.ko,
-          tag: tagOf(picked ? picked[0] : auto?.filePath),
-        });
-      }
-
-      // 소품 — 색 이름으로 부르고, 에셋을 이어 두었으면 그 시트를 함께.
-      for (const item of objectLegend(cut.composition)) {
-        const key = `p:${item.color.ko}:${item.label}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const swapRef = cut.composition?.objects.find(
-          (object) => object.id === item.id,
-        )?.swapRef;
-        const asset = swapRef
-          ? backgrounds.find((entry) => entry.id === swapRef.id) ??
-            characters.find((entry) => entry.id === swapRef.id)
-          : undefined;
-        out.push({
-          kind: "prop",
-          name: swapRef?.name || item.label,
-          color: item.color.ko,
-          tag: tagOf(
-            (asset?.generatedImages ?? []).find((image) => image.isCompositeSheet)?.filePath ??
-              (asset?.generatedImages ?? []).find((image) => image.isPrimary)?.filePath,
-          ),
-        });
-      }
-
-      // 배경 — 컷이 가리키는 장소 하나.
-      const place = backgrounds.find((item) => item.id === cut.backgroundId);
-      if (place && !seen.has(`b:${place.id}`)) {
-        seen.add(`b:${place.id}`);
-        out.push({
-          kind: "background",
-          name: place.name || "장소",
-          tag: tagOf(
-            (place.generatedImages ?? []).find((image) => image.isPrimary)?.filePath ??
-              (place.generatedImages ?? [])[0]?.filePath,
-          ),
-        });
-      }
-    }
-    return out;
-  }, [cells, characters, backgrounds]);
+  const swaps = useMemo(() => storyboardSwaps(cells, characters, backgrounds), [cells, characters, backgrounds]);
   const missing = scene.cuts.length - cells.length;
   /** 키 이미지가 없어 **구도 그림**으로 채운 칸 수. */
   const guideCount = cells.filter((cell) => cell.image.id.startsWith("guide-")).length;
@@ -197,51 +120,7 @@ export default function SceneStoryboard({
   const [writing, setWriting] = useState(false);
 
   /** 요청문과 API 가 **같은 재료**를 봅니다(`promptRequest` 규칙). */
-  const boardRequestData = () => {
-    const built = buildStoryboardVideoPrompt({
-      sceneTitle: scene.title,
-      sceneSummary: scene.summary,
-      cells,
-      aspect: videoAspect,
-      lockNames,
-    });
-    return {
-      sceneTitle: scene.title || "장면",
-      sceneSummary: scene.summary || "",
-      sheetTag: scene.storyboardPath ? `@${fileStem(scene.storyboardPath)}` : null,
-      swaps,
-      totalSeconds: Number(built.seconds.toFixed(1)),
-      clamped: built.clamped,
-      // 길이·화면비·잠금은 늘 실어 보냅니다(공개 프롬프트 실측에서 가장 자주 빠지는 셋).
-      aspect: videoAspect || null,
-      lockNames: lockNames.length ? lockNames : null,
-      cuts: cells.map((cell) => {
-        const moves = cell.cut.composition ? cameraMovesOf(cell.cut.composition) : [];
-        return {
-          order: cell.cut.order,
-          title: cell.cut.title || null,
-          seconds: Number(
-            cutVideoSecondsOf(cell.cut).toFixed(1),
-          ),
-          /*
-            **영문 카메라 문장도 함께 보냅니다.**
-
-            사용자 2026-09-18 점검에서 드러났습니다 — 한국어만 보내고 있었습니다. 그래서
-            LLM 이 영문 칸을 스스로 번역해 썼고, 규칙으로 조립한 글과 서로 다른 말이
-            됐습니다. 촬영 용어 문장은 이미 `describeCameraMoves` 가 만들어 둡니다.
-          */
-          camera: describeCameraMoves(moves)?.ko ?? "고정",
-          cameraEn: describeCameraMoves(moves)?.en ?? "locked-off static camera, no camera movement",
-          description: cell.cut.description || null,
-          acting: cell.cut.acting || null,
-          vfx: cell.cut.vfx || null,
-          marks: (cell.marks ?? []).map((mark, index) => `${index + 1}) ${mark.note || "동선"}`),
-          // 키 이미지가 아니라 마네킹 구도 그림으로 채운 칸.
-          fromGuide: cell.image.id.startsWith("guide-"),
-        };
-      }),
-    };
-  };
+  const boardRequestData = () => storyboardRequestData({ scene, cells, swaps, videoAspect, lockNames });
 
   const writePrompt = async () => {
     if (writing) return;
@@ -260,10 +139,7 @@ export default function SceneStoryboard({
         template: "storyboard-video",
         data: boardRequestData(),
       });
-      onPatch(() => ({
-        storyboardPromptKo: result.ko,
-        storyboardPromptEn: result.en,
-      }));
+      onPatch((current) => withStoryboardPrompt(current, result, "API · 프롬프트 작성"));
       toast.success("스토리보드 영상 프롬프트를 받았습니다.");
     } catch (error) {
       toast.error(String(error));
@@ -312,11 +188,10 @@ export default function SceneStoryboard({
         값이 아니라 **지금 값에서** 만듭니다. 6000×6000 을 굽는 데 몇 초가 걸리고,
         그 사이 컷 제목을 고치는 것이 정상적인 사용법입니다(공통 규칙 — patch 는 함수).
       */
-      onPatch(() => ({
+      onPatch((current) => ({
         storyboardPath: saved.path,
         storyboardAt: new Date().toISOString(),
-        storyboardPromptKo: prompt.ko,
-        storyboardPromptEn: prompt.en,
+        ...withStoryboardPrompt(current, prompt, "스토리보드 · 규칙 조립"),
       }));
       toast.success(
         `스토리보드를 만들었습니다 — 컷 ${cells.length}칸${markedCount ? ` · 표시 ${markedCount}칸` : ""}.`,
@@ -422,10 +297,7 @@ export default function SceneStoryboard({
               title={`스토리보드 → 씬 영상 · ${scene.title || "장면"}`}
               data={() => boardRequestData()}
               onApplyPrompt={(result) =>
-                onPatch(() => ({
-                  storyboardPromptKo: result.ko,
-                  storyboardPromptEn: result.en,
-                }))
+                onPatch((current) => withStoryboardPrompt(current, result, "LLM 요청문 · 결과 넣기"))
               }
             />
             <button
@@ -478,6 +350,22 @@ export default function SceneStoryboard({
           onEnglishChange={(storyboardPromptEn) =>
             onPatch(() => ({ storyboardPromptEn }))
           }
+        />
+      )}
+      {scene.storyboardPath && (
+        <PromptHistoryShelf
+          history={scene.storyboardPromptHistory || []}
+          onRestore={(entry) => onPatch(() => ({
+            storyboardPromptKo: entry.ko,
+            storyboardPromptEn: entry.en,
+          }))}
+          onRename={(id, label) => onPatch((current) => ({
+            storyboardPromptHistory: (current.storyboardPromptHistory || []).map((item) =>
+              item.id === id ? { ...item, label } : item),
+          }))}
+          onRemove={(id) => onPatch((current) => ({
+            storyboardPromptHistory: (current.storyboardPromptHistory || []).filter((item) => item.id !== id),
+          }))}
         />
       )}
 

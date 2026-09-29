@@ -36,7 +36,7 @@ Codex에서는 스킬 이름을 길게 적지 않고 `사용자올제 국호 프
 
 ## 현재 소스의 API 범위
 
-현재 [도구 등록부](../client/src/lib/appControlRegistry.ts)에는 **MCP 도구 46개**가 있으며, 이 중 **7개가 BGM용**입니다. `composition_apply`가 받는 [구도 명령](../client/src/lib/compositionControlCommands.ts)은 **69종**입니다. 도구 수와 그 안의 편집 명령 수는 별개입니다. [프로젝트 명령](../client/src/lib/projectControl.ts)과 [BGM 명령](../client/src/lib/controlBgm.ts)도 각각 입력 규격을 검증합니다.
+현재 [도구 등록부](../client/src/lib/appControlRegistry.ts)에는 **MCP 도구 49개**가 있으며, 이 중 **7개가 BGM용**입니다. `composition_apply`가 받는 [구도 명령](../client/src/lib/compositionControlCommands.ts)은 **69종**입니다. 도구 수와 그 안의 편집 명령 수는 별개입니다. [프로젝트 명령](../client/src/lib/projectControl.ts)과 [BGM 명령](../client/src/lib/controlBgm.ts)도 각각 입력 규격을 검증합니다.
 
 아래 표는 코드에 등록된 범위입니다. 모든 기능의 실제 앱 검증이 끝났다는 뜻은 아닙니다. 실행 중인 판의 `tools/list`와 `app_status`가 실제로 사용할 수 있는 규격입니다.
 
@@ -57,6 +57,14 @@ Codex에서는 스킬 이름을 길게 적지 않고 `사용자올제 국호 프
 | 아직 남은 연결 | 모델 설치·가중치 및 LoRA 다운로드, 이미지 자르기·마스크 그리기, Magnific의 실제 Generate 클릭, API·전역 설정 | 기존 앱 기능이나 네이티브 내부 명령이 있어도 이 앱의 MCP `tools/list`에 노출된 것과는 다릅니다. 별도 공급자 MCP의 도구를 앱 조종기 도구로 세지 않습니다. |
 
 작업 단위 명령을 묶어 제공하는 방식입니다. 모든 버튼을 동일한 이름의 API로 복제하지 않습니다. 새 기능은 입력 규격, 상태 조회, 적용, 결과 확인과 실패 처리를 함께 연결해야 합니다.
+
+### 앱과 같은 프롬프트 요청·Magnific 구성
+
+생성 방식을 정하기 전에 `creation_options`로 앱에서 현재 고를 수 있는 로컬 모델, Magnific 데스크톱 구성 모델, 설정된 ComfyUI 경로와 프로젝트 선택값을 확인합니다. 사용자가 이미지·영상의 모델 또는 경로를 지정하지 않았다면 작업에 필요한 선택만 한 번 묻습니다. “알아서 해”라고 맡겼다면 앱의 현재 설정과 작업 목적에 맞춰 정하고 사용한 모델·경로를 알립니다. 컷마다 같은 질문을 반복하지 않습니다. 구성만 완료된 상태를 생성 결과로 취급하지 않습니다.
+
+Codex와 Claude는 인물·장소·컷 이미지·컷 영상·장면 영상을 작성할 때 `prompt_prepare`를 먼저 호출합니다. `target`은 `{kind:"character"|"background",id}` 또는 `{kind:"cutImage"|"cutVideo",sceneId,cutId}` 또는 `{kind:"sceneVideo",sceneId}`입니다. 이 명령은 현재 프로젝트의 카드 값, 구도·등장인물, 선택한 시트 칸, 모델·플랫폼·공통 규칙과 실제 이미지 순서를 앱의 API 버튼과 같은 함수로 조립해 반환합니다. 실내 6면 전개도 틀이 필요한 장소는 먼저 틀을 프로젝트에 저장하므로 반환된 새 `revision`을 사용합니다. 답변은 한국어·영어 프롬프트와 두 네거티브를 별도로 작성하고 `project_update`의 `prompt.apply`로 저장합니다. 이때 API 버튼과 같은 카드 이력에 이전 값과 새 값을 남깁니다. 사용자가 그 사이 앱에서 고쳤다면 `revision_conflict`가 나며 최신 상태로 다시 준비해야 합니다.
+
+이미지 생성에 앱의 Magnific «구성»을 쓰려면 인물·장소 카드에는 `magnific_sheet_compose_preview`, 컷에는 `magnific_compose_preview`를 호출하고, 확인한 `previewId`로 `magnific_compose`를 실행합니다. 카드의 저장 프롬프트·선택 모델·`@`로 연결된 참조와 배경 비율을 그대로 사용합니다. 실행은 로그인한 Magnific 데스크톱 보드에 노드와 생성기를 올릴 뿐 **Generate를 누르거나 크레딧을 쓰지 않습니다**. 실제 출력은 확인해 앱의 대상 카드에 등록해야 합니다. 이것은 앱 기능을 통한 구성 경로이며, 별도 Magnific MCP 직접 생성과 구분합니다.
 
 `cut.add`는 화면에 사람이 없는 컷도 `characterIds: []`를 명시해야 합니다. 인물이 있다면 먼저 `project_get`에서 캐릭터 ID를 확인해 이 배열에 넣으세요. 컷 제목·대사에 이름만 적고 ID를 빠뜨리면 생성 프롬프트의 인물 시트와 `@` 참조가 연결되지 않으므로 요청을 거절합니다. `cut.update`로 등장인물을 바꾸면 기존 프롬프트의 참조 부분도 함께 갱신되며, 저장 후 컷의 `characterIds`와 프롬프트를 다시 읽어 확인하세요.
 

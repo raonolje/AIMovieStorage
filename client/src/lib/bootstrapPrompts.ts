@@ -42,6 +42,7 @@ import {
 } from "@/lib/promptPayloads";
 import type { Background, Character, Cut, ProjectDraft, Scene } from "@/lib/projectTypes";
 import { cutVideoLinkInput } from "@/lib/cutVideoReferences";
+import { withCutVideoPrompt } from "@/lib/cutVideoPromptHistory";
 
 /**
  * **AI 일괄 생성 4단계 — 카드마다 프롬프트를 자세히 쓰기.**
@@ -458,10 +459,10 @@ async function writeCut(
   const wrote = await writeProject(project(), (current) =>
     patchCutIn(current, target.sceneId, target.cutId, (now) => {
       const link = cutVideoLinkInput(now, linkInputOf(current, now));
-      return {
-        videoPromptKo: relinkPromptText(result.ko, link, "ko"),
-        videoPromptEn: relinkPromptText(result.en, link, "en"),
-      };
+      return withCutVideoPrompt(now, {
+        ko: relinkPromptText(result.ko, link, "ko"),
+        en: relinkPromptText(result.en, link, "en"),
+      }, HOW);
     }),
   );
   if (!wrote.draft) throw new Error(`${label} 영상 칸에 못 넣었습니다 — ${wrote.why}`);

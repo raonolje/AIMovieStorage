@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { buildReferenceTags } from "@/components/ReferenceTagBar";
+import { backgroundComposeAspect, blueprintForSpace, isOutdoorSpaceChipId, unfoldChipOf } from "./blueprint";
+import { magnificModelOf } from "./promptLibrary";
 import { t } from "./i18n";
 import { uid } from "./projectTypes";
 import { getProjectSnapshot, ProjectControlError } from "./projectControl";
@@ -58,11 +61,18 @@ export const magnificComposeExecuteSchema = z
     operationId: id,
   })
   .strict();
+export const magnificSheetComposePreviewSchema = z.object({
+  projectId: id,
+  expectedRevision: z.string().min(1).max(200),
+  target: z.object({ kind: z.enum(["character", "background"]), id }).strict(),
+  language: z.enum(["ko", "en"]).default("en"),
+}).strict();
 type PreviewRequest = z.infer<typeof magnificComposePreviewSchema>;
+type SheetPreviewRequest = z.infer<typeof magnificSheetComposePreviewSchema>;
 type ExecuteRequest = z.infer<typeof magnificComposeExecuteSchema>;
 type Plan = Omit<MagnificComposeInput, "onStatus" | "beforeCompose">;
 interface Preview {
-  request: PreviewRequest;
+  request: PreviewRequest | SheetPreviewRequest;
   plan: Plan;
   projectTitle: string;
   projectFolder: string;
@@ -329,6 +339,55 @@ export async function previewControlMagnific(raw: unknown) {
   };
 }
 
+/** 카드의 «구성»과 같은 모델·참조·비율로 인물/장소 이미지 생성기를 준비합니다. */
+export async function previewControlMagnificSheet(raw: unknown) {
+  const request = magnificSheetComposePreviewSchema.parse(raw);
+  const draft = await current(request.projectId, request.expectedRevision);
+  const entity = request.target.kind === "character"
+    ? draft.characters.find(item => item.id === request.target.id)
+    : draft.backgrounds.find(item => item.id === request.target.id);
+  if (!entity) fail("target_not_found", "인물 또는 장소 카드를 찾지 못했습니다.");
+  const prompt = request.language === "ko" ? entity.promptKo : entity.promptEn;
+  if (!prompt?.trim()) fail("prompt_missing", "앱 카드에 저장된 프롬프트가 없습니다. 먼저 프롬프트를 작성해 주세요.");
+  const model = magnificModelOf(entity.promptModel);
+  if (!model) fail("unsupported_model", "고른 이미지 모델은 Magnific 구성에 연결되지 않습니다. 앱 카드의 모델을 확인해 주세요.");
+  const references = entity.references || [];
+  const tags = buildReferenceTags(references, "magnific");
+  const used = tags.filter(tag => tag.filePath && prompt.includes(tag.mention)).map(tag => tag.filePath!);
+  const all = tags.map(tag => tag.filePath).filter((path): path is string => Boolean(path));
+  const referencePaths = used.length ? used : all;
+  const baseDirectory = getMediaLibrarySettings().baseDirectory.trim();
+  if (!baseDirectory) fail("storage_not_ready", "데스크톱 앱에서 저장 폴더를 정한 뒤에 쓸 수 있습니다.");
+  const projectFolder = projectFolderName(request.projectId, draft.title);
+  checkPaths(referencePaths, baseDirectory, projectFolder);
+  const background = request.target.kind === "background"
+    ? draft.backgrounds.find(item => item.id === request.target.id) : undefined;
+  const blueprint = background ? blueprintForSpace(background.blueprint, background.spaceKind || "exterior") : undefined;
+  const aspectRatio = background && blueprint
+    ? backgroundComposeAspect(blueprint, isOutdoorSpaceChipId(unfoldChipOf(blueprint) ?? "")
+      ? background.exteriorSpace : background.panoramaSpace) ?? "16:9"
+    : "16:9";
+  const plan: Plan = {
+    kind: "image", prompt, referencePaths, model, aspectRatio, count: 1,
+    owner: { kind: request.target.kind, name: entity.name },
+  };
+  await validateMagnificComposition(plan);
+  await current(request.projectId, request.expectedRevision);
+  for (const [key, item] of previews) if (item.expiresAt < Date.now()) previews.delete(key);
+  while (previews.size >= 20) previews.delete(previews.keys().next().value!);
+  const previewId = uid();
+  const expiresAt = Date.now() + PREVIEW_TTL;
+  previews.set(previewId, { request, plan, projectTitle: draft.title, projectFolder, baseDirectory, expiresAt });
+  return {
+    previewId, projectId: request.projectId, revision: request.expectedRevision,
+    target: request.target, expiresAt, kind: "image", language: request.language,
+    prompt, model, aspectRatio,
+    references: referencePaths.map(path => ({ name: path.split(/[\\/]/).pop(), tag: `@${path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "")}` })),
+    paidGeneration: false,
+    limitation: "앱의 «구성»과 같이 보드에 생성기를 올립니다. 생성 버튼은 누르지 않습니다.",
+  };
+}
+
 async function validateCurrent(payload: Payload) {
   const draft = await current(
     payload.request.projectId,
@@ -459,7 +518,7 @@ registerTaskRunner(KIND, async (raw, report, task) => {
     message,
     paidGeneration: false,
     projectId: payload.request.projectId,
-    cutId: payload.request.cutId,
+    ...( "cutId" in payload.request ? { cutId: payload.request.cutId } : { target: payload.request.target }),
     sourceRevision: payload.request.expectedRevision,
   };
   await saveTaskExternalCheckpoint(task.id, result);

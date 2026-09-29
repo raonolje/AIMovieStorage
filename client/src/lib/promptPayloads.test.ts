@@ -12,6 +12,8 @@ import {
   cutVideoRequestPayload,
   cutVideoSkeletonInput,
   sheetReferenceTags,
+  sheetReferenceSelection,
+  sheetReferenceSources,
   sheetRequestPayload,
   withCutPromptResult,
   withPromptResult,
@@ -63,6 +65,19 @@ describe("characterBasics", () => {
 });
 
 describe("sheetRequestPayload", () => {
+  it("전개도 틀이 다섯 번째여도 태그와 실제 입력 이미지가 같은 네 장을 본다", () => {
+    const references = Array.from({ length: 5 }, (_, index) => ({
+      id: `r${index}`,
+      name: `ref_${index}`,
+      thumb: `data:image/png;base64,${index}`,
+      file: null,
+      ...(index === 4 ? { label: "전개도 틀 실외 · 지평선" } : {}),
+    }));
+    const selected = sheetReferenceSelection(references);
+    expect(selected.map((item) => item.id)).toEqual(["r0", "r1", "r2", "r4"]);
+    expect(sheetReferenceSources(references)).toEqual([0, 1, 2, 4].map((index) => `data:image/png;base64,${index}`));
+    expect(sheetReferenceTags(references, "magnific")[3].role).toContain("전개도 틀");
+  });
   it("인물 시트 요청의 키 — basics 가 실리고 배경 전용 값은 없다", () => {
     const data = sheetRequestPayload({
       kind: "character",

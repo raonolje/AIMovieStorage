@@ -160,6 +160,30 @@ async function sendToLlm(options: LlmRequestOptions, requestId?: string): Promis
         options.onResponseId?.(responseId);
       }
     : undefined;
+  const parts = await buildPromptRequestText(options, Math.min(options.images?.length ?? 0, 4));
+
+  // 그림은 넉 장까지만 보냅니다. 더 보내면 모델이 각각을 더 작게 줄여 보므로
+  // 장수를 늘릴수록 오히려 한 장 한 장이 흐려집니다.
+  const images = await Promise.all((options.images ?? []).slice(0, 4).map(source => toLlmImage(source)));
+
+  return callLlmText({
+    task: options.task,
+    system: "You follow the instructions in the user message exactly and reply with only the requested JSON.",
+    fixedPrompt: parts.fixed,
+    prompt: parts.fresh,
+    images,
+    maxTokens: options.maxTokens ?? 4096,
+    timeoutSecs: options.timeoutSecs,
+    requestId,
+    onResponseId,
+  });
+}
+
+/** API 버튼과 대화 조종기가 같은 템플릿·모델 규칙·조건문을 읽습니다. */
+export async function buildPromptRequestText(
+  options: Pick<LlmRequestOptions, "template" | "data" | "modelId" | "platformId" | "techniques">,
+  imageCount = 0,
+): Promise<{ fixed: string; fresh: string }> {
   const [system, modelGuide, platformGuide, techniqueGuides, commonRules] = await Promise.all([
     loadRequestTemplate(options.template),
     options.modelId ? loadModelGuide(options.modelId) : Promise.resolve(""),
@@ -178,7 +202,7 @@ async function sendToLlm(options: LlmRequestOptions, requestId?: string): Promis
     }
   }
 
-  const parts = splitRequestText({
+  return splitRequestText({
     system,
     modelGuide,
     platformGuide,
@@ -186,29 +210,7 @@ async function sendToLlm(options: LlmRequestOptions, requestId?: string): Promis
     commonRules,
     prompt: JSON.stringify(options.data, null, 2),
     vars,
-  });
-
-  // 그림은 넉 장까지만 보냅니다. 더 보내면 모델이 각각을 더 작게 줄여 보므로
-  // 장수를 늘릴수록 오히려 한 장 한 장이 흐려집니다.
-  const images = await Promise.all((options.images ?? []).slice(0, 4).map(source => toLlmImage(source)));
-
-  return callLlmText({
-    task: options.task,
-    // 요청문 전체를 system 이 아니라 prompt 로 보냅니다.
-    // 창에 뜨는 글과 한 글자도 다르지 않아야 결과를 비교할 수 있습니다.
-    system: "You follow the instructions in the user message exactly and reply with only the requested JSON.",
-    /*
-      **앞부분(템플릿·가이드·공통규칙)은 캐시에 얹습니다.** 컷 예순두 개를 뽑으면 그 앞부분이
-      글자 하나 안 바뀌고 예순두 번 다시 갑니다 — 「국호」 실측으로 되풀이 입력 토큰이 115만.
-      갈라 보내면 두 번째부터 0.1배로 읽힙니다. 이어 붙인 글은 예전과 한 글자도 같습니다.
-    */
-    fixedPrompt: parts.fixed,
-    prompt: parts.fresh,
-    images,
-    maxTokens: options.maxTokens ?? 4096,
-    timeoutSecs: options.timeoutSecs,
-    requestId,
-    onResponseId,
+    imageCount,
   });
 }
 

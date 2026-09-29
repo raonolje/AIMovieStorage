@@ -5,6 +5,10 @@ import { z } from "zod";
 import { relinkCutCharacterPrompts } from "@/lib/cutCharacterLinks";
 import { relinkCharacterBlueprintPrompts } from "@/lib/characterBlueprintPrompt";
 import { CHARACTER_BLUEPRINT_GROUPS } from "@/lib/blueprint";
+import { appendPromptHistory } from "@/lib/promptHistory";
+import { withStoryboardPrompt } from "@/lib/storyboardPromptHistory";
+import { applyAppPromptResult } from "@/lib/appPromptRequest";
+import { withCutVideoPrompt } from "@/lib/cutVideoPromptHistory";
 import { loadProjects, listLocalProjects, getLocalProject, saveLocalProjectAndConfirm } from "@/lib/localProjectStore";
 import { readProject, writeProjectAndConfirm } from "@/lib/projectWrite";
 import { newProjectDraft, newCharacter, newBackground, newScene, newCut, uid, type ProjectDraft, type Character, type Background } from "@/lib/projectTypes";
@@ -20,8 +24,19 @@ const characterFields = z.object({ name: name.optional(), role: text.optional(),
 const backgroundFields = z.object({ name: name.optional(), location: text.optional(), description: text.optional(), spaceKind: z.enum(["interior", "exterior"]).optional(), ...prompts }).strict();
 const sceneFields = z.object({ title: text.optional(), summary: text.optional(), storyboardPromptKo: text.optional(), storyboardPromptEn: text.optional() }).strict();
 const cutFields = z.object({ title: text.optional(), description: text.optional(), acting: text.optional(), actingEn: text.optional(), backgroundMotion: text.optional(), backgroundMotionEn: text.optional(), vfx: text.optional(), vfxEn: text.optional(), plannedSeconds: z.number().finite().positive().max(3600).optional(), characterIds: z.array(id).max(100).optional(), backgroundId: id.optional(), useComposition: z.boolean().optional(), useRefVideo: z.boolean().optional(), videoPromptKo: text.optional(), videoPromptEn: text.optional(), ...prompts }).strict();
+export const appPromptTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("character"), id }).strict(),
+  z.object({ kind: z.literal("background"), id }).strict(),
+  z.object({ kind: z.literal("cutImage"), sceneId: id, cutId: id }).strict(),
+  z.object({ kind: z.literal("cutVideo"), sceneId: id, cutId: id }).strict(),
+  z.object({ kind: z.literal("sceneVideo"), sceneId: id }).strict(),
+]);
+const appPromptResultSchema = z.object({
+  ko: text.min(1), en: text.min(1), negativeKo: text, negativeEn: text,
+}).strict();
 
 export const projectCommandSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("prompt.apply"), target: appPromptTargetSchema, result: appPromptResultSchema }).strict(),
   z.object({ type: z.literal("project.update"), fields: projectFields }).strict(),
   z.object({ type: z.literal("character.add"), id: id.optional(), fields: characterFields.extend({ name }) }).strict(),
   z.object({ type: z.literal("character.update"), id, fields: characterFields }).strict(),
@@ -191,49 +206,96 @@ function checkScenePromptLanguages(current: ReturnType<typeof newScene>, fields:
   checkKoreanPrompt(next.storyboardPromptKo ?? "", "장면의 스토리보드 한글 프롬프트");
 }
 
+/** 조종기가 네 칸을 직접 써도 API 버튼과 같은 선반에 이전 판·새 판을 남깁니다. */
+function recordControlPrompt<T extends { promptKo?: string; promptEn?: string; negativeKo?: string; negativeEn?: string; promptHistory?: ReturnType<typeof appendPromptHistory> }>(
+  current: T, next: T, fields: object,
+): T {
+  if (!["promptKo", "promptEn", "negativeKo", "negativeEn"].some((key) => key in fields)) return next;
+  const body = (item: T) => ({
+    ko: item.promptKo || "", en: item.promptEn || "",
+    negativeKo: item.negativeKo || "", negativeEn: item.negativeEn || "",
+  });
+  let history = current.promptHistory;
+  if (current.promptKo?.trim() || current.promptEn?.trim())
+    history = appendPromptHistory(history, { ...body(current), note: "덮어쓰기 전" });
+  history = appendPromptHistory(history, { ...body(next), note: "대화 조종기" });
+  return { ...next, promptHistory: history };
+}
+
 /** 새 ID는 호출 바깥에서 정합니다. React가 같은 갱신 함수를 다시 계산해도 다른 카드를 만들면 안 됩니다. */
 export function applyProjectCommands(current: ProjectDraft, commands: ProjectCommand[]): ProjectDraft {
   return commands.reduce((draft, command) => {
     if (command.type === "project.update") return { ...draft, ...command.fields };
-    if (command.type.endsWith(".add")) {
+    if (command.type !== "prompt.apply" && command.type.endsWith(".add")) {
       if (!command.id) throw new ProjectControlError("invalid_request", "추가할 대상의 열쇠가 없습니다.");
       checkNewId(draft, command.id);
     }
     switch (command.type) {
+      case "prompt.apply": {
+        checkKoreanPrompt(command.result.ko, "조종기 한글 프롬프트");
+        const target = command.target;
+        const exists = target.kind === "character" ? draft.characters.some((item) => item.id === target.id)
+          : target.kind === "background" ? draft.backgrounds.some((item) => item.id === target.id)
+          : target.kind === "sceneVideo" ? draft.scenes.some((item) => item.id === target.sceneId)
+          : draft.scenes.some((scene) => scene.id === target.sceneId && scene.cuts.some((cut) => cut.id === target.cutId));
+        if (!exists) throw new ProjectControlError("target_not_found", "프롬프트를 적용할 카드를 찾지 못했습니다.");
+        return applyAppPromptResult(draft, target, command.result);
+      }
       case "character.add": {
         const base = newCharacter();
         checkCharacterPromptLanguages(base, command.fields);
-        return { ...draft, characters: [...draft.characters, relinkCharacterBlueprintPrompts({ ...base, ...command.fields, id: command.id! })] };
+        const next = relinkCharacterBlueprintPrompts({ ...base, ...command.fields, id: command.id! });
+        return { ...draft, characters: [...draft.characters, recordControlPrompt(base, next, command.fields)] };
       }
       case "character.update": return { ...draft, characters: replaceById(draft.characters, command.id, (item) => {
         checkOwnerRename(item, command.fields.name);
         checkCharacterPromptLanguages(item, command.fields);
         const next = { ...item, ...command.fields };
-        return command.fields.blueprint || "promptKo" in command.fields || "promptEn" in command.fields
+        const linked = command.fields.blueprint || "promptKo" in command.fields || "promptEn" in command.fields
           ? relinkCharacterBlueprintPrompts(next) : next;
+        return recordControlPrompt(item, linked, command.fields);
       }) };
-      case "background.add": return { ...draft, backgrounds: [...draft.backgrounds, { ...newBackground(command.fields.spaceKind), ...command.fields, id: command.id! }] };
-      case "background.update": return { ...draft, backgrounds: replaceById(draft.backgrounds, command.id, (item) => { checkOwnerRename(item, command.fields.name); return { ...item, ...command.fields }; }) };
+      case "background.add": {
+        const base = newBackground(command.fields.spaceKind);
+        return { ...draft, backgrounds: [...draft.backgrounds, recordControlPrompt(base, { ...base, ...command.fields, id: command.id! }, command.fields)] };
+      }
+      case "background.update": return { ...draft, backgrounds: replaceById(draft.backgrounds, command.id, (item) => { checkOwnerRename(item, command.fields.name); return recordControlPrompt(item, { ...item, ...command.fields }, command.fields); }) };
       case "scene.add": {
         const base = newScene();
         checkScenePromptLanguages(base, command.fields);
-        return { ...draft, scenes: [...draft.scenes, { ...base, ...command.fields, id: command.id!, cuts: [] }] };
+        const next = { ...base, ...command.fields, id: command.id!, cuts: [] };
+        const prompt = "storyboardPromptKo" in command.fields || "storyboardPromptEn" in command.fields
+          ? withStoryboardPrompt(base, { ko: next.storyboardPromptKo || "", en: next.storyboardPromptEn || "" }, "대화 조종기") : {};
+        return { ...draft, scenes: [...draft.scenes, { ...next, ...prompt }] };
       }
       case "scene.update": return { ...draft, scenes: replaceById(draft.scenes, command.id, (item) => {
         checkScenePromptLanguages(item, command.fields);
-        return { ...item, ...command.fields };
+        const next = { ...item, ...command.fields };
+        return "storyboardPromptKo" in command.fields || "storyboardPromptEn" in command.fields
+          ? { ...next, ...withStoryboardPrompt(item, { ko: next.storyboardPromptKo || "", en: next.storyboardPromptEn || "" }, "대화 조종기") } : next;
       }) };
       case "cut.add":
         checkCutReferences(draft, command.fields);
         checkCutPromptLanguages(newCut(1), command.fields);
-        return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => ({ ...scene, cuts: [...scene.cuts, relinkCutCharacterPrompts({ ...newCut(scene.cuts.length + 1), ...command.fields, id: command.id! }, draft.characters, draft.backgrounds)] })) };
+        return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => {
+          const base = newCut(scene.cuts.length + 1);
+          const next = relinkCutCharacterPrompts({ ...base, ...command.fields, id: command.id! }, draft.characters, draft.backgrounds);
+          const recorded = recordControlPrompt(base, next, command.fields);
+          const video = "videoPromptKo" in command.fields || "videoPromptEn" in command.fields
+            ? withCutVideoPrompt(base, { ko: recorded.videoPromptKo || "", en: recorded.videoPromptEn || "" }, "대화 조종기") : {};
+          return { ...scene, cuts: [...scene.cuts, { ...recorded, ...video }] };
+        }) };
       case "cut.update":
         checkCutReferences(draft, command.fields);
         return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => ({ ...scene, cuts: replaceById(scene.cuts, command.id, (cut) => {
           checkCutPromptLanguages(cut, command.fields);
           const next = { ...cut, ...command.fields };
           // 인물을 고른 요청에만 잇습니다. 길이·대사 수정만으로 옛 컷의 잘못된 캐스팅을 확정하지 않습니다.
-          return command.fields.characterIds ? relinkCutCharacterPrompts(next, draft.characters, draft.backgrounds) : next;
+          const linked = command.fields.characterIds ? relinkCutCharacterPrompts(next, draft.characters, draft.backgrounds) : next;
+          const recorded = recordControlPrompt(cut, linked, command.fields);
+          const video = "videoPromptKo" in command.fields || "videoPromptEn" in command.fields
+            ? withCutVideoPrompt(cut, { ko: recorded.videoPromptKo || "", en: recorded.videoPromptEn || "" }, "대화 조종기") : {};
+          return { ...recorded, ...video };
         }) })) };
     }
   }, current);
@@ -247,7 +309,7 @@ export async function updateProjectControl(input: unknown) {
   try {
     const state = observe(request.projectId, requireDraft(request.projectId));
     if (request.expectedRevision !== state.revision) throw new ProjectControlError("revision_conflict", "그 사이 프로젝트가 바뀌었습니다. 변경 내역을 읽은 뒤 다시 적용해 주세요.", { expectedRevision: request.expectedRevision, actualRevision: state.revision });
-    const commands = request.commands.map((command) => command.type !== "project.update" && command.type.endsWith(".add") && !command.id ? { ...command, id: uid() } : command);
+    const commands = request.commands.map((command) => command.type !== "project.update" && command.type !== "prompt.apply" && command.type.endsWith(".add") && !command.id ? { ...command, id: uid() } : command);
     const preview = applyProjectCommands(state.draft, commands);
     const pending: PendingControllerEdit = { applied: false, observed: false, changes: diffControlValues(state.draft, preview) };
     pendingControllerEdits.set(request.projectId, pending);
@@ -264,7 +326,7 @@ export async function updateProjectControl(input: unknown) {
     }
     const latest = observe(request.projectId, requireDraft(request.projectId));
     if (!outcome.persisted) throw new ProjectControlError("save_failed", outcome.why || "편집 내용을 파일에 저장하지 못했습니다.", { applied: Boolean(outcome.draft), snapshot: snapshot(request.projectId, latest, request.detail) });
-    return { ...snapshot(request.projectId, latest, request.detail), persisted: true, created: commands.flatMap((command) => command.type.endsWith(".add") && "id" in command ? [{ type: command.type, id: command.id }] : []) };
+    return { ...snapshot(request.projectId, latest, request.detail), persisted: true, created: commands.flatMap((command) => command.type !== "prompt.apply" && command.type.endsWith(".add") && "id" in command ? [{ type: command.type, id: command.id }] : []) };
   } finally { working.delete(request.projectId); pendingControllerEdits.delete(request.projectId); }
 }
 

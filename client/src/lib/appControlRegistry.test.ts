@@ -133,6 +133,7 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
     const exportVideo = await import("./compositionVideoExport");
     const loras = await import("./controlLoras");
     const magnific = await import("./controlMagnific");
+    const prompt = await import("./controlPrompt");
     const comfy = await import("./controlComfy");
     for (const [name, schema] of [
       ["project_create", project.projectCreateSchema], ["project_update", project.projectUpdateSchema],
@@ -144,7 +145,9 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
       ["composition_apply_mocap", applyMocap.compositionApplyMocapSchema],
       ["composition_export_video", exportVideo.compositionExportVideoSchema],
       ["loras_list", loras.controlLorasListSchema],
+      ["prompt_prepare", prompt.promptPrepareSchema],
       ["magnific_compose_preview", magnific.magnificComposePreviewSchema],
+      ["magnific_sheet_compose_preview", magnific.magnificSheetComposePreviewSchema],
       ["magnific_compose", magnific.magnificComposeExecuteSchema],
       ["comfy_workflow_get", comfy.comfyWorkflowSchema],
       ["comfy_generate", comfy.comfyGenerateSchema],
@@ -158,6 +161,7 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
     expect(tools.find(tool => tool.name === "composition_apply")?.inputSchema.required).toContain("expectedRevision");
     expect(tools.find(tool => tool.name === "loras_list")?.annotations.readOnlyHint).toBe(true);
     expect(tools.find(tool => tool.name === "magnific_compose_preview")?.annotations.readOnlyHint).toBe(true);
+    expect(tools.find(tool => tool.name === "creation_options")?.annotations.readOnlyHint).toBe(true);
     expect(tools.find(tool => tool.name === "magnific_compose")?.annotations.openWorldHint).toBe(true);
     expect(tools.find(tool => tool.name === "comfy_generate")?.inputSchema.required).toContain("expectedRevision");
     expectFailure(await call("loras_list", { engine: "anima" }), "invalid_request");

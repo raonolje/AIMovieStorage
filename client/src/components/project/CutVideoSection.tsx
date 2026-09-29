@@ -2,6 +2,7 @@ import { Film, Loader2, Sparkles } from "lucide-react";
 import LocalGenerateButton from "@/components/LocalGenerateButton";
 import MagnificVideoCapability from "@/components/MagnificVideoCapability";
 import PromptResultPanels from "@/components/PromptResultPanels";
+import PromptHistoryShelf from "@/components/PromptHistoryShelf";
 import { assetSrc } from "@/lib/mediaLibrary";
 import { cutStem, sceneFolderName } from "@/lib/projectNames";
 import { uid } from "@/lib/projectTypes";
@@ -292,6 +293,16 @@ ${new Date(render.at).toLocaleString()}`}
           english={cut.videoPromptEn || ""}
           onKoreanChange={(videoPromptKo: string) => patchCut(() => ({ videoPromptKo }))}
           onEnglishChange={(videoPromptEn: string) => patchCut(() => ({ videoPromptEn }))}
+        />
+        <PromptHistoryShelf
+          history={cut.videoPromptHistory || []}
+          onRestore={(entry) => patchCut(() => ({ videoPromptKo: entry.ko, videoPromptEn: entry.en }))}
+          onRename={(id, label) => patchCut((current) => ({
+            videoPromptHistory: (current.videoPromptHistory || []).map((item) => item.id === id ? { ...item, label } : item),
+          }))}
+          onRemove={(id) => patchCut((current) => ({
+            videoPromptHistory: (current.videoPromptHistory || []).filter((item) => item.id !== id),
+          }))}
         />
       </section>
   );

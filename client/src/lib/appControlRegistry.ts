@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { promptPrepareSchema, prepareControlPrompt } from "./controlPrompt";
+import { controlCreationOptions } from "./controlCreationOptions";
 import { mediaRegisterSchema, assetSetPrimarySchema, registerControlMedia, setControlAssetPrimary } from "./controlAssetRegistration";
-import { magnificComposePreviewSchema, magnificComposeExecuteSchema, previewControlMagnific, enqueueControlMagnific } from "./controlMagnific";
+import { magnificComposePreviewSchema, magnificSheetComposePreviewSchema, magnificComposeExecuteSchema, previewControlMagnific, previewControlMagnificSheet, enqueueControlMagnific } from "./controlMagnific";
 import { comfyWorkflowSchema, comfyGenerateSchema, getControlComfyStatus, getControlComfyWorkflow, enqueueControlComfy } from "./controlComfy";
 import { controlDetailSchema, projectControlValue } from "./controlProjection";
 import { EDITION } from "./edition";
@@ -138,9 +140,12 @@ export function addControlTool<T>(
   });
 }
 const empty = z.object({}).strict();
+addControlTool("prompt_prepare", "Read the exact current AIMovieStorage prompt request used by its API button, including selected blueprint panels, project context, model/platform/common rules and up to four matching reference images. For six-face backgrounds it first saves the app's layout template. Use the returned revision with project_update prompt.apply; regenerate this request after any manual edit. Works from Codex or Claude without an app LLM API call.", promptPrepareSchema, false, prepareControlPrompt, true);
+addControlTool("creation_options", "List the app's current local, Magnific desktop composition and configured ComfyUI image/video choices. Before generation, ask the user which image/video model and route to use unless already specified or the user delegated the choice ('알아서 해'). Reuse the answer for this project; read project selections again after edits. Magnific composition alone does not generate.", z.object({ projectId: z.string().min(1).max(200).optional() }).strict(), true, input => controlCreationOptions(input.projectId));
 addControlTool("media_register", "Copy a Codex/Claude-created local image or video into a project character, background or cut, saving the generation prompt and provenance. Requires the latest project revision and a stable operationId for retries. makePrimary selects the representative asset.", mediaRegisterSchema, false, registerControlMedia);
 addControlTool("asset_set_primary", "Select the representative image or video in a project character, background or cut after reading its latest revision.", assetSetPrimarySchema, false, setControlAssetPrimary);
 addControlTool("magnific_compose_preview", "Preview a saved cut's Magnific desktop composition, including its exact prompt, references and video settings. Read project_get first and supply expectedRevision. Does not upload or generate. Preview expires after ten minutes; unsaved guide captures must be saved first.", magnificComposePreviewSchema, true, previewControlMagnific);
+addControlTool("magnific_sheet_compose_preview", "Preview a character or background card's image composition through the app's Magnific 구성 button. Uses its saved prompt, selected model, reference images and background aspect ratio. Read project_get first and supply expectedRevision. Does not upload or generate.", magnificSheetComposePreviewSchema, true, previewControlMagnificSheet);
 addControlTool("magnific_compose", "Queue an inspected Magnific desktop composition using previewId and expectedRevision. Uploads references and configures the generator; NEVER presses Generate or spends generation credits. Requires a signed-in desktop board. Reuse operationId; check job_get. A disconnected partial upload is not automatically repeated.", magnificComposeExecuteSchema, false, enqueueControlMagnific, false, true);
 addControlTool("comfy_status", "Check the configured external ComfyUI connection and which image/video workflows are registered. Does not submit a workflow.", empty, true, getControlComfyStatus, false, true);
 addControlTool("comfy_workflow_get", "Read configured workflow input mappings, allowed override keys and reference order without exposing the raw graph or local paths. Configure the API-format workflow in app Settings first.", comfyWorkflowSchema, true, getControlComfyWorkflow);

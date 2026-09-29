@@ -460,6 +460,7 @@ export interface Cut {
    * 돈을 내고 받는 것이고, 그 위에 손으로 고친 문장이 얹혀 있습니다.
    */
   promptHistory?: SavedPromptEntry[];
+  videoPromptHistory?: SavedPromptEntry[];
   /**
    * 구도잡기에서 뽑은 **레퍼런스 영상**(mp4)의 저장 경로와 길이(초).
    *
@@ -601,6 +602,7 @@ export interface Scene {
   storyboardAt?: string;
   storyboardPromptKo?: string;
   storyboardPromptEn?: string;
+  storyboardPromptHistory?: SavedPromptEntry[];
   /**
    * 이 장면의 영상. 컷 영상이 아니라 **장면 하나를 통째로** 뽑은 것입니다.
    *

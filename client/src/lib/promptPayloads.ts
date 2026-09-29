@@ -33,6 +33,12 @@ import {
   type BlueprintKind,
   type BlueprintRouteMark,
   type SpaceKind,
+  CUBEMAP_CHIP_ID,
+  DOME_CHIP_ID,
+  isUnfoldChipId,
+  panoramaBoxOf,
+  spaceFitsChip,
+  PANORAMA_INTERIOR_CHIP_ID,
 } from "@/lib/blueprint";
 import type { ProjectContextSummary } from "@/lib/projectContext";
 import type { Background, Character, Cut, GeneratedImageAsset, ReferenceImage } from "@/lib/projectTypes";
@@ -184,6 +190,16 @@ export function isUnfoldTemplateReference(image: ReferenceImage | undefined): bo
   return Boolean(image?.label?.startsWith("전개도 틀"));
 }
 
+/** 카드 버튼과 조종기가 같은 방 치수·틀 이름으로 레퍼런스를 준비합니다. */
+export function unfoldTemplateWanted(blueprint: string[], space: Background["panoramaSpace"]) {
+  if (!blueprint.some((id) => isUnfoldChipId(id) && id !== DOME_CHIP_ID)) return null;
+  const cube = blueprint.includes(CUBEMAP_CHIP_ID);
+  if (!cube && !spaceFitsChip(PANORAMA_INTERIOR_CHIP_ID, space)) return null;
+  const box = cube ? { width: 1, depth: 1, height: 1 } : panoramaBoxOf(space!, true);
+  const label = cube ? "전개도 틀 실외 · 지평선" : `전개도 틀 ${box.width}×${box.depth}×${box.height} m · 회색`;
+  return { box, label, horizon: cube };
+}
+
 /**
  * 그림에 붙은 태그를 요청에 함께 싣습니다.
  *
@@ -197,13 +213,17 @@ export function isUnfoldTemplateReference(image: ReferenceImage | undefined): bo
  * 마그니픽은 파일 이름으로 그림을 부릅니다. tag 도 name 도 파일 이름으로 보내야
  * LLM 이 `@정체성` 같은 표시 이름을 쓰지 않습니다.
  */
-export function sheetReferenceTags(list: ReferenceImage[], platform: string): SheetReferenceTag[] {
+export function sheetReferenceSelection(list: ReferenceImage[]): ReferenceImage[] {
   /*
     요청에는 앞 네 장만 싣습니다. 전개도 틀은 늘 **맨 뒤에** 붙으므로 레퍼런스가 다섯 장을 넘으면 틀이 잘려 나가
     프롬프트가 부를 태그가 사라집니다 — 그때는 넷째 자리를 틀에 내줍니다(틀 없이 뽑으면 칸이 제멋대로라서).
   */
   const templateAt = list.findIndex(isUnfoldTemplateReference);
-  const shown = templateAt >= 4 ? [...list.slice(0, 3), list[templateAt]] : list.slice(0, 4);
+  return templateAt >= 4 ? [...list.slice(0, 3), list[templateAt]] : list.slice(0, 4);
+}
+
+export function sheetReferenceTags(list: ReferenceImage[], platform: string): SheetReferenceTag[] {
+  const shown = sheetReferenceSelection(list);
   return buildReferenceTags(shown, platform).map((tag, order) => ({
     order: order + 1,
     tag: tag.mention,
@@ -227,8 +247,7 @@ export function templateMentionOf(list: ReferenceImage[], platform: string): str
  * 화면에 띄우는 주소와 같은 순서 — **저장된 파일이 먼저입니다.** blob 은 앱을 닫으면 죽습니다.
  */
 export function sheetReferenceSources(list: ReferenceImage[]): string[] {
-  return list
-    .slice(0, 4)
+  return sheetReferenceSelection(list)
     .map((image) => assetSrc(image.filePath) || image.thumb || "")
     .filter(Boolean);
 }
@@ -821,12 +840,21 @@ export function withCutPromptResult(
   how: string,
   note: string,
 ): Partial<Cut> {
+  const previous = current.promptKo?.trim() || current.promptEn?.trim()
+    ? appendPromptHistory(current.promptHistory, {
+        ko: current.promptKo || "",
+        en: current.promptEn || "",
+        negativeKo: current.negativeKo || "",
+        negativeEn: current.negativeEn || "",
+        note: "덮어쓰기 전",
+      })
+    : current.promptHistory;
   return {
     promptKo: linked.ko,
     promptEn: linked.en,
     negativeKo: made.negativeKo,
     negativeEn: made.negativeEn,
-    promptHistory: appendPromptHistory(current.promptHistory, {
+    promptHistory: appendPromptHistory(previous, {
       ...made,
       ko: linked.ko,
       en: linked.en,

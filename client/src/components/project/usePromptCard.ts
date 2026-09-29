@@ -6,13 +6,7 @@ import {
   type BlueprintKind,
   type SpaceKind,
   blueprintForSpace,
-  CUBEMAP_CHIP_ID,
-  DOME_CHIP_ID,
-  isUnfoldChipId,
-  panoramaBoxOf,
-  spaceFitsChip,
   spaceForChips,
-  PANORAMA_INTERIOR_CHIP_ID,
 } from "@/lib/blueprint";
 import { buildUnfoldTemplate } from "@/lib/unfoldPrompt";
 import { useProjectMedia } from "@/components/project/ProjectMediaContext";
@@ -26,6 +20,7 @@ import {
   sheetRequestPayload,
   sheetRunConditions,
   templateMentionOf as templateMentionOfList,
+  unfoldTemplateWanted as wantedUnfoldTemplate,
   withPromptResult,
   withUnfoldFrame as withUnfoldFrameOf,
 } from "@/lib/promptPayloads";
@@ -885,25 +880,9 @@ export function usePromptCard<
   };
 
   /** 지금 칩·크기에 맞는 틀. 전개도 칩이 아니거나 방 크기가 비었으면 null. */
-  const unfoldTemplateWanted = () => {
-    // 파노라마 돔은 틀 그림 없이 한 장을 뽑습니다(`DOME_CHIP_ID`).
-    if (kind !== "background" || !blueprint.some((id) => isUnfoldChipId(id) && id !== DOME_CHIP_ID)) return null;
-    /*
-      실외 큐브맵은 칸이 늘 정사각이라 크기와 상관없이 같은 틀입니다 — 한 변을 안 넣어도 넣습니다.
-      방은 가로·깊이·층고가 칸 비율이라 크기가 차야 짓습니다.
-    */
-    const cube = blueprint.includes(CUBEMAP_CHIP_ID);
-    const space = entity.panoramaSpace;
-    if (!cube && !spaceFitsChip(PANORAMA_INTERIOR_CHIP_ID, space)) return null;
-    const box = cube ? { width: 1, depth: 1, height: 1 } : panoramaBoxOf(space!, true);
-    /*
-      꼬리표가 바뀌면 옛 틀을 갈아 끼웁니다. «· 회색» 을 붙인 까닭 — 2026-09-15 에 틀을 색 칸·밝은 회색 칸에서 **바탕과 거의 같은
-      회색 칸**으로 바꿨는데, 꼬리표가 같으면 이미 틀이 있는 카드가 옛 틀을 그대로 올립니다.
-    */
-    // 실외 틀은 옆 칸에 지평선(아래 절반 조금 어둡게)을 넣은 판 — 꼬리표가 달라 옛 틀이 저절로 갈립니다.
-    const label = cube ? "전개도 틀 실외 · 지평선" : `전개도 틀 ${box.width}×${box.depth}×${box.height} m · 회색`;
-    return { box, label, horizon: cube };
-  };
+  const unfoldTemplateWanted = () => kind === "background"
+    ? wantedUnfoldTemplate(blueprint, entity.panoramaSpace)
+    : null;
 
   /*
     크기 칸을 고치면(칩을 바꾸면) **이미 틀이 있는 카드에서는** 곧바로 갈아 끼웁니다 — 레퍼런스 줄의 틀이 지금 방 비율로

@@ -27,6 +27,7 @@ import ImageLightbox, { type LightboxImage } from "@/components/ImageLightbox";
 import { faceDisplayName, faceSetImages, splitFaceSets } from "@/lib/faceSets";
 import CutVideoShelf from "@/components/project/CutVideoShelf";
 import { requestPromptFromLlm } from "@/lib/promptRequest";
+import { withCutVideoPrompt } from "@/lib/cutVideoPromptHistory";
 import {
   relinkPrompts,
   relinkPromptText,
@@ -868,10 +869,10 @@ export default function CutCard({
    */
   const keepVideoPrompt = async (made: { ko: string; en: string }) => {
     const input = await gatherLinkInput().then(link => cutVideoLinkInput(cut, link)).catch(() => undefined);
-    patchCut(() => ({
-      videoPromptKo: input ? relinkPromptText(made.ko, input, "ko") : made.ko,
-      videoPromptEn: input ? relinkPromptText(made.en, input, "en") : made.en,
-    }));
+    patchCut((current) => withCutVideoPrompt(current, {
+      ko: input ? relinkPromptText(made.ko, input, "ko") : made.ko,
+      en: input ? relinkPromptText(made.en, input, "en") : made.en,
+    }, "영상 프롬프트 작성"));
   };
 
   const applyVideoPrompt = async () => {

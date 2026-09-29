@@ -2,14 +2,7 @@ import { useState } from "react";
 import { MessageSquareQuote } from "lucide-react";
 import { toast } from "sonner";
 import { RequestTextDialog, type PromptQuad, type PromptTailShape } from "@/components/RequestTextDialog";
-import { composeRequestText } from "@/lib/llmRequestText";
-import {
-  loadCommonRules,
-  loadModelGuide,
-  loadPlatformGuide,
-  loadRequestTemplate,
-  loadTechniqueGuides,
-} from "@/lib/promptLibrary";
+import { buildPromptRequestText } from "@/lib/promptRequest";
 import { getTargetPlatform } from "@/components/PlatformSelect";
 import type { DEFAULT_REQUEST_TEMPLATES } from "@/lib/promptLibraryDefaults";
 
@@ -70,53 +63,16 @@ export function LlmRequestButton({
 
   const open = async () => {
     try {
-      /*
-        플랫폼 가이드도 같이 싣습니다. (지시 128)
-
-        마그니픽은 `@파일이름`, 컴피UI 는 `<picture 1>` 로 레퍼런스를
-        가리킵니다. 손으로 붙여넣어 쓰는 이 창이야말로 그 문법이 맞아야
-        합니다 — API 로 받는 쪽만 고치고 여기를 빠뜨리면, 같은 요청인데
-        결과가 달라집니다.
-      */
       const platformId = getTargetPlatform();
-      const [system, modelGuide, platformGuide, techniqueGuides, commonRules] = await Promise.all([
-        loadRequestTemplate(template),
-        modelId ? loadModelGuide(modelId) : Promise.resolve(""),
-        platformId ? loadPlatformGuide(platformId) : Promise.resolve(""),
-        loadTechniqueGuides(techniques?.() ?? []),
-        // 손으로 붙여넣는 글도 API 로 보내는 글과 **한 글자도 달라선 안 됩니다.**
-        loadCommonRules(),
-      ]);
-      /*
-        `::when` 문단을 가르는 값들. (지시 165)
-
-        요청문에는 「keep 이면 이렇게, blend 면 저렇게」 같은 갈래가 들어
-        있습니다. 그 갈래를 고르는 값을 안 넘기면 **문단이 통째로 지워집니다.**
-        그러면 손으로 붙여넣어 받은 결과가 API 로 받은 것과 달라집니다 —
-        같은 요청문이어야 하는데요.
-
-        고른 값을 작업 데이터에서 그대로 꺼내 씁니다. 따로 받아 두면
-        데이터와 어긋나는 날이 옵니다.
-      */
       const payload = data();
-      const vars: Record<string, string> = {};
-      if (platformId) vars.platform = platformId;
-      if (payload && typeof payload === "object") {
-        for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
-          if (typeof value === "string") vars[key] = value;
-        }
-      }
-
-      setText(composeRequestText({
-        system,
-        modelGuide,
-        platformGuide,
-        techniqueGuides,
-        commonRules,
-        prompt: JSON.stringify(payload, null, 2),
-        imageCount: imageCount?.() ?? 0,
-        vars,
-      }));
+      const parts = await buildPromptRequestText({
+        template,
+        data: payload,
+        modelId,
+        platformId,
+        techniques: techniques?.() ?? [],
+      }, imageCount?.() ?? 0);
+      setText([parts.fixed, parts.fresh].filter(Boolean).join("\n\n---\n\n"));
     } catch (error) {
       toast.error(`요청문을 만들지 못했습니다. ${error}`);
     }

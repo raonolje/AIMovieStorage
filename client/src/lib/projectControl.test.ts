@@ -40,6 +40,32 @@ function gate() { let resolve!: () => void; const promise = new Promise<void>((d
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("프로젝트 대화 조종", () => {
+  it("앱 요청문으로 받은 답을 조종기로 적용하면 이전 판과 새 판을 같은 이력에 남긴다", async () => {
+    const api = await import("./projectControl");
+    current().characters = [{ ...newCharacter(), id: "c1", name: "서진우", promptKo: "기존 한글 프롬프트", promptEn: "previous English prompt" }];
+    const first = await api.getProjectSnapshot("p");
+    await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [{
+      type: "prompt.apply", target: { kind: "character", id: "c1" },
+      result: { ko: "새로운 한국어 인물 시트", en: "A new English character sheet", negativeKo: "오류 없음", negativeEn: "no defects" },
+    }] });
+    const character = current().characters[0];
+    expect(character.promptKo).toContain("새로운 한국어 인물 시트");
+    expect(character.promptHistory?.[0].ko).toContain("새로운 한국어 인물 시트");
+    expect(character.promptHistory?.[1].ko).toBe("기존 한글 프롬프트");
+  });
+
+  it("씬을 다시 요청해도 스토리보드 프롬프트 이력이 남는다", async () => {
+    const api = await import("./projectControl");
+    current().scenes = [{ ...newScene(), id: "s1", storyboardPromptKo: "오래된 한국어 장면", storyboardPromptEn: "Old English scene", cuts: [] }];
+    const first = await api.getProjectSnapshot("p");
+    await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [{
+      type: "prompt.apply", target: { kind: "sceneVideo", sceneId: "s1" },
+      result: { ko: "새로운 한국어 장면", en: "A new English scene", negativeKo: "", negativeEn: "" },
+    }] });
+    expect(current().scenes[0].storyboardPromptHistory?.map((entry) => entry.ko)).toEqual([
+      "새로운 한국어 장면", "오래된 한국어 장면",
+    ]);
+  });
   it("새 컷에 인물 목록이 빠지면 얼굴 참조 없이 저장하지 않는다", async () => {
     const api = await import("./projectControl");
     current().scenes = [{ ...newScene(), id: "s1", cuts: [] }];
