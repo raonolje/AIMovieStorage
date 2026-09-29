@@ -1067,6 +1067,8 @@ export async function composeMagnificAuto(input: {
   /** Magnific 영상 구성 전용. 로컬 생성과 이미지 구성의 해상도는 바꾸지 않습니다. */
     resolution?: "720p" | "1080p";
     musicEnabled?: boolean;
+  /** 새 이미지 생성기만 선택하고, Magnific의 무한대 표시가 확인되면 실행합니다. */
+  runAfterCompose?: boolean;
   /** 조종기는 외부 전송 직전에 현재 판과 영속 시작 기록을 확인합니다. */
   beforeCompose?: () => Promise<void>;
   /** 앞 구성이 끝나기를 기다리게 됐을 때 */
@@ -1081,7 +1083,7 @@ export async function composeMagnificAuto(input: {
     input.onQueued?.();
   }
   await input.beforeCompose?.();
-  const result = await invoke<{ message: string; fingerprints: string[] }>("magnific_compose_auto", {
+  const result = await invoke<{ message: string; fingerprints: string[]; runSubmitted: boolean }>("magnific_compose_auto", {
     baseDirectory,
     paths: input.paths,
     prompt: input.prompt,
@@ -1090,6 +1092,7 @@ export async function composeMagnificAuto(input: {
     durationSeconds: input.durationSeconds,
       resolution: input.resolution,
       musicEnabled: input.musicEnabled,
+    runAfterCompose: input.runAfterCompose ?? false,
     aspectRatio: input.aspectRatio,
     count: input.count,
   });

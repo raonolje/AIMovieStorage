@@ -966,6 +966,31 @@ pub async fn magnific_recent(limit: Option<u32>, query: Option<String>) -> Res<V
         .collect())
 }
 
+/// 조종기가 사용자가 고른 결과 ID만 임시 파일로 내려받아 앱의 media_register 경로에 넘깁니다.
+/// URL을 외부 입력으로 받지 않아 임의 주소 다운로드에 이용되지 않습니다.
+#[tauri::command]
+pub async fn magnific_download_creation(identifier: String) -> Res<String> {
+    if identifier.is_empty() || identifier.len() > 200 || !identifier.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') {
+        return Err("Magnific 결과 ID가 올바르지 않습니다.".into());
+    }
+    let creation = magnific_recent(Some(100), None).await?.into_iter()
+        .find(|item| item.identifier == identifier)
+        .ok_or("최근 Magnific 결과에서 해당 ID를 찾지 못했습니다. 목록을 새로 읽어 주세요.")?;
+    if creation.tool.contains("video") {
+        return Err("영상 결과는 이 이미지 등록 명령으로 내려받지 않습니다.".into());
+    }
+    let output = std::env::temp_dir().join("aimoviestorage-magnific-import").join(format!("{identifier}.png"));
+    magnific_download(creation.url, output.to_string_lossy().into_owned()).await
+}
+
+#[cfg(test)]
+mod creation_import_tests {
+    #[tokio::test]
+    async fn rejects_a_url_instead_of_a_creation_id_before_network_access() {
+        assert!(super::magnific_download_creation("https://example.com/file.png".into()).await.is_err());
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 실제 마그니픽에 붙어 한 바퀴 돌려 보는 시험
 // ─────────────────────────────────────────────────────────────────────────────

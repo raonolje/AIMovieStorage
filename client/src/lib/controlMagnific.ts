@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { invoke } from "@tauri-apps/api/core";
+import { mediaTargetSchema } from "./controlMediaTargetSchema";
 import { buildReferenceTags } from "@/components/ReferenceTagBar";
 import { backgroundComposeAspect, blueprintForSpace, isOutdoorSpaceChipId, unfoldChipOf } from "./blueprint";
 import { magnificModelOf } from "./promptLibrary";
@@ -68,6 +70,8 @@ export const magnificComposeBatchExecuteSchema = z.object({
   expectedRevision: z.string().min(1).max(200),
   previewIds: z.array(id).min(1).max(20),
   operationId: id,
+  /** 각 새 구성 묶음을 정확히 선택해 순서대로 실행. 무한대/2K 표시가 없으면 중단. */
+  runAfterCompose: z.boolean().default(false),
 }).strict();
 export const magnificSheetComposePreviewSchema = z.object({
   projectId: id,
@@ -76,6 +80,36 @@ export const magnificSheetComposePreviewSchema = z.object({
   language: z.enum(["ko", "en"]).default("en"),
   count: z.number().int().min(1).max(4).optional(),
 }).strict();
+export const magnificResultsListSchema = z.object({
+  query: z.string().trim().max(300).optional(),
+}).strict();
+export const magnificResultRegisterSchema = z.object({
+  projectId: id, expectedRevision: id, operationId: id,
+  identifier: id, target: mediaTargetSchema,
+  promptKo: z.string().max(32_000).optional(),
+  promptEn: z.string().max(32_000).optional(),
+  makePrimary: z.boolean().optional(),
+}).strict();
+
+/** 생성 완료 목록에서 사람이 비교할 후보를 고릅니다. 조회 자체는 생성/다운로드하지 않습니다. */
+export async function listControlMagnificResults(raw: unknown) {
+  const input = magnificResultsListSchema.parse(raw);
+  return invoke<Array<{ identifier: string; name: string; tool: string; status: string; createdAt: string; thumbnailUrl: string }>>("magnific_recent", {
+    limit: 100, query: input.query || null,
+  });
+}
+
+/** 선택한 Magnific 결과 한 장을 앱의 기존 media_register 경로로 저장합니다. */
+export async function registerControlMagnificResult(raw: unknown) {
+  const input = magnificResultRegisterSchema.parse(raw);
+  const sourcePath = await invoke<string>("magnific_download_creation", { identifier: input.identifier });
+  const { registerControlMedia } = await import("./controlAssetRegistration");
+  return registerControlMedia({
+    projectId: input.projectId, expectedRevision: input.expectedRevision,
+    operationId: input.operationId, target: input.target, sourcePath,
+    promptKo: input.promptKo, promptEn: input.promptEn, makePrimary: input.makePrimary,
+  });
+}
 type PreviewRequest = z.infer<typeof magnificComposePreviewSchema>;
 type SheetPreviewRequest = z.infer<typeof magnificSheetComposePreviewSchema>;
 type ExecuteRequest = z.infer<typeof magnificComposeExecuteSchema>;
@@ -592,6 +626,7 @@ registerTaskRunner(BATCH_KIND, async (raw, report, task) => {
       await validateCurrent(item);
       await composeInMagnific({
         ...item.plan,
+        runAfterCompose: payload.requestExecution.runAfterCompose,
         onStatus: step => report({ step: `${completed + 1}/${payload.items.length} · ${step}` }),
         beforeCompose: async () => {
           if (isStopping(task.id)) throw new Error(t("Magnific 구성을 시작하기 전에 취소했습니다."));
@@ -603,7 +638,9 @@ registerTaskRunner(BATCH_KIND, async (raw, report, task) => {
       });
       completed++;
       await saveTaskExternalCheckpoint(task.id, {
-        phase: "partial", completed, total: payload.items.length, paidGeneration: false,
+        phase: "partial", completed, total: payload.items.length,
+        runSubmitted: payload.requestExecution.runAfterCompose,
+        paidGeneration: false,
       });
     }
   } catch (error) {
@@ -615,6 +652,7 @@ registerTaskRunner(BATCH_KIND, async (raw, report, task) => {
       const message = `Magnific 이미지 ${completed}/${payload.items.length}개 구성을 확인했습니다. 나머지는 일부 업로드됐을 수 있어 자동으로 반복하지 않습니다. 보드를 확인하세요.${cause ? ` 원인: ${cause}` : ""}`;
       await saveTaskExternalCheckpoint(task.id, {
         phase: "unknown", completed, total: payload.items.length,
+        runSubmitted: payload.requestExecution.runAfterCompose && completed > 0,
         paidGeneration: false, message,
       }).catch(() => undefined);
       throw new ProjectControlError("external_result_unknown", message);
@@ -623,7 +661,10 @@ registerTaskRunner(BATCH_KIND, async (raw, report, task) => {
   }
   const result = {
     phase: "completed", completed, total: payload.items.length,
-    message: `Magnific 이미지 ${completed}개를 캔버스에 구성했습니다. 각 생성기는 1~4장의 결과를 설정했습니다.`,
+    message: payload.requestExecution.runAfterCompose
+      ? `Magnific 이미지 ${completed}개를 순서대로 구성하고 각 새 생성기의 실행 버튼을 눌렀습니다. 각 생성기는 1~4장의 결과를 설정했습니다. 결과 완료 여부는 Magnific에서 확인하세요.`
+      : `Magnific 이미지 ${completed}개를 캔버스에 구성했습니다. 각 생성기는 1~4장의 결과를 설정했습니다.`,
+    runSubmitted: payload.requestExecution.runAfterCompose,
     paidGeneration: false, projectId: payload.requestExecution.projectId,
     sourceRevision: payload.requestExecution.expectedRevision,
   };

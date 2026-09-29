@@ -50,6 +50,8 @@ export interface MagnificComposeInput {
   videoResolution?: MagnificVideoResolution;
   /** Magnific 영상 생성기의 음악 토글. 음향 효과는 별도로 켜 둡니다. */
   musicEnabled?: boolean;
+  /** 크레딧 없음 표시가 확인된 새 이미지 생성기만 즉시 실행합니다. */
+  runAfterCompose?: boolean;
   onStatus?: (message: string) => void;
   /** 대기·카탈로그 조회 뒤 실제 외부 전송 직전에 최신 판을 확인합니다. */
   beforeCompose?: () => Promise<void>;
@@ -98,6 +100,7 @@ export async function composeInMagnific(input: MagnificComposeInput): Promise<st
     durationSeconds: input.seconds,
     resolution: input.kind === "video" ? resolution : undefined,
     musicEnabled: input.kind === "video" ? input.musicEnabled ?? false : undefined,
+    runAfterCompose: input.runAfterCompose ?? false,
     model:
       input.model ??
       (input.kind === "video" ? MAGNIFIC_VIDEO_MODEL : MAGNIFIC_IMAGE_MODEL),

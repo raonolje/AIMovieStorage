@@ -1439,6 +1439,65 @@ pub fn launch_outcome_message(outcome: LaunchOutcome, button: &str, when_up: &st
 pub struct ComposeResult {
     message: String,
     fingerprints: Vec<String>,
+    run_submitted: bool,
+}
+
+/// 자동 실행은 방금 붙인 이미지 생성기만 대상으로 합니다. 화면의 무한대 표시는 현재
+/// 계정에서 크레딧 없이 실행되는 경로를 뜻합니다. 하나라도 그 표시가 없으면 누르지 않습니다.
+/// 기존 보드 전체를 Ctrl+A로 잡지 않습니다.
+async fn run_new_image_generators(
+    cdp: &mut magnific_cdp::Cdp,
+    new_ids: &std::collections::BTreeSet<String>,
+    expected: usize,
+) -> Res<()> {
+    let new_json = serde_json::to_string(new_ids).map_err(|e| e.to_string())?;
+    let script = format!(r#"JSON.stringify((()=>{{
+      const wanted=new Set({new_json});
+      return [...document.querySelectorAll('.vue-flow__node')]
+        .filter(n=>wanted.has(n.dataset.id) && n.querySelector('[data-cy="space-node-image-generator"]'))
+        .map(n=>{{
+          const button=n.querySelector('[data-cy="workflow-run-icon-button"]');
+          const icon=button?.querySelector('use')?.getAttribute('href')||button?.querySelector('use')?.getAttribute('xlink:href')||'';
+          const resolution=n.querySelector('[data-cy="node-control-selector-resolution"]')?.textContent?.trim()||'';
+          return {{id:n.dataset.id||'', free:icon.endsWith('#infinity'), enabled:!!button&&!button.disabled, resolution}};
+        }});
+    }})())"#);
+    let value = cdp.eval(&script).await?;
+    let nodes: Vec<serde_json::Value> = serde_json::from_str(value.as_str().unwrap_or("[]"))
+        .map_err(|e| format!("새 생성기 정보를 읽지 못했습니다: {e}"))?;
+    if nodes.len() != expected || nodes.iter().any(|node| {
+        node.get("id").and_then(|v| v.as_str()).unwrap_or("").is_empty()
+            || node.get("free").and_then(|v| v.as_bool()) != Some(true)
+            || node.get("enabled").and_then(|v| v.as_bool()) != Some(true)
+            || node.get("resolution").and_then(|v| v.as_str()) != Some("2K")
+    }) {
+        return Err("새 이미지 생성기의 수·2K 설정·무한대(크레딧 없음) 표시를 모두 확인하지 못해 실행하지 않았습니다. 캔버스에서 확인하세요.".into());
+    }
+    let ids: Vec<String> = nodes.iter().filter_map(|node| node.get("id").and_then(|v| v.as_str()).map(str::to_string)).collect();
+    cdp.key("Escape", 27, false, false).await?;
+    let centers = cdp.node_centers(&ids).await?;
+    if centers.len() != ids.len() {
+        return Err("새 생성기가 화면에 모두 표시되지 않아 실행하지 않았습니다.".into());
+    }
+    for (index, (_, x, y)) in centers.iter().enumerate() {
+        cdp.click(*x, *y, index > 0).await?;
+    }
+    if !exact_upload_selection(&ids, &cdp.node_ids(true).await?) {
+        return Err("방금 만든 이미지 생성기만 정확히 선택하지 못해 실행하지 않았습니다.".into());
+    }
+    let selector = if ids.len() == 1 {
+        format!(".vue-flow__node[data-id='{}'] [data-cy='workflow-run-icon-button']", ids[0])
+    } else {
+        "[data-cy='run-multi-button']".to_string()
+    };
+    let selector_json = serde_json::to_string(&selector).map_err(|e| e.to_string())?;
+    let button = cdp.eval(&format!(r#"JSON.stringify((()=>{{const b=document.querySelector({selector_json});if(!b||b.disabled)return null;const r=b.getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]}})())"#)).await?;
+    let point: Option<(f64, f64)> = serde_json::from_str(button.as_str().unwrap_or("null"))
+        .map_err(|e| format!("실행 버튼 좌표를 읽지 못했습니다: {e}"))?;
+    let (x, y) = point.ok_or("선택한 생성기의 실행 버튼을 찾지 못해 실행하지 않았습니다.")?;
+    // 사용자가 누르는 것과 같은 마우스 이벤트. 응답이 유실됐을 때 재클릭하지 않습니다.
+    cdp.click(x, y, false).await?;
+    Ok(())
 }
 
 /// «구성» — 그림 올리기 → 생성기까지를 사람 손 없이. 마그니픽 데스크톱을 CDP 로 조종합니다.
@@ -1466,12 +1525,16 @@ pub async fn magnific_compose_auto(
     duration_seconds: Option<f64>,
     resolution: Option<String>,
     music_enabled: Option<bool>,
+    run_after_compose: Option<bool>,
 ) -> Res<ComposeResult> {
     if !cfg!(target_os = "windows") {
         return Err("Magnific 데스크톱 자동 구성은 현재 Windows 전용입니다. Mac에서는 Magnific MCP 또는 웹에서 작업해 주세요.".into());
     }
     if prompt.trim().is_empty() {
         return Err("보낼 프롬프트가 없습니다.".into());
+    }
+    if run_after_compose.unwrap_or(false) && (kind.as_deref() == Some("video") || model != "imagen-nano-banana-2") {
+        return Err("자동 실행은 확인된 Magnific 이미지 모델(Nano Banana 2K)에서만 가능합니다.".into());
     }
     // 업로드나 원본 노드 정리 전에 미지원 설정을 거절합니다.
     if kind.as_deref() == Some("video") {
@@ -1494,7 +1557,7 @@ pub async fn magnific_compose_auto(
       시간만큼 깎여 죽습니다. 마감이 터지면 본체 future 가 drop 되어 CDP 웹소켓도 같이 닫히고,
       잠금 guard 는 이 함수가 쥐고 있으니 돌아갈 때 풀립니다.
     */
-    let body = compose_body(base_directory, paths, prompt, model, aspect_ratio, count, kind, duration_seconds, resolution, music_enabled.unwrap_or(false), has_video);
+    let body = compose_body(base_directory, paths, prompt, model, aspect_ratio, count, kind, duration_seconds, resolution, music_enabled.unwrap_or(false), has_video, run_after_compose.unwrap_or(false));
     match tokio::time::timeout(budget, body).await {
         Ok(result) => result,
         Err(_) => Err(format!(
@@ -1630,6 +1693,7 @@ async fn compose_body(
     resolution: Option<String>,
     music_enabled: bool,
     has_video: bool,
+    run_after_compose: bool,
 ) -> Res<ComposeResult> {
     // 페이지 찾기. 포트가 없으면: 마그니픽이 안 떠 있으면 우리가 켜고, 떠 있으면 다시 켜 달라고 합니다.
     let (ws_url, page_url) = match magnific_cdp::find_app_page().await {
@@ -1907,7 +1971,34 @@ async fn compose_body(
     if files.len() > missing_files.len() {
         message.push_str(&format!(" 기존 레퍼런스 {}개는 재업로드 없이 사용했습니다.", files.len() - missing_files.len()));
     }
-    Ok(ComposeResult { message, fingerprints })
+    let mut run_submitted = false;
+    if run_after_compose {
+        cdp.set_stage("새 이미지 생성기만 선택·실행");
+        // 화면 밖의 기존 노드가 새 뷰포트에 나타나면 DOM 차집합에는 섞입니다.
+        // 저장된 보드의 전후 ID를 우선 비교하고, 사용할 수 없을 때만 붙여넣기 직후의
+        // 선택 집합(붙여넣기 전에 Escape로 비웠음)을 씁니다.
+        let mut new_ids = std::collections::BTreeSet::new();
+        if let Some((space_id, before_snapshot)) = &saved_before {
+            for _ in 0..10 {
+                if let Ok(after) = saved_board_snapshot(space_id).await {
+                    let difference: std::collections::BTreeSet<String> =
+                        after.nodes.difference(&before_snapshot.nodes).cloned().collect();
+                    if difference.len() == expected { new_ids = difference; break; }
+                }
+                sleep(300).await;
+            }
+        }
+        if new_ids.is_empty() {
+            new_ids = set_of(&cdp.node_ids(true).await?);
+        }
+        if new_ids.len() != expected {
+            return Err("이번 구성에서 만든 노드 ID를 정확히 확인하지 못해 실행하지 않았습니다.".into());
+        }
+        run_new_image_generators(&mut cdp, &new_ids, gen_count).await?;
+        run_submitted = true;
+        message.push_str(" 새 이미지 생성기만 선택해 Magnific 실행 버튼을 눌렀습니다.");
+    }
+    Ok(ComposeResult { message, fingerprints, run_submitted })
 }
 
 /// 그림 파일들을 마그니픽 캔버스에 붙여넣습니다. 파일마다 이미지 노드가 됩니다.
@@ -2421,8 +2512,22 @@ mod compose_regression_tests {
 
     #[tokio::test]
     async fn unknown_video_model_fails_before_any_board_or_file_access() {
-        let error = magnific_compose_auto("없는 폴더".into(), vec!["없는 영상.mp4".into()], "p".into(), "unknown".into(), "16:9".into(), 1, Some("video".into()), Some(5.0), Some("720p".into()), Some(true)).await;
+        let error = magnific_compose_auto("없는 폴더".into(), vec!["없는 영상.mp4".into()], "p".into(), "unknown".into(), "16:9".into(), 1, Some("video".into()), Some(5.0), Some("720p".into()), Some(true), None).await;
         assert!(matches!(error, Err(message) if message.contains("데스크톱 생성기 설정")));
+    }
+
+    /// 로그인한 Magnific Desktop 보드와 2K 무한대 표시는 현장에서만 검사합니다.
+    /// 평소 시험/CI에서는 실행하지 않습니다.
+    #[tokio::test]
+    #[ignore]
+    async fn live_new_image_generator_runs_only_when_unlimited() {
+        let result = compose_body(
+            String::new(), Vec::new(),
+            "Cinematic still of an empty rain-soaked Korean street at blue hour, warm shop lights reflected on the pavement, natural film grain, no text".into(),
+            "imagen-nano-banana-2".into(), "16:9".into(), 1,
+            Some("image".into()), None, None, false, false, true,
+        ).await.unwrap();
+        assert!(result.run_submitted);
     }
 
     #[test]

@@ -1493,6 +1493,7 @@ pub fn run() {
             magnific_mcp::magnific_generate_details,
             magnific_mcp::magnific_wait,
             magnific_mcp::magnific_download,
+            magnific_mcp::magnific_download_creation,
             magnific_mcp::magnific_recent,
             // 로라 살림 — 찾고 받고 폴더에 정리.
             lora::lora_files,

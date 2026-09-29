@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { mediaTargetSchema } from "./controlMediaTargetSchema";
+export { mediaTargetSchema } from "./controlMediaTargetSchema";
 import { relinkCharacterBlueprintPrompts } from "./characterBlueprintPrompt";
 import { validateLocalControlOptions } from "./localControlCapabilities";
 import { structureSourceSchema } from "./localStructureControl";
@@ -41,9 +43,6 @@ import {
 } from "./taskQueue";
 
 const id = z.string().min(1).max(200);
-export const mediaTargetSchema = z
-  .object({ kind: z.enum(["character", "background", "cut"]), id })
-  .strict();
 const optionsSchema = z
   .object({
     prompt: z.string().min(1).max(32000),

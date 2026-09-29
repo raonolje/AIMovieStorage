@@ -228,6 +228,23 @@ describe("Magnific 데스크톱 조종의 미리보기와 실행", () => {
     await finish(q, job.jobId);
     expect(state.native).toHaveBeenCalledTimes(2);
   });
+  it("자동 실행 요청은 각 새 이미지 구성에만 전달하고 동일 작업을 재실행하지 않는다", async () => {
+    const { q, control } = await prepare();
+    const character = state.draft!.characters[0];
+    character.promptModel = "nano-banana";
+    character.promptEn = "Portrait";
+    const preview = await control.previewControlMagnificSheet({
+      projectId: "p", expectedRevision: "r1", target: { kind: "character", id: "c0" },
+    });
+    const request = { projectId: "p", expectedRevision: "r1",
+      previewIds: [preview.previewId], operationId: "run-once", runAfterCompose: true };
+    const job = await control.enqueueControlMagnificBatch(request);
+    const done = await finish(q, job.jobId);
+    expect(done.externalCheckpoint).toMatchObject({ phase: "completed", runSubmitted: true });
+    expect(state.native).toHaveBeenCalledWith(expect.objectContaining({ runAfterCompose: true }));
+    await control.enqueueControlMagnificBatch(request);
+    expect(state.native).toHaveBeenCalledTimes(1);
+  });
   it("배경 전개도 구성은 카드의 4:3 비율과 틀 참조를 유지한다", async () => {
     const { q, control } = await prepare();
     const background = state.draft!.backgrounds[0];
