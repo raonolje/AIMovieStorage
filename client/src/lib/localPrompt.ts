@@ -43,6 +43,7 @@ const BASE_NEGATIVE =
 const USES_NEGATIVE: Record<LocalEngineId, boolean> = {
   minimaxh3: false,
   minimaxmusic: false,
+  qwentts: false,
   qwenimage: true,
   zimage: false,
   // Krea 2 Turbo 도 guidance 0 증류판이라 네거티브가 아무 일도 하지 않습니다.
@@ -239,6 +240,7 @@ export function tuneForLocal(
 const SIZE_STEP: Record<LocalEngineId, number> = {
   minimaxh3: 32,
   minimaxmusic: 8,
+  qwentts: 8,
   qwenimage: 8,
   zimage: 8,
   krea2: 8,

@@ -145,7 +145,7 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
       ["composition_apply", composition.compositionApplyRequestSchema], ["composition_commit", composition.compositionSessionRequestSchema],
       ["media_generate", media.generateMediaSchema], ["media_upscale", media.upscaleMediaSchema],
       ["media_register", registration.mediaRegisterSchema], ["asset_set_primary", registration.assetSetPrimarySchema],
-      ["voice_extract", voice.voiceExtractSchema], ["voice_select", voice.voiceSelectSchema],
+      ["voice_extract", voice.voiceExtractSchema], ["voice_generate", voice.voiceGenerateSchema], ["voice_engine_install", voice.voiceEngineInstallSchema], ["voice_select", voice.voiceSelectSchema],
       ["mocap_analyze", mocap.mocapAnalyzeSchema], ["mocap_track_hands", mocap.mocapHandsSchema],
       ["mocap_result", mocap.mocapResultSchema],
       ["composition_apply_mocap", applyMocap.compositionApplyMocapSchema],

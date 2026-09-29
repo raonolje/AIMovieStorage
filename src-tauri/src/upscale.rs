@@ -97,6 +97,7 @@ pub static LOCAL: Family = Family {
     ids: &[
         "minimaxh3",
         "minimaxmusic",
+        "qwentts",
         "wanvideo",
         "acestep",
         "qwenimage",

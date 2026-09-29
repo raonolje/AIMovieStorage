@@ -38,7 +38,7 @@ export async function extractVoiceFromPrimary(input: {
   return {
     id: crypto.randomUUID(), operationId: input.operationId, filePath: path, sourceVideoId: video.id,
     sourceCutId: input.sourceCutId, startSeconds: input.startSeconds,
-    endSeconds: input.endSeconds, isPrimary: true,
+    endSeconds: input.endSeconds, source: "extracted", isPrimary: true,
   };
 }
 

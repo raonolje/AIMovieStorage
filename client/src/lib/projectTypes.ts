@@ -344,10 +344,17 @@ export interface CharacterVoiceReference {
   id: string;
   operationId?: string;
   filePath: string;
-  sourceVideoId: string;
-  sourceCutId: string;
-  startSeconds: number;
-  endSeconds: number;
+  source?: "extracted" | "generated";
+  sourceVideoId?: string;
+  sourceCutId?: string;
+  startSeconds?: number;
+  endSeconds?: number;
+  dialogue?: string;
+  category?: string;
+  traits?: string;
+  model?: string;
+  speaker?: string;
+  language?: string;
   isPrimary?: boolean;
 }
 

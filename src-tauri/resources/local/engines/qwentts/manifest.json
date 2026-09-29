@@ -1,0 +1,18 @@
+{
+  "id": "qwentts",
+  "name": "목소리 — Qwen3-TTS",
+  "purpose": "대사·목소리 특징·연기 톤으로 캐릭터 음성 WAV 생성",
+  "version": "Qwen3-TTS 0.1.1 · 2026-01-22 모델",
+  "kind": "python",
+  "heavy": false,
+  "python": "3.12",
+  "experimental": false,
+  "models_dir": "models",
+  "code": [],
+  "models": [],
+  "empty_files": [],
+  "notes": [
+    "Apache 2.0. VoiceDesign 1.7B, CustomVoice 1.7B·0.6B 중 선택합니다.",
+    "선택한 모델의 가중치는 첫 생성 때 엔진 전용 폴더에 받습니다. 첫 실행은 오래 걸릴 수 있습니다."
+  ]
+}

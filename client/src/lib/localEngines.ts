@@ -30,6 +30,7 @@ import { queueMirrorWriteAndConfirm, registerMirrorSection, whenAppSettingsReady
 export type LocalEngineId =
   | "minimaxh3"
   | "minimaxmusic"
+  | "qwentts"
   | "qwenimage"
   | "zimage"
   | "krea2"
@@ -41,7 +42,7 @@ export type LocalEngineId =
   | "nlf"
   | "gvhmr";
 
-export type LocalEngineKind = "image" | "video" | "music" | "mocap";
+export type LocalEngineKind = "image" | "video" | "music" | "voice" | "mocap";
 
 /**
  * 이 빌드에 실린 엔진 — 상태 캐시·설치 목록·모델 고르기·로라 서랍이 전부 이 목록을 돕니다.
@@ -53,6 +54,7 @@ export const LOCAL_ENGINE_IDS: LocalEngineId[] = (
   [
     "minimaxh3",
     "minimaxmusic",
+    "qwentts",
     "qwenimage",
     "zimage",
     "krea2",
@@ -342,6 +344,18 @@ export const LOCAL_ENGINE_CATALOG: Record<LocalEngineId, LocalEngineInfo> = {
     needs: vramNeeds({ bf16Gb: 19, quantVramGb: 8, ramGb: 16, diskGb: 20, quantNote: "언어 모델을 CPU 로 흘려" }),
     precisionModes: ["bf16"],
   },
+  qwentts: {
+    id: "qwentts",
+    kind: "voice",
+    name: "목소리 — Qwen3-TTS",
+    purpose: "대사와 목소리 특징으로 연기 톤의 음성을 만듭니다. 자유 목소리 설계 또는 고정 화자를 고를 수 있습니다.",
+    license: "Apache 2.0 — 상업 이용 가능",
+    sizeHint: "선택 모델당 약 2~5 GB + 독립 파이썬 환경 · 처음 생성 때 가중치 다운로드",
+    extension: "wav",
+    priority: 0,
+    needs: vramNeeds({ bf16Gb: 4, ramGb: 12, diskGb: 10 }),
+    precisionModes: ["bf16"],
+  },
   qwenimage: {
     id: "qwenimage",
     kind: "image",
@@ -508,6 +522,7 @@ export const LOCAL_KIND_LABEL: Record<LocalEngineKind, string> = {
   image: "그림",
   video: "영상",
   music: "음악",
+  voice: "목소리",
   mocap: "모션 캡처",
 };
 
@@ -873,6 +888,11 @@ export interface LocalLora {
 
 export interface LocalRunOptions {
   prompt: string;
+  /** Qwen3-TTS 목소리 생성. prompt는 읽을 대사입니다. */
+  voice_model?: "design" | "custom-1.7b" | "custom-0.6b";
+  voice_speaker?: string;
+  voice_instruct?: string;
+  language?: string;
   negative?: string;
   /**
    * 텍스트 인코더가 한 번에 읽는 토큰 수(`localTokenBudget`). 안 주면 워커가 1024 로 봅니다.

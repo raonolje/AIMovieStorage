@@ -7,6 +7,11 @@ import os
 def validate_control_options(engine_id, opts, check_files=False):
     if not isinstance(opts, dict):
         raise ValueError("생성 옵션은 객체여야 합니다.")
+    if engine_id == "qwentts":
+        from engines.qwentts import validate
+        validate(opts)
+    elif any(key in opts for key in ("voice_model", "voice_speaker", "voice_instruct")):
+        raise ValueError("목소리 옵션은 Qwen3-TTS에서만 사용할 수 있습니다.")
     if "ltx_quality" in opts:
         if engine_id != "ltx25":
             raise ValueError("LTX 품질 선택은 LTX 2.5에서만 사용할 수 있습니다.")
