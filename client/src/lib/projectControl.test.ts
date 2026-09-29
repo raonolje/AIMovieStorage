@@ -40,6 +40,131 @@ function gate() { let resolve!: () => void; const promise = new Promise<void>((d
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("프로젝트 대화 조종", () => {
+  it("공용 시트 배치도와 캐릭터별 이미지 채우기를 앱 저장 형식으로 나눈다", async () => {
+    const api = await import("./projectControl");
+    current().characters = [{ ...newCharacter(), id: "actor", name: "서아", generatedImages: [
+      { id: "portrait", name: "서아_001", thumb: "", file: null, filePath: "C:/project/서아.png" },
+    ] }];
+    const first = await api.getProjectSnapshot("p");
+    const saved = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "sheet.layout.upsert", id: "cast-sheet", name: "전신과 프로필", size: { width: 2048, height: 2048 }, placements: [
+        { id: "face", kind: "image", x: 0, y: 0, width: 1024, height: 1024, label: "얼굴" },
+        { id: "profile", kind: "profile", x: 1050, y: 0, width: 900, height: 1000 },
+      ] },
+      { type: "sheet.fill", owner: { kind: "character", id: "actor" }, layoutId: "cast-sheet", fills: { face: "portrait" } },
+    ] });
+    expect(saved.persisted).toBe(true);
+    expect(current().sheetLayouts?.[0]).toMatchObject({ coords: "px", placements: [{ id: "face" }, { id: "profile" }] });
+    expect(current().sheetLayouts?.[0].placements[0].imageId).toBeUndefined();
+    expect(current().characters[0].sheetFills?.["cast-sheet"]).toEqual({ face: "portrait" });
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: saved.revision, commands: [
+      { type: "sheet.fill", owner: { kind: "character", id: "actor" }, layoutId: "cast-sheet", fills: { face: "other" } },
+    ] })).rejects.toMatchObject({ code: "invalid_reference" });
+  });
+  it("저장된 컷 구도의 방과 소품을 라이브러리에 담아 다음 컷에서 재사용한다", async () => {
+    const api = await import("./projectControl");
+    const composition = { ...normalizeComposition(), rooms: [{ id: "room", name: "방송 무대", kind: "indoor", width: 18, depth: 12, height: 8,
+      position: { x: 0, y: 0, z: 0 }, rotation: 0 }], objects: [] };
+    current().scenes = [{ ...newScene(), id: "scene", cuts: [{ ...newCut(1), id: "cut", composition }] }];
+    const first = await api.getProjectSnapshot("p");
+    const saved = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "room_preset.save_from_cut", sceneId: "scene", cutId: "cut", roomId: "room", name: "콘서트 무대", id: "stage" },
+    ] });
+    expect(saved.persisted).toBe(true);
+    expect(current().roomPresets?.[0]).toMatchObject({ id: "stage", name: "콘서트 무대", room: { id: "room" } });
+    const removed = await api.updateProjectControl({ projectId: "p", expectedRevision: saved.revision, commands: [
+      { type: "room_preset.remove", id: "stage" },
+    ] });
+    expect(removed.persisted).toBe(true);
+    expect(current().roomPresets).toEqual([]);
+  });
+  it("저장된 그림의 앵커·움직임 구역을 편집해 스토리보드와 배경 요청에 공유한다", async () => {
+    const api = await import("./projectControl");
+    current().characters = [{ ...newCharacter(), id: "actor", generatedImages: [
+      { id: "portrait", name: "서아", thumb: "", file: null, filePath: "C:/project/서아.png" },
+    ] }];
+    const first = await api.getProjectSnapshot("p");
+    const saved = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "image.marks", assetId: "portrait", marks: [
+        { id: "stage", shape: "rect", note: "무대 뒤 LED만 움직임", points: [{ x: 0.1, y: 0.2 }, { x: 0.8, y: 0.9 }], motion: true },
+        { id: "entry", shape: "anchor", note: "서아 진입", points: [{ x: 0.2, y: 0.3 }, { x: 0.4, y: 0.5 }] },
+      ] },
+    ] });
+    expect(saved.persisted).toBe(true);
+    expect(current().imageMarks?.["C:/project/서아.png"]).toHaveLength(2);
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: saved.revision, commands: [
+      { type: "image.marks", assetId: "portrait", marks: [{ id: "bad", shape: "anchor", note: "잘못된 구역", points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], motion: true }] },
+    ] })).rejects.toMatchObject({ code: "invalid_request" });
+  });
+  it("생성 결과를 정체성 레퍼런스로 연결하고 순서를 조절하며 원본 파일은 보존한다", async () => {
+    const api = await import("./projectControl");
+    current().characters = [{ ...newCharacter(), id: "actor", name: "서아", generatedImages: [
+      { id: "portrait", name: "서아_001", thumb: "", file: null, filePath: "C:/project/서아.png", isPrimary: true },
+    ] }];
+    const first = await api.getProjectSnapshot("p");
+    const linked = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "reference.link", owner: { kind: "character", id: "actor" }, sourceAssetId: "portrait", position: "first", label: "정체성 기준" },
+    ] });
+    expect(current().characters[0].references[0]).toMatchObject({ filePath: "C:/project/서아.png", sharedFile: true, label: "정체성 기준" });
+    const refId = current().characters[0].references[0].id;
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: linked.revision, commands: [
+      { type: "reference.link", owner: { kind: "character", id: "actor" }, sourceAssetId: "portrait" },
+    ] })).rejects.toMatchObject({ code: "duplicate_reference" });
+    const unlinked = await api.updateProjectControl({ projectId: "p", expectedRevision: linked.revision, commands: [
+      { type: "reference.unlink", owner: { kind: "character", id: "actor" }, referenceId: refId },
+    ] });
+    expect(unlinked.persisted).toBe(true);
+    expect(current().characters[0].references).toHaveLength(0);
+    expect(current().characters[0].generatedImages).toHaveLength(1);
+  });
+  it("작품의 장르·스타일·시대를 앱 UI와 같은 규칙으로 저장해 다음 프롬프트에 반영한다", async () => {
+    const api = await import("./projectControl");
+    const first = await api.getProjectSnapshot("p");
+    const changed = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "project.update", fields: { genres: ["뮤직비디오"], styles: ["시네마틱 필름"], eras: ["m-modern"] } },
+    ] });
+    expect(current()).toMatchObject({ genre: "뮤직비디오", style: "시네마틱 필름", genres: ["뮤직비디오"], styles: ["시네마틱 필름"], eras: ["m-modern"] });
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: changed.revision, commands: [
+      { type: "project.update", fields: { eras: ["invented-era"] } },
+    ] })).rejects.toMatchObject({ code: "invalid_request" });
+  });
+  it("앱과 공유하는 추가 요청문은 수동 수정 후 오래된 판에서 생성되지 않는다", async () => {
+    const api = await import("./projectControl");
+    const extra = await import("./controlSupplementalPrompt");
+    const natural = await import("./controlNaturalPrompt");
+    current().characters = [{ ...newCharacter(), id: "actor", name: "서아", description: "무대에서 활발하게 춤춘다" }];
+    const before = await api.getProjectSnapshot("p");
+    const first = await extra.prepareSupplementalPrompt({ projectId: "p", expectedRevision: before.revision,
+      target: { kind: "characterFirstReference", id: "actor" } });
+    expect(first.structuredContent.request).toContain("무대에서 활발하게 춤춘다");
+    const profile = await extra.prepareSupplementalPrompt({ projectId: "p", expectedRevision: before.revision,
+      target: { kind: "characterProfile", id: "actor" } });
+    expect(profile.structuredContent.request).toContain("서아");
+    const prose = await natural.prepareNaturalPrompt({ projectId: "p", expectedRevision: before.revision,
+      target: { kind: "characterDescription", id: "actor" } });
+    expect(prose.request).toContain("무대에서 활발하게 춤춘다");
+    state.projects.get("p")!.draft = { ...current(), characters: current().characters.map((item) => ({ ...item, description: "수동 수정" })) };
+    await expect(extra.prepareSupplementalPrompt({ projectId: "p", expectedRevision: before.revision,
+      target: { kind: "characterFirstReference", id: "actor" } })).rejects.toMatchObject({ code: "revision_conflict" });
+  });
+  it("프로필·분석 이력을 보존하고 컷의 인물 이미지 참조를 현재 프로젝트 안에서만 고른다", async () => {
+    const api = await import("./projectControl");
+    current().characters = [{ ...newCharacter(), id: "actor", name: "서아", analysis: "예전 특징",
+      generatedImages: [{ id: "portrait", name: "서아_001", thumb: "", file: null, filePath: "C:/project/서아.png" }] }];
+    current().scenes = [{ ...newScene(), id: "scene", cuts: [{ ...newCut(1), id: "cut", characterIds: ["actor"] }] }];
+    const before = await api.getProjectSnapshot("p");
+    const updated = await api.updateProjectControl({ projectId: "p", expectedRevision: before.revision, commands: [
+      { type: "character.profile", id: "actor", fields: { personality: "무대에서 활발하다" } },
+      { type: "character.update", id: "actor", fields: { analysis: "웃을 때 눈꼬리가 올라간다", analysisEn: "Her eyes brighten when she smiles" } },
+      { type: "cut.update", sceneId: "scene", id: "cut", fields: { characterRefs: { actor: ["C:/project/서아.png"] }, styleTags: ["cinematic"], techniques: ["acting"] } },
+    ] });
+    expect(current().characters[0].profile?.personality).toBe("무대에서 활발하다");
+    expect(current().characters[0].analysisHistory?.map((item) => item.text)).toEqual(["웃을 때 눈꼬리가 올라간다", "예전 특징"]);
+    expect(current().scenes[0].cuts[0].characterRefs).toEqual({ actor: ["C:/project/서아.png"] });
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: updated.revision, commands: [
+      { type: "cut.update", sceneId: "scene", id: "cut", fields: { characterRefs: { actor: ["C:/outside.png"] } } },
+    ] })).rejects.toMatchObject({ code: "invalid_reference" });
+  });
   it("배경 구성 칩을 조종기로 선택·수정하고 알 수 없는 칩은 거부한다", async () => {
     const api = await import("./projectControl");
     const first = await api.getProjectSnapshot("p");
@@ -54,6 +179,20 @@ describe("프로젝트 대화 조종", () => {
     await expect(api.updateProjectControl({ projectId: "p", expectedRevision: changed.revision, commands: [
       { type: "background.update", id: "b1", fields: { blueprint: ["nonexistent-chip"] } },
     ] })).rejects.toMatchObject({ code: "invalid_request" });
+  });
+  it("장소 프롬프트도 인물·컷처럼 한글과 영문을 함께 저장한다", async () => {
+    const api = await import("./projectControl");
+    const first = await api.getProjectSnapshot("p");
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "background.add", id: "b1", fields: { name: "골목", promptEn: "A rainy alley" } },
+    ] })).rejects.toMatchObject({ code: "bilingual_prompt_required" });
+    const added = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "background.add", id: "b1", fields: { name: "골목", promptKo: "비 내리는 골목", promptEn: "A rainy alley" } },
+    ] });
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: added.revision, commands: [
+      { type: "background.update", id: "b1", fields: { promptKo: "Rainy alley in Seoul", promptEn: "A rainy alley in Seoul" } },
+    ] })).rejects.toMatchObject({ code: "korean_prompt_required" });
+    expect(current().backgrounds[0].promptKo).toBe("비 내리는 골목");
   });
   it("선택한 이미지·영상 모델을 앱 카드와 프로젝트 설정에 저장한다", async () => {
     const api = await import("./projectControl");
@@ -84,6 +223,13 @@ describe("프로젝트 대화 조종", () => {
     expect(character.promptKo).toContain("새로운 한국어 인물 시트");
     expect(character.promptHistory?.[0].ko).toContain("새로운 한국어 인물 시트");
     expect(character.promptHistory?.[1].ko).toBe("기존 한글 프롬프트");
+    const latest = await api.getProjectSnapshot("p", "summary");
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: latest.revision, commands: [{
+      type: "prompt.apply", target: { kind: "character", id: "c1" },
+      result: { ko: "새로운 한국어 인물 시트", en: "A new English character sheet",
+        negativeKo: "plastic skin, broken hands", negativeEn: "plastic skin, broken hands" },
+    }] })).rejects.toMatchObject({ code: "korean_prompt_required" });
+    expect(current().characters[0].negativeKo).toBe("오류 없음");
   });
 
   it("씬을 다시 요청해도 스토리보드 프롬프트 이력이 남는다", async () => {
@@ -284,6 +430,27 @@ describe("프로젝트 대화 조종", () => {
     expect(current().scenes[0].cuts[0]).toMatchObject({ id: "k1", characterIds: ["c1"], backgroundId: "b1" });
     const changes = await api.getProjectChanges({ projectId: "p", sinceRevision: first.revision });
     expect(changes.changes.every((item) => item.source === "controller")).toBe(true);
+  });
+
+  it("장면과 컷의 순서를 바꾸면 컷 번호를 다시 매기고 내용과 미디어를 보존한다", async () => {
+    const api = await import("@/lib/projectControl");
+    const firstCut = { ...newCut(1), id: "k1", title: "첫 컷", videos: [{ id: "v1", name: "영상", filePath: "p/video.mp4", createdAt: "now" }] };
+    current().scenes = [
+      { ...newScene(), id: "s1", title: "첫 장면", cuts: [firstCut, { ...newCut(2), id: "k2", title: "둘째 컷" }] },
+      { ...newScene(), id: "s2", title: "둘째 장면", cuts: [] },
+    ];
+    const first = await api.getProjectSnapshot("p");
+    const result = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "scene.move", id: "s2", position: 0 },
+      { type: "cut.move", sceneId: "s1", id: "k2", position: 0 },
+    ] });
+    expect(result.persisted).toBe(true);
+    expect(current().scenes.map((scene) => scene.id)).toEqual(["s2", "s1"]);
+    expect(current().scenes[1].cuts.map((cut) => [cut.id, cut.order])).toEqual([["k2", 1], ["k1", 2]]);
+    expect(current().scenes[1].cuts[1].videos).toEqual(firstCut.videos);
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: result.revision, commands: [
+      { type: "cut.move", sceneId: "s1", id: "k1", position: 2 },
+    ] })).rejects.toMatchObject({ code: "invalid_position" });
   });
 
   it("ID를 생략해도 새 카드 ID를 반환하고 다음 편집에 그대로 쓴다", async () => {

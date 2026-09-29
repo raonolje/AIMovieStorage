@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { FIELD_STYLE, NumberInput, PanelSection } from "@/components/composition/fields";
 import { isDesktopApp } from "@/lib/llm";
 import { importMusicToBgm, listBgmChoices } from "@/lib/bgmLibrary";
-import { assetSrc } from "@/lib/mediaLibrary";
+import { measureAudioSeconds } from "@/lib/audioDuration";
 import {
   cutMusicAtIn,
   musicOf,
@@ -63,23 +63,15 @@ export function MusicSection({
   const [choices] = useState(() => listBgmChoices());
   const [picking, setPicking] = useState(false);
 
-  /** 길이는 파일을 한 번 읽어야 압니다 — 「타임라인을 노래 길이로」 를 누르려면 끝이 어디인지 알아야 합니다. */
-  const measure = (path: string) =>
-    new Promise<number>((resolve) => {
-      const probe = document.createElement("audio");
-      probe.preload = "metadata";
-      probe.addEventListener("loadedmetadata", () => resolve(probe.duration || 0), { once: true });
-      probe.addEventListener("error", () => resolve(0), { once: true });
-      probe.src = assetSrc(path);
-    });
-
   /** BGM 화면에서 뽑아 둔 곡을 그대로 씁니다 — 파일은 `BGM/곡/…` 에 두고 경로만 적습니다. */
   const useBgm = async (path: string, label: string) => {
-    const seconds = await measure(path);
-    setState((current) => setMusicIn(current, { path, name: label, seconds, sections: [] }));
-    toast.success(`${label} · ${seconds.toFixed(1)}초`, {
-      description: "BGM 프로젝트의 곡을 타임라인에 깔았습니다",
-    });
+    try {
+      const seconds = await measureAudioSeconds(path);
+      setState((current) => setMusicIn(current, { path, name: label, seconds, sections: [] }));
+      toast.success(`${label} · ${seconds.toFixed(1)}초`, {
+        description: "BGM 프로젝트의 곡을 타임라인에 깔았습니다",
+      });
+    } catch { toast.error("음원 길이를 읽지 못해 타임라인에 올리지 않았습니다."); }
   };
 
   /**
@@ -110,7 +102,7 @@ export function MusicSection({
       });
       const path = copied?.path ?? source;
       const name = copied?.name ?? (source.split(/[\\/]/).pop() ?? source);
-      const seconds = await measure(path);
+      const seconds = await measureAudioSeconds(path);
       setState((current) => setMusicIn(current, { path, name, seconds, sections: [] }));
       toast.success(`${name} · ${seconds.toFixed(1)}초`, {
         description: copied

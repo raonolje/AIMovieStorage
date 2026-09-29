@@ -5,6 +5,7 @@ import AutoTextarea from "@/components/AutoTextarea";
 import { LlmRequestButton } from "@/components/LlmRequestButton";
 import { parseJsonResponse, useLlmReady } from "@/lib/llm";
 import { requestJsonFromLlm } from "@/lib/promptRequest";
+import { characterProfileRequestData } from "@/lib/supplementalPromptPayload";
 import {
   PROFILE_FIELDS,
   normalizeProfile,
@@ -47,13 +48,7 @@ export default function CharacterProfilePanel({
     onChange({ ...value, [id]: next });
 
   /** 요청문에 실어 보낼 것. 두 버튼이 같은 것을 씁니다. */
-  const requestData = () => ({
-    project: projectContext,
-    projectName,
-    basics,
-    // 이미 적어 둔 값을 함께 보냅니다. 사용자가 정한 방향을 모델이 뒤엎으면 안 됩니다.
-    current: value,
-  });
+  const requestData = () => characterProfileRequestData({ project: projectContext, projectName, basics, profile: value });
 
   /**
    * 돌려받은 칸만 덮어씁니다. 빠뜨린 칸까지 비우면 적어 둔 것이 날아갑니다.

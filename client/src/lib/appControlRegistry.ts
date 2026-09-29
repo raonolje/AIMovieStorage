@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { promptPrepareSchema, prepareControlPrompt } from "./controlPrompt";
+import { promptStatusSchema, promptHistoryReadSchema, getProjectPromptStatus, getProjectPromptHistory } from "./controlPromptStatus";
+import { supplementalPromptPrepareSchema, prepareSupplementalPrompt } from "./controlSupplementalPrompt";
+import { naturalPromptPrepareSchema, prepareNaturalPrompt } from "./controlNaturalPrompt";
 import { controlCreationOptions } from "./controlCreationOptions";
+import { storyboardBakeSchema, bakeControlStoryboard } from "./controlStoryboard";
+import { bootstrapInputSchema, bootstrapInputReadSchema, bootstrapReferenceRegisterSchema, bootstrapReferenceUpdateSchema, bootstrapDocumentImportSchema, bootstrapPrepareSchema, bootstrapApplySchema, bootstrapPromptTargetsSchema, getBootstrapInput, updateBootstrapInput, registerBootstrapReference, updateBootstrapReference, importBootstrapDocument, prepareBootstrapPrompt, applyBootstrapResult, getBootstrapPromptTargets } from "./controlBootstrap";
 import { mediaRegisterSchema, assetSetPrimarySchema, registerControlMedia, setControlAssetPrimary } from "./controlAssetRegistration";
 import { magnificComposePreviewSchema, magnificSheetComposePreviewSchema, magnificComposeExecuteSchema, magnificComposeBatchExecuteSchema, magnificResultsListSchema, magnificResultRegisterSchema, previewControlMagnific, previewControlMagnificSheet, enqueueControlMagnific, enqueueControlMagnificBatch, listControlMagnificResults, registerControlMagnificResult } from "./controlMagnific";
 import { comfyWorkflowSchema, comfyGenerateSchema, getControlComfyStatus, getControlComfyWorkflow, enqueueControlComfy } from "./controlComfy";
@@ -8,6 +13,12 @@ import { controlDetailSchema, projectControlValue } from "./controlProjection";
 import { EDITION } from "./edition";
 import { controlLorasListSchema, listControlLoras } from "./controlLoras";
 import { compositionApplyMocapSchema, applyCompositionMocap } from "./compositionMocapControl";
+import { compositionMusicUseSchema, useCompositionBgm } from "./compositionMusicControl";
+import { motionCleanupPrepareSchema, motionCleanupApplySchema, prepareCompositionMotionCleanup, applyCompositionMotionCleanup } from "./compositionMotionCleanupControl";
+import { compositionMusicImportSchema, compositionGlbImportSchema, importCompositionMusic, importCompositionGlb } from "./compositionImportControl";
+import { compositionBackgroundImportSchema, importCompositionBackground } from "./compositionBackgroundControl";
+import { backgroundUnfoldSchema, unfoldBackgroundImage } from "./controlBackgroundUnfold";
+import { sheetBakeSchema, bakeControlSheet } from "./controlSheet";
 import { compositionExportVideoSchema, enqueueCompositionVideoExport } from "./compositionVideoExport";
 import {
   mocapListSchema, mocapAnalyzeSchema, mocapHandsSchema, mocapResultSchema,
@@ -64,6 +75,8 @@ import {
   bgmCreateSchema,
   bgmUpdateSchema,
   bgmGenerateSchema,
+  bgmPromptPrepareSchema,
+  prepareBgmPrompt,
 } from "./controlBgm";
 
 export type McpContent =
@@ -141,8 +154,23 @@ export function addControlTool<T>(
 }
 const empty = z.object({}).strict();
 addControlTool("prompt_prepare", "Read the exact current AIMovieStorage prompt request used by its API button, including selected blueprint panels, project context, model/platform/common rules and up to four matching reference images. For six-face backgrounds it first saves the app's layout template. Use the returned revision with project_update prompt.apply; regenerate this request after any manual edit. Works from Codex or Claude without an app LLM API call.", promptPrepareSchema, false, prepareControlPrompt, true);
+addControlTool("project_prompt_status", "List every character, background, scene storyboard, cut image and cut video prompt slot with Korean/English presence, history count and last source note. Paginate large projects; missingOnly filters empty ready slots. Use this to continue all app prompts across chats before prompt_prepare and project_update prompt.apply.", promptStatusSchema, true, getProjectPromptStatus);
+addControlTool("project_prompt_history", "List prior versions of one character, background, scene storyboard, cut image or cut video prompt. Pass entryId to read its full Korean/English and negative text. Read the latest revision before applying a prior version; this never edits the project.", promptHistoryReadSchema, true, getProjectPromptHistory);
+addControlTool("prompt_prepare_extra", "Read the app's character profile, character/background reference analysis, first-reference, or anchored background-faces prompt request. Uses the same data builders as the app UI and returns the matching images and project revision. Apply the JSON using project_update as instructed, checking revision again before writing.", supplementalPromptPrepareSchema, true, prepareSupplementalPrompt, true);
+addControlTool("natural_prompt_prepare", "Build the app's exact '프롬프트 말로' request for saved character/background descriptions, scene summaries, and cut description/acting/background motion/VFX. Returns the current revision and corresponding project_update fields. No LLM API call.", naturalPromptPrepareSchema, true, prepareNaturalPrompt);
+addControlTool("storyboard_bake", "Bake a scene storyboard from the same primary cut images or saved composition guides and image marks as the app button. Saves the image and its bilingual rule-built video prompt in the project. Requires current project revision; inspect its output before prompt_prepare sceneVideo.", storyboardBakeSchema, false, bakeControlStoryboard);
+addControlTool("background_unfold", "Cut a registered background's finished cross-unfold image into six room faces using the app's auto-detection, edge and safety checks, and face-set file naming. If auto-detection misses a real cross-unfold, provide the editor's normalized x[5]/y[4] grid lines; safety checks still apply. Registers all six faces and marks the source as processed only after project persistence. Does not accept arbitrary file paths or bypass unsafe-boundary warnings.", backgroundUnfoldSchema, false, unfoldBackgroundImage);
+addControlTool("sheet_bake", "Render a character or background composite sheet using the app's saved shared layout, owner-specific image fills, profile table and same composeSheet renderer as the UI. Save it into the project media folder and register an editable sheet snapshot. First use project_update sheet.layout.upsert and sheet.fill with a current revision. Reuse operationId after a lost response; this creates a new sheet and never replaces or deletes an existing one.", sheetBakeSchema, false, bakeControlSheet);
+addControlTool("bootstrap_input_update", "Set the app's AI batch creation source, hint, requested counts and append/replace mode. Existing uploaded reference files remain attached. Does not call an LLM or alter project cards.", bootstrapInputSchema, false, updateBootstrapInput);
+addControlTool("bootstrap_input_get", "Read the current AI batch creation input, reference tags and imported document list so another Codex/Claude chat can continue. Use detail=full for the complete source text.", bootstrapInputReadSchema, true, getBootstrapInput);
+addControlTool("bootstrap_reference_register", "Copy a local image or video into the project's AI batch creation references, assign the app's @ref_img_N or @ref_mov_N tag, and store how it must be used. Reuse operationId after a lost response. It does not edit scene cards.", bootstrapReferenceRegisterSchema, false, registerBootstrapReference);
+addControlTool("bootstrap_reference_update", "Change how an AI batch reference is used or remove it from this batch input. Removing a reference does not delete its project file, as in the app UI.", bootstrapReferenceUpdateSchema, false, updateBootstrapReference);
+addControlTool("bootstrap_document_import", "Copy a PDF, DOCX or text screenplay/planning document to the project's DOCU folder, extract text with the app's document reader, and append it to the batch source with its filename. Reuse operationId after a lost response; inspect bootstrap_input_get before generating.", bootstrapDocumentImportSchema, false, importBootstrapDocument);
+addControlTool("bootstrap_prompt_prepare", "Build the app's exact three-stage AI batch creation request (outline, details, shots). For details provide the previous outline; for shots provide outline and details. Returns current input fingerprint and matching uploaded reference images. Do not substitute a generic request.", bootstrapPrepareSchema, true, prepareBootstrapPrompt, true);
+addControlTool("bootstrap_apply", "Parse three batch-creation answers with the same app parsers, resolve characters/backgrounds by name, construct shot compositions and persist once. Requires current project revision, matching input fingerprint and stable operationId. Replace mode requires explicit confirmedReplace and preserves cards with images.", bootstrapApplySchema, false, applyBootstrapResult);
+addControlTool("bootstrap_prompt_targets", "Read the persisted fourth-stage worklist created by bootstrap_apply. Shows which character, background and cut image/video prompts still need the app's exact prompt_prepare → project_update prompt.apply flow. Use after batch creation and when resuming in another chat; do not silently leave drafts as final prompts.", bootstrapPromptTargetsSchema, true, getBootstrapPromptTargets);
 addControlTool("creation_options", "List the app's current local, Magnific desktop composition and configured ComfyUI image/video choices. Before generation, ask the user which image/video model and route to use unless already specified or the user delegated the choice ('알아서 해'). Reuse the answer for this project; read project selections again after edits. Magnific composition alone does not generate.", z.object({ projectId: z.string().min(1).max(200).optional() }).strict(), true, input => controlCreationOptions(input.projectId));
-addControlTool("media_register", "Copy a Codex/Claude-created local image or video into a project character, background or cut, saving the generation prompt and provenance. Requires the latest project revision and a stable operationId for retries. makePrimary selects the representative asset.", mediaRegisterSchema, false, registerControlMedia);
+addControlTool("media_register", "Copy a Codex/Claude-created local image or video into a project character, background or cut, saving its source prompt and provenance. Only a complete Korean/English prompt pair also updates the card prompt and history; a single-language prompt remains on the asset. Requires latest revision and stable operationId. makePrimary selects the representative.", mediaRegisterSchema, false, registerControlMedia);
 addControlTool("asset_set_primary", "Select the representative image or video in a project character, background or cut after reading its latest revision.", assetSetPrimarySchema, false, setControlAssetPrimary);
 addControlTool("magnific_compose_preview", "Preview a saved cut's Magnific desktop composition, including its exact prompt, references and video settings. Read project_get first and supply expectedRevision. Does not upload or generate. Preview expires after ten minutes; unsaved guide captures must be saved first.", magnificComposePreviewSchema, true, previewControlMagnific);
 addControlTool("magnific_sheet_compose_preview", "Preview a character or background card's image composition through the app's Magnific 구성 button. Uses its saved prompt, selected model, reference images and background aspect ratio. Read project_get first and supply expectedRevision. Does not upload or generate.", magnificSheetComposePreviewSchema, true, previewControlMagnificSheet);
@@ -173,6 +201,7 @@ addControlTool(
   true,
   (input) => getBgmSnapshot(input.projectId),
 );
+addControlTool("bgm_prompt_prepare", "Build the exact BGM style-and-lyrics request used by the app API button for this saved track. Read bgm_get first, then use bgm_update with the returned revision. No app LLM API call is made.", bgmPromptPrepareSchema, true, prepareBgmPrompt);
 addControlTool(
   "bgm_create",
   "Create a music project and confirm settings-file persistence. Reuse operationId on retries.",
@@ -328,6 +357,12 @@ addControlTool(
   false,
   applyCompositionCommands,
 );
+addControlTool("composition_music_use", "Place a registered BGM track on the open composition timeline. The app reads the audio file's actual duration; do not guess seconds. Use the returned revision and composition_commit to save.", compositionMusicUseSchema, false, useCompositionBgm);
+addControlTool("composition_music_import", "Copy a local audio file to the app's BGM upload folder and place it on the composition timeline after measuring its actual duration. Requires an explicit local sourcePath and current composition revision; then composition_commit.", compositionMusicImportSchema, false, importCompositionMusic);
+addControlTool("composition_glb_import", "Copy a local GLB/GLTF into this project's composition folder and create an animation track in the open composition. Inspect the returned track ID, edit it with glb.update, then composition_commit.", compositionGlbImportSchema, false, importCompositionGlb);
+addControlTool("composition_background_import", "Copy a local image or HDRI into this composition's project folder. Panoramas go to the app's panorama directory; an existing background of the same kind and name is selected instead of copied again. Read the returned ID, use room.face or room.panorama as needed, then composition_commit.", compositionBackgroundImportSchema, false, importCompositionBackground);
+addControlTool("composition_motion_cleanup_prepare", "Build the exact motion-cleanup AI system and prompt used by the editor for one placed character. Requires dense motion capture keys and a current composition revision. No app LLM API call.", motionCleanupPrepareSchema, true, prepareCompositionMotionCleanup);
+addControlTool("composition_motion_cleanup_apply", "Apply automatic or Codex/Claude motion-cleanup decisions through the editor's same smoothing algorithm and undo history. Unknown issue IDs are ignored and unanswered issues use the app's automatic fallback.", motionCleanupApplySchema, false, applyCompositionMotionCleanup);
 addControlTool(
   "composition_apply_mocap",
   "Apply one person from a saved project-local mocap source to a placed character/mannequin. Uses the editor's retargeting, one undo entry and expectedRevision. Optional sourceStartSeconds/durationSeconds trim the original-video interval; timelineStartSeconds sets its destination. Defaults use the saved source. Mirror follows the analyzed result, with no second flip. Selected channels replace keys only within that interval. Returns compact metadata; call composition_commit to save. No arbitrary file paths.",

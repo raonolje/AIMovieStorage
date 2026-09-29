@@ -9,6 +9,7 @@ import PromptResultPanels from "@/components/PromptResultPanels";
 import { LlmRequestButton } from "@/components/LlmRequestButton";
 import LocalEnginesPanel from "@/components/LocalEnginesPanel";
 import { requestPromptFromLlm } from "@/lib/promptRequest";
+import { bgmRequestData } from "@/lib/bgmPromptRequest";
 import PromptHistoryShelf from "@/components/PromptHistoryShelf";
 import type { SavedPromptEntry } from "@/lib/promptHistory";
 import { useApiReady } from "@/lib/useApiReady";
@@ -39,44 +40,6 @@ import {
   subscribeBgmProjects,
   patchBgmTrack,
 } from "@/lib/bgmProjects";
-
-/**
- * LLM 에 보낼 **곡 재료 한 벌**.
- *
- * 「LLM 요청문」 창에 뜨는 글과 API 로 보내는 글이 한 글자도 달라선 안 됩니다(`promptRequest` 규칙).
- * 두 군데에 손으로 적어 두었더니 한쪽에만 보컬·구조 태그를 빠뜨려, 모델이 보컬을 모르는 채
- * 「가사 없음, instrumental」 로 답하는 일이 있었습니다().
- */
-function bgmRequestData(track: BgmTrack) {
-  return {
-    name: track.name,
-    usage: track.usage,
-    mood: track.mood,
-    genre: track.genre,
-    instruments: track.instruments,
-    vocals: track.vocals ?? [],
-    era: track.era ?? [],
-    production: track.production ?? [],
-    structure: track.structure ?? [],
-    tempo: track.tempo || null,
-    durationSeconds: track.durationSeconds || null,
-    instrumental: track.instrumental,
-    /*
-      참·거짓만 보내면 모델이 «알아서» 연주곡으로 답합니다. 사람이 끈 스위치를 모델이
-      되켜는 셈이라(),
-      **한국어 지시문으로** 함께 보냅니다. 값이 아니라 말이어야 지켜집니다.
-    */
-    지시: track.instrumental
-      ? "연주곡입니다. 노랫말을 짓지 말고 구간 태그와 연주 지시만 적으세요."
-      : "노래입니다. 반드시 부를 가사를 쓰세요. instrumental·no vocals 같은 말을 스타일에 넣지 마세요.",
-    // 이미 적어 둔 가사가 있으면 그것을 **고쳐 쓰라**는 뜻으로 함께 보냅니다.
-    lyrics: track.instrumental ? null : track.lyricsKo || track.lyrics || null,
-    excludeStyles: track.excludeStyles || null,
-    reference: track.reference || null,
-    notes: track.notes || null,
-    targetTool: track.targetTool,
-  };
-}
 
 /**
  * Suno 칸의 **글자 수**와 그 칸에서 알아 둘 것 한 줄.

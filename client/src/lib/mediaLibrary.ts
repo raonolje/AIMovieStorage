@@ -495,7 +495,7 @@ export async function saveProjectMediaAsset(
  */
 export async function importProjectMediaAsset(
   sourcePath: string,
-  options: Omit<SaveAssetOptions, "subdir" | "number">,
+  options: Omit<SaveAssetOptions, "number">,
 ): Promise<{ path: string; name: string } | null> {
   const baseDirectory = getMediaLibrarySettings().baseDirectory.trim();
   if (!isDesktopApp() || !baseDirectory || !options.projectName.trim()) return null;
@@ -506,6 +506,7 @@ export async function importProjectMediaAsset(
       assetType: options.assetType,
       ownerName: options.ownerName,
       stem: options.stem?.trim() || null,
+      subdir: options.subdir || null,
       sourcePath,
     },
   });

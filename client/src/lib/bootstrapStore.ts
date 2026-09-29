@@ -104,6 +104,8 @@ export interface BootstrapInput {
 /** 일괄 생성에 넣은 문서 한 개. */
 export interface BootstrapDoc {
   id: string;
+  /** 대화 조종기에서 같은 작업 ID로 다른 문서를 다시 보내지 않기 위한 경로. */
+  importSourcePath?: string;
   /** 프로젝트 폴더에 저장된 경로(`<프로젝트>/DOCU/…`). */
   path: string;
   /** 화면에 보일 이름(확장자까지 — 무슨 갈래인지가 보여야 합니다). */
@@ -116,6 +118,8 @@ export interface BootstrapDoc {
 
 export interface BootstrapRef {
   id: string;
+  /** 조종기 재시도에서 같은 작업 ID에 다른 원본을 잘못 묶지 않기 위한 출처. */
+  importSourcePath?: string;
   /** 프로젝트 폴더에 저장된 경로. */
   path: string;
   /** 화면에 보일 이름(확장자 없이). */
@@ -412,7 +416,7 @@ onProjectOpened((project) => deliver(project));
  * 화면을 열 때마다(`registerBootstrapTarget`) 같은 알림이 뜨면 잔소리가 됩니다.
  */
 /** 지난 답 목록에 쌓습니다. 같은 답이 두 줄로 쌓이지 않게 맨 앞과 견줍니다. */
-function keepPast(project: string, result: BootstrapResult, input: BootstrapInput) {
+export function keepPast(project: string, result: BootstrapResult, input: BootstrapInput) {
   const made = summarizeBootstrap(result, { characters: [], backgrounds: [] });
   const note = [
     `캐릭터 ${made.characterNames.length}`,

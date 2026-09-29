@@ -34,7 +34,8 @@ import {
   stemHasPrefix,
   type ProjectAssetType,
 } from "@/lib/mediaLibrary";
-import { modelLabel, normalizeImageModelId } from "@/lib/promptLibrary";
+import { normalizeImageModelId } from "@/lib/promptLibrary";
+import { firstReferenceRequestData, referenceAnalysisRequestData } from "@/lib/supplementalPromptPayload";
 import { filterImageFiles, type PromptWorkflowState } from "@/lib/promptWorkflow";
 import { uid, type GeneratedImageAsset, type ReferenceImage } from "@/lib/projectTypes";
 import type { ProjectContextSummary } from "@/lib/projectContext";
@@ -530,12 +531,7 @@ export function usePromptCard<
         // 안 적으면 여러 개를 돌렸을 때 목록에서 구분이 안 됩니다.
         label: `${name || "이름 없음"} · 레퍼런스 분석`,
         deliveredTo: `${name || "이름 없음"} · 이미지 분석 칸에 넣음`,
-        data: {
-          project: options.projectContext?.facts ?? null,
-          name,
-          description: options.description,
-          references: referenceTags(),
-        },
+        data: referenceAnalysisRequestData({ project: options.projectContext?.facts ?? null, name, description: options.description, references: referenceTags() }),
         images,
         onStarted: (id) => {
           analysisJob.current = id;
@@ -644,18 +640,11 @@ export function usePromptCard<
    * `kind`·`modelId`·`spaceKind` 는 문자열이라 그대로 `::when` 변수가 됩니다 —
    * 요청 문구가 인물·장소·물건과 모델 문법에 따라 다른 문단을 고릅니다.
    */
-  const firstReferencePayload = () => ({
-    project: options.projectContext?.facts ?? null,
-    kind,
-    name,
-    description: options.description,
-    // 키·체형·역할처럼 그림에서 읽을 수 없는 값. 인물 카드만 줍니다.
-    basics: options.basics ?? null,
-    // 이 자리는 대개 레퍼런스가 없어서 비어 있습니다. 있으면 재료로 씁니다.
-    analysis: entity.analysis || null,
-    spaceKind: options.spaceKind ?? null,
-    modelId: firstReferenceModelId(),
-    modelLabel: modelLabel(firstReferenceModelId()),
+  const firstReferencePayload = () => firstReferenceRequestData({
+    project: options.projectContext?.facts ?? null, kind, name,
+    description: options.description, basics: options.basics ?? null,
+    analysis: entity.analysis, spaceKind: options.spaceKind,
+    firstReferenceModel: entity.firstReferenceModel,
   });
 
   const runFirstReference = async () => {
@@ -961,7 +950,9 @@ export function usePromptCard<
         */
         platformId: getTargetPlatform(),
         data: promptRequestPayload(references),
-        images: referenceSources(),
+        // 방금 추가한 전개도 틀은 아직 현재 렌더의 entity.references에 없을 수 있습니다.
+        // 요청문에 쓴 @태그와 실제 전송 이미지는 같은 목록에서 골라야 합니다.
+        images: sheetReferenceSources(references),
       });
       applyPrompt(withUnfoldFrame(result, references), conditions());
       toast.success("프롬프트를 받았습니다.");

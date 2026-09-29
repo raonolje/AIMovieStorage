@@ -3,6 +3,7 @@ import { Loader2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { requestJsonFromLlm } from "@/lib/promptRequest";
 import { hasOrders, missingSignal, plainify } from "@/lib/naturalPrompt";
+import { naturalPromptRequestData } from "@/lib/naturalPromptRequest";
 import type { ProjectContextSummary } from "@/lib/projectContext";
 
 /**
@@ -84,15 +85,7 @@ export default function NaturalPromptButton({
         label: `${
           kind === "acting" ? "연기" : kind === "vfx" ? "효과" : kind === "background" ? "배경 움직임" : "상황"
         } · 프롬프트 말로`,
-        data: {
-          text: body,
-          kind,
-          isVideo: Boolean(isVideo),
-          seconds: seconds ?? null,
-          shot: shot ?? null,
-          people: people ?? [],
-          project: context?.facts ?? null,
-        },
+        data: naturalPromptRequestData({ text: body, kind, isVideo, seconds, shot, people, context }),
       });
       const ko = (made.ko || "").trim();
       if (!ko) {

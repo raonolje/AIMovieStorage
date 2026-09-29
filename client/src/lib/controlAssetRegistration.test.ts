@@ -19,6 +19,7 @@ vi.mock("./controlMedia", async (load) => {
 vi.mock("./projectControl", () => ({
   ProjectControlError: class extends Error { constructor(public code: string, message: string) { super(message); } },
   getProjectSnapshot: async () => ({ revision: mock.revision }),
+  checkKoreanPrompt: (value: string) => { if (value && !/[가-힣]/.test(value)) throw Error("한글 프롬프트가 아닙니다"); },
 }));
 vi.mock("./localProjectStore", () => ({ projectFolderName: () => "test-project" }));
 vi.mock("./projectWrite", () => ({
@@ -47,9 +48,25 @@ describe("chat asset registration", () => {
     expect(first).toMatchObject({ assetId: "new-asset", persisted: true, primary: true });
     expect(mock.importFile).toHaveBeenCalledOnce();
     expect(mock.draft.scenes[0].cuts[0].images).toMatchObject([{ importOperationId: "op-1", promptEn: "concert wide shot", isPrimary: true }]);
-    expect(mock.draft.scenes[0].cuts[0].promptEn).toBe("concert wide shot");
+    expect(mock.draft.scenes[0].cuts[0].promptEn).toBeUndefined();
+    expect(mock.draft.scenes[0].cuts[0].promptHistory).toBeUndefined();
     expect(await registerControlMedia(request)).toMatchObject({ reused: true });
     expect(mock.importFile).toHaveBeenCalledOnce();
+    expect(mock.draft.scenes[0].cuts[0].promptHistory).toBeUndefined();
+  });
+
+  it("new imported prompts preserve the earlier image and video prompt versions", async () => {
+    mock.draft.scenes[0].cuts[0].promptKo = "이전 그림";
+    mock.draft.scenes[0].cuts[0].promptEn = "old image";
+    mock.draft.scenes[0].cuts[0].videoPromptKo = "이전 영상";
+    mock.draft.scenes[0].cuts[0].videoPromptEn = "old video";
+    await registerControlMedia({ projectId: "p", expectedRevision: "r1", operationId: "image-1",
+      target: { kind: "cut", id: "cut-1" }, sourcePath: "C:/chat/result.png", promptKo: "새 그림", promptEn: "new image" });
+    await registerControlMedia({ projectId: "p", expectedRevision: "r1", operationId: "video-1",
+      target: { kind: "cut", id: "cut-1" }, sourcePath: "C:/chat/result.mp4", promptKo: "새 영상", promptEn: "new video" });
+    const cut = mock.draft.scenes[0].cuts[0];
+    expect(cut.promptHistory.map((item: { ko: string }) => item.ko)).toEqual(["새 그림", "이전 그림"]);
+    expect(cut.videoPromptHistory.map((item: { ko: string }) => item.ko)).toEqual(["새 영상", "이전 영상"]);
   });
 
   it("selects only one primary in the target shelf", async () => {

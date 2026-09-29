@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { sameImmutableJson } from "./immutableJson";
 import * as edit from "@/lib/compositionEdit";
-import type { CompositionState, Vector3Value } from "@/lib/composition";
+import { ROOM_DRIFT_MAX, roomDriftOf, roomVideoFaceOf, type CompositionState, type CompositionSwapRef, type Vector3Value } from "@/lib/composition";
 import { SHOT_PRESETS } from "@/lib/cameraMoves";
 import { EDITABLE_BONES, fingerStateToBonePose } from "@/lib/rig";
+import { applyRoomPresetIn, type RoomPreset } from "@/lib/roomPreset";
 
 const id = z.string().min(1).max(200);
 const label = z.string().min(1).max(500);
@@ -102,6 +103,17 @@ export const compositionCommandSchema = z.discriminatedUnion("op", [
     .strict(),
   z.object({ op: z.literal("room.select"), id }).strict(),
   z.object({ op: z.literal("room.remove"), id }).strict(),
+  z.object({ op: z.literal("room.preset_apply"), id }).strict(),
+  z.object({ op: z.literal("background.select"), id, kind: z.enum(["panorama", "hdri"]) }).strict(),
+  z.object({ op: z.literal("room.background"), id, backgroundId: id.nullable() }).strict(),
+  z.object({ op: z.literal("room.drift"), id, drift: z.object({
+    x: z.number().finite().min(-ROOM_DRIFT_MAX).max(ROOM_DRIFT_MAX),
+    y: z.number().finite().min(-ROOM_DRIFT_MAX).max(ROOM_DRIFT_MAX),
+  }).strict().nullable() }).strict(),
+  z.object({ op: z.literal("room.video"), id, video: z.object({
+    face: z.enum(["front", "back", "left", "right", "top", "bottom", "panorama"]),
+    source: z.string().max(4000),
+  }).strict().nullable() }).strict(),
   z
     .object({
       op: z.literal("room.face"),
@@ -224,6 +236,10 @@ export const compositionCommandSchema = z.discriminatedUnion("op", [
     })
     .strict(),
   z.object({ op: z.literal("object.remove"), id }).strict(),
+  z.object({ op: z.literal("object.image"), id, path: z.string().max(4000) }).strict(),
+  z.object({ op: z.literal("object.swap"), id, reference: z.object({
+    kind: z.enum(["character", "asset", "background"]), id,
+  }).strict().nullable() }).strict(),
   z
     .object({
       op: z.literal("object.mount"),
@@ -263,6 +279,9 @@ export const compositionCommandSchema = z.discriminatedUnion("op", [
     })
     .strict(),
   z.object({ op: z.literal("group.ungroup"), id }).strict(),
+  z.object({ op: z.literal("group.swap"), id, reference: z.object({
+    kind: z.enum(["character", "asset", "background"]), id,
+  }).strict().nullable() }).strict(),
   z.object({ op: z.literal("shot.add"), name: label.optional() }).strict(),
   z.object({ op: z.literal("shot.save"), id }).strict(),
   z.object({ op: z.literal("shot.goto"), id }).strict(),
@@ -401,6 +420,10 @@ export const compositionCommandSchema = z.discriminatedUnion("op", [
       easing,
     })
     .strict(),
+  z.object({ op: z.literal("pose_joint_key.move"), targetId: id, keyId: id, bone: id, timeSeconds: seconds }).strict(),
+  z.object({ op: z.literal("pose_joint_key.remove"), targetId: id, keyId: id, bone: id }).strict(),
+  z.object({ op: z.literal("pose_key_group.move"), targetId: id, keyId: id, timeSeconds: seconds }).strict(),
+  z.object({ op: z.literal("pose_key_group.remove"), targetId: id, keyId: id }).strict(),
   z
     .object({
       op: z.literal("occlusion_key.room_toggle"),
@@ -506,7 +529,14 @@ export class CompositionControlError extends Error {
 
 export interface CompositionCommandContext {
   characterIds: readonly string[];
+  characterNames?: Readonly<Record<string, string>>;
   imageIds?: readonly string[];
+  backgroundIds?: readonly string[];
+  videoIds?: readonly string[];
+  wallImagePaths?: readonly string[];
+  roomPresets?: readonly RoomPreset[];
+  swapRefs?: readonly CompositionSwapRef[];
+  musicPaths?: readonly string[];
 }
 
 const radians = (v: Vector3Value): Vector3Value => ({
@@ -583,6 +613,12 @@ export function reduceCompositionCommands(
             state.customBackgrounds.some((item) => item.id === value),
           value,
         );
+    };
+    const swap = (value: { kind: CompositionSwapRef["kind"]; id: string } | null) => {
+      if (!value) return null;
+      const found = context.swapRefs?.find((item) => item.kind === value.kind && item.id === value.id);
+      requireId(found, value.id);
+      return found!;
     };
     const record = (next: { state: CompositionState; id: string | null }) => {
       state = next.state;
@@ -677,6 +713,40 @@ export function reduceCompositionCommands(
         room(command.id);
         state = edit.removeRoomIn(state, command.id);
         break;
+      case "background.select":
+        requireId(state.customBackgrounds.some((item) => item.id === command.id && item.kind === command.kind), command.id);
+        state = edit.selectCustomBackgroundIn(state, command.kind, command.id);
+        break;
+      case "room.background":
+        room(command.id);
+        if (command.backgroundId) requireId(context.backgroundIds?.includes(command.backgroundId), command.backgroundId);
+        state = edit.setRoomBackgroundIn(state, command.backgroundId ?? "", command.id);
+        break;
+      case "room.drift":
+        room(command.id);
+        if (edit.roomsOf(state).find((item) => item.id === command.id)?.horizon && command.drift)
+          throw new CompositionControlError("invalid_target", "호리존 방은 배경 그림 흐름을 사용할 수 없습니다.");
+        state = edit.patchRoomIn(state, command.id, (item) => ({ ...item, drift: roomDriftOf(command.drift) }));
+        break;
+      case "room.video": {
+        room(command.id);
+        const currentRoom = edit.roomsOf(state).find((item) => item.id === command.id)!;
+        if (currentRoom.horizon && command.video)
+          throw new CompositionControlError("invalid_target", "호리존 방에는 배경 영상을 걸 수 없습니다.");
+        if (command.video?.source) requireId(context.videoIds?.includes(command.video.source), command.video.source);
+        if (command.video && roomVideoFaceOf(currentRoom) === "panorama" && command.video.face !== "panorama")
+          throw new CompositionControlError("invalid_target", "돔 배경 영상은 파노라마 면에 걸어야 합니다.");
+        if (command.video && roomVideoFaceOf(currentRoom) !== "panorama" && command.video.face === "panorama")
+          throw new CompositionControlError("invalid_target", "상자 방에는 파노라마 영상을 걸 수 없습니다.");
+        state = edit.patchRoomIn(state, command.id, (item) => ({ ...item, video: command.video ?? undefined }));
+        break;
+      }
+      case "room.preset_apply": {
+        const preset = context.roomPresets?.find((item) => item.id === command.id);
+        requireId(preset, command.id);
+        state = applyRoomPresetIn(state, preset!);
+        break;
+      }
       case "room.face":
         room(command.id);
         image(command.imageId);
@@ -847,6 +917,15 @@ export function reduceCompositionCommands(
         object(command.id);
         state = edit.removeObjectIn(state, command.id);
         break;
+      case "object.image":
+        object(command.id);
+        if (command.path) requireId(context.wallImagePaths?.includes(command.path), command.path);
+        state = edit.setObjectImageIn(state, command.id, command.path);
+        break;
+      case "object.swap":
+        object(command.id);
+        state = edit.setObjectSwapIn(state, command.id, swap(command.reference));
+        break;
       case "object.mount":
         object(command.id);
         room(command.roomId);
@@ -919,6 +998,10 @@ export function reduceCompositionCommands(
           command.id,
         );
         state = edit.ungroupObjectsIn(state, command.id);
+        break;
+      case "group.swap":
+        requireId(edit.objectGroupsOf(state).some((item) => item.id === command.id), command.id);
+        state = edit.patchObjectGroupIn(state, command.id, { swapRef: swap(command.reference) ?? undefined });
         break;
       case "shot.add":
         record(edit.addCameraShotIn(state, command.name));
@@ -1150,6 +1233,8 @@ export function reduceCompositionCommands(
             ),
           command.keyId,
         );
+        if (command.timeSeconds > edit.timelineOf(state).duration)
+          throw new CompositionControlError("invalid_time", "동작 키의 시각이 타임라인 길이를 넘습니다.");
         state = edit.moveMotionKeyIn(
           state,
           command.targetId,
@@ -1190,6 +1275,28 @@ export function reduceCompositionCommands(
           command.easing,
         );
         break;
+      case "pose_joint_key.move":
+      case "pose_joint_key.remove": {
+        const track = edit.motionTracksOf(state).find((item) => item.targetId === command.targetId && item.channel === "pose");
+        requireId(track && edit.poseJointRowsOf(track).some((row) => row.bone === command.bone && row.keys.some((key) => key.id === command.keyId)), command.keyId);
+        if (command.op === "pose_joint_key.move") {
+          if (command.timeSeconds > edit.timelineOf(state).duration)
+            throw new CompositionControlError("invalid_time", "관절 키의 시각이 타임라인 길이를 넘습니다.");
+          state = edit.movePoseJointKeyIn(state, command.targetId, command.keyId, command.bone, command.timeSeconds);
+        } else state = edit.removePoseJointKeyIn(state, command.targetId, command.keyId, command.bone);
+        break;
+      }
+      case "pose_key_group.move":
+      case "pose_key_group.remove": {
+        const track = edit.motionTracksOf(state).find((item) => item.targetId === command.targetId && item.channel === "pose");
+        requireId(track?.keys.some((key) => key.id === command.keyId), command.keyId);
+        if (command.op === "pose_key_group.move") {
+          if (command.timeSeconds > edit.timelineOf(state).duration)
+            throw new CompositionControlError("invalid_time", "자세 키의 시각이 타임라인 길이를 넘습니다.");
+          state = edit.movePoseKeyGroupIn(state, command.targetId, command.keyId, command.timeSeconds);
+        } else state = edit.removePoseKeyGroupIn(state, command.targetId, command.keyId);
+        break;
+      }
       case "occlusion_key.room_toggle":
         room(command.roomId);
         state = edit.toggleOccludeKeyIn(

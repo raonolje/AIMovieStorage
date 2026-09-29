@@ -134,6 +134,10 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
     const loras = await import("./controlLoras");
     const magnific = await import("./controlMagnific");
     const prompt = await import("./controlPrompt");
+    const extraPrompt = await import("./controlSupplementalPrompt");
+    const naturalPrompt = await import("./controlNaturalPrompt");
+    const storyboard = await import("./controlStoryboard");
+    const bootstrap = await import("./controlBootstrap");
     const comfy = await import("./controlComfy");
     for (const [name, schema] of [
       ["project_create", project.projectCreateSchema], ["project_update", project.projectUpdateSchema],
@@ -146,6 +150,12 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
       ["composition_export_video", exportVideo.compositionExportVideoSchema],
       ["loras_list", loras.controlLorasListSchema],
       ["prompt_prepare", prompt.promptPrepareSchema],
+      ["prompt_prepare_extra", extraPrompt.supplementalPromptPrepareSchema],
+      ["natural_prompt_prepare", naturalPrompt.naturalPromptPrepareSchema],
+      ["storyboard_bake", storyboard.storyboardBakeSchema],
+      ["bootstrap_input_update", bootstrap.bootstrapInputSchema],
+      ["bootstrap_prompt_prepare", bootstrap.bootstrapPrepareSchema],
+      ["bootstrap_apply", bootstrap.bootstrapApplySchema],
       ["magnific_compose_preview", magnific.magnificComposePreviewSchema],
       ["magnific_sheet_compose_preview", magnific.magnificSheetComposePreviewSchema],
       ["magnific_compose", magnific.magnificComposeExecuteSchema],

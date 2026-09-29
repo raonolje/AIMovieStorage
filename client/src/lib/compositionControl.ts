@@ -215,7 +215,14 @@ function snapshot(session: Session, detail: ControlDetail = "full") {
     state: projected.value,
     projection: projected.projection,
     availableCharacterIds: [...value.context.characterIds],
+    availableCharacterNames: { ...(value.context.characterNames ?? {}) },
     availableImageIds: [...(value.context.imageIds ?? [])],
+    availableBackgroundIds: [...(value.context.backgroundIds ?? [])],
+    availableVideoIds: [...(value.context.videoIds ?? [])],
+    availableWallImagePaths: [...(value.context.wallImagePaths ?? [])],
+    availableRoomPresets: (value.context.roomPresets ?? []).map(({ id, name }) => ({ id, name })),
+    availableSwapRefs: [...(value.context.swapRefs ?? [])],
+    availableMusicPaths: [...(value.context.musicPaths ?? [])],
   };
 }
 

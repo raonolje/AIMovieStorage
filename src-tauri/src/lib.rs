@@ -413,12 +413,13 @@ fn import_project_asset(request: ImportAssetRequest) -> Res<String> {
     if !source.is_file() {
         return Err(format!("파일을 찾지 못했습니다: {}", request.source_path));
     }
-    let dir = owner_dir(
+    let owner = owner_dir(
         &request.base_directory,
         &request.project_name,
         &request.asset_type,
         &request.owner_name,
     );
+    let dir = owner_subdir(&owner, request.subdir.as_deref())?;
     ensure_dir(&dir)?;
     let ext = source
         .extension()
@@ -448,6 +449,7 @@ struct ImportAssetRequest {
     asset_type: String,
     owner_name: String,
     stem: Option<String>,
+    subdir: Option<String>,
     /// 디스크에 있는 원본 파일의 전체 경로.
     source_path: String,
 }

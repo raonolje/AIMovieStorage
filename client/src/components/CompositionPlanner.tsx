@@ -33,6 +33,7 @@ import { PlannerMoveTimeline } from "@/components/composition/planner/MoveTimeli
 import { TimelinePanel } from "@/components/composition/planner/TimelinePanel";
 import type { ProjectDraft } from "@/lib/projectTypes";
 import { applyRoomPresetIn, captureRoomPreset, type RoomPreset } from "@/lib/roomPreset";
+import { listBgmChoices } from "@/lib/bgmLibrary";
 import { usePlannerPlayback } from "@/components/composition/planner/usePlannerPlayback";
 import { usePlannerMedia } from "@/components/composition/planner/usePlannerMedia";
 import { useReferenceVideo } from "@/components/composition/planner/useReferenceVideo";
@@ -690,7 +691,17 @@ export default function CompositionPlanner({
     open,
     identity: cutId && projectName ? { cutId, projectName, sceneTitle, cutOrder } : null,
     history,
-    context: { characterIds: characters.map(item => item.id), imageIds: media.availableBackgrounds.map(item => item.id) },
+    context: {
+      characterIds: characters.map(item => item.id),
+      characterNames: Object.fromEntries(characters.map(item => [item.id, item.name])),
+      imageIds: media.availableBackgrounds.map(item => item.id),
+      backgroundIds: backgrounds.map(item => item.id),
+      videoIds: media.roomVideos.map(item => item.id),
+      wallImagePaths: media.listedBackgrounds.map(item => item.filePath ?? item.id),
+      roomPresets: roomPresets ?? [],
+      swapRefs: swapOptions.map(({ kind, id, name }) => ({ kind, id, name })),
+      musicPaths: listBgmChoices().map((item) => item.path),
+    },
     capture: () => captureRef.current,
     stopPlayback: () => { setPlaying(false); setPreviewing(false); },
     exportVideo: video.exportVideo,

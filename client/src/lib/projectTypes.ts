@@ -803,6 +803,18 @@ export interface ProjectDraft extends ProjectContext {
    * 옮겨 다른 공간을 만들 때 원본이 깨끗하게 남습니다.
    */
   imageMarks?: Record<string, ImageMark[]>;
+  /** 대화 조종기로 적용한 일괄 생성 작업 열쇠. 응답 분실 후 같은 답의 중복 씬 생성을 막습니다. */
+  controlBootstrapOperations?: string[];
+  /** 대화 조종기의 카드별 상세 프롬프트 작업표. 다른 채팅에서도 같은 4단계를 이어갑니다. */
+  controlBootstrapPlans?: Array<{
+    operationId: string;
+    targets: Array<
+      | { kind: "character"; id: string }
+      | { kind: "background"; id: string }
+      | { kind: "cutImage"; sceneId: string; cutId: string }
+      | { kind: "cutVideo"; sceneId: string; cutId: string }
+    >;
+  }>;
   progress?: StepProgress;
   /** 마그니픽 후보함 처리 기록. 키는 후보함 기준 상대 경로. */
   magnificHandled?: Record<string, MagnificHandled>;

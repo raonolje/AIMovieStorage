@@ -83,6 +83,119 @@ function fixture(initial = normalizeComposition()) {
 }
 
 describe("구도 명령 관문", () => {
+  it("대화 명령만으로 5인 무대·위치·카메라 이동과 클로즈업 키를 저장한다", async () => {
+    const ids = ["seoah", "jian", "mina", "yuna", "harin"];
+    const f = fixture();
+    f.port.read = () => ({ state: f.state(), canUndo: true, canRedo: false,
+      context: { characterIds: ids, backgroundIds: ["stage"] } });
+    const first = await applyCompositionCommands({ sessionId: f.sessionId, expectedRevision: 0,
+      commands: [{ op: "timeline.set", duration: 15, fps: 24 }, { op: "room.add", kind: "indoor", name: "공연장" },
+        ...ids.map((id) => ({ op: "character.place" as const, id }))] });
+    expect(first.created).toHaveLength(1);
+    const roomId = first.created![0].id;
+    const placed = await applyCompositionCommands({ sessionId: f.sessionId, expectedRevision: first.revision,
+      commands: [{ op: "room.background", id: roomId, backgroundId: "stage" },
+        ...ids.map((id, index) => ({ op: "character.update" as const, id,
+          positionMeters: { x: index - 2, y: 0, z: 0 } })),
+        { op: "camera_move.add", presetId: SHOT_PRESETS.find((item) => item.kind === "free")!.id }] });
+    const moveId = placed.created![0].id;
+    const keyed = await applyCompositionCommands({ sessionId: f.sessionId, expectedRevision: placed.revision,
+      commands: [{ op: "camera_move.update", id: moveId, startTime: 0, duration: 15 },
+        { op: "camera_key.add", id: moveId, localTimeSeconds: 0, channels: ["position", "target", "fov"] },
+        { op: "camera_key.add", id: moveId, localTimeSeconds: 8, channels: ["position", "target", "fov"] }] });
+    const move = f.state().cameraMoves?.find((item) => item.id === moveId);
+    expect(move?.keys).toHaveLength(2);
+    const closeId = move!.keys![1].id;
+    const final = await applyCompositionCommands({ sessionId: f.sessionId, expectedRevision: keyed.revision,
+      commands: [{ op: "camera_key.update", id: moveId, keyId: closeId,
+        positionMeters: { x: -2, y: 1.65, z: 1.3 }, targetMeters: { x: -2, y: 1.65, z: 0 }, fovDegrees: 32 }] });
+    expect(f.state().characters).toHaveLength(5);
+    expect(f.state().rooms![0].backgroundId).toBe("stage");
+    expect(f.state().cameraMoves?.find((item) => item.id === moveId)?.keys?.[1].pose).toMatchObject({
+      position: { x: -2, y: 1.65, z: 1.3 }, target: { x: -2, y: 1.65, z: 0 },
+    });
+    expect(f.state().cameraMoves!.find((item) => item.id === moveId)!.keys![1].pose.fovScale! * f.state().camera.fovDegrees).toBeCloseTo(32);
+    const committed = await commitComposition({ sessionId: f.sessionId, expectedRevision: final.revision });
+    expect(committed.persistedLatest).toBe(true);
+  });
+  it("타임라인 음악 구간은 현재 올린 곡에서만 편집한다", () => {
+    const start = normalizeComposition();
+    const added = { ...start, timeline: { ...start.timeline!, music: { path: "BGM/곡/무대.wav", name: "무대", seconds: 68, sections: [] } } };
+    expect(added.timeline?.music).toMatchObject({ path: "BGM/곡/무대.wav", seconds: 68, sections: [] });
+    const edited = reduceCompositionCommands(added, [{ op: "music.update", offset: 12, bpm: 120 }], context).state;
+    expect(edited.timeline?.music).toMatchObject({ offset: 12, bpm: 120 });
+    expect(() => reduceCompositionCommands(start, [{ op: "music.update", bpm: 120 }], context)).toThrow();
+  });
+  it("방 라이브러리와 벽 그림도 앱 편집 함수를 거치고 다른 파일 경로는 막는다", () => {
+    const source = normalizeComposition();
+    const start = reduceCompositionCommands(source, [{ op: "room.add", kind: "indoor" },
+      { op: "object.add", kind: "wall", label: "무대 벽" }], context).state;
+    const roomId = start.rooms![0].id;
+    const wallId = start.objects[0].id;
+    const preset = { id: "preset", name: "무대", savedAt: "2026-09-29", room: start.rooms![0], objects: [], groups: [] };
+    const linked = { ...context, roomPresets: [preset], wallImagePaths: ["C:/project/stage.png"] };
+    const changed = reduceCompositionCommands(start, [{ op: "object.image", id: wallId, path: "C:/project/stage.png" },
+      { op: "room.preset_apply", id: "preset" }], linked).state;
+    expect(changed.objects[0].image).toBe("C:/project/stage.png");
+    expect(changed.rooms).toHaveLength(2);
+    expect(changed.rooms![1].id).not.toBe(roomId);
+    expect(() => reduceCompositionCommands(start, [{ op: "object.image", id: wallId, path: "C:/outside.png" }], linked)).toThrow();
+  });
+  it("가져온 파노라마와 HDRI는 존재하는 항목만 환경으로 선택한다", () => {
+    const source = normalizeComposition();
+    const state = { ...source, customBackgrounds: [
+      { id: "sky", name: "하늘", thumb: "asset://sky", kind: "hdri" as const },
+      { id: "stage", name: "무대", thumb: "asset://stage", kind: "panorama" as const },
+    ] };
+    expect(reduceCompositionCommands(state, [{ op: "background.select", id: "sky", kind: "hdri" }], context).state)
+      .toMatchObject({ environmentMode: "hdri", hdriId: "sky" });
+    expect(reduceCompositionCommands(state, [{ op: "background.select", id: "stage", kind: "panorama" }], context).state)
+      .toMatchObject({ environmentMode: "panorama", panoramaId: "stage" });
+    expect(() => reduceCompositionCommands(state, [{ op: "background.select", id: "sky", kind: "panorama" }], context)).toThrow();
+  });
+  it("조종기가 방 배경·흐름·영상과 소품/묶음 스왑을 앱 편집 상태에 보존한다", () => {
+    const source = normalizeComposition();
+    const linked = { characterIds: ["person"], imageIds: ["image"], backgroundIds: ["place"],
+      videoIds: ["C:/project/loop.mp4"], swapRefs: [{ kind: "character" as const, id: "person", name: "서아" }] };
+    const added = reduceCompositionCommands(source, [{ op: "room.add", kind: "indoor" },
+      { op: "object.add", kind: "box", label: "무대 소품" }, { op: "object.add", kind: "box", label: "다른 소품" }], linked);
+    const roomId = added.state.rooms![0].id;
+    const [first, second] = added.state.objects.map((item) => item.id);
+    const grouped = reduceCompositionCommands(added.state, [{ op: "group.create", ids: [first, second] }], linked);
+    const groupId = grouped.state.objectGroups![0].id;
+    const result = reduceCompositionCommands(grouped.state, [
+      { op: "room.background", id: roomId, backgroundId: "place" },
+      { op: "room.drift", id: roomId, drift: { x: 0.04, y: 0 } },
+      { op: "room.video", id: roomId, video: { face: "front", source: "C:/project/loop.mp4" } },
+      { op: "object.swap", id: first, reference: { kind: "character", id: "person" } },
+      { op: "group.swap", id: groupId, reference: { kind: "character", id: "person" } },
+    ], linked).state;
+    expect(result.rooms![0]).toMatchObject({ backgroundId: "place", drift: { x: 0.04, y: 0 }, video: { face: "front", source: "C:/project/loop.mp4" } });
+    expect(result.objects.find((item) => item.id === first)?.swapRef).toEqual({ kind: "character", id: "person", name: "서아" });
+    expect(result.objectGroups![0].swapRef).toEqual({ kind: "character", id: "person", name: "서아" });
+    expect(() => reduceCompositionCommands(result, [{ op: "room.video", id: roomId,
+      video: { face: "front", source: "C:/outside.mp4" } }], linked)).toThrow();
+    expect(() => reduceCompositionCommands(result, [{ op: "room.background", id: roomId, backgroundId: "other" }], linked)).toThrow();
+  });
+
+  it("관절 키와 접힌 자세 키는 화면과 같은 관절별 이동·삭제 규칙을 따른다", () => {
+    const source = normalizeComposition();
+    const start: CompositionState = { ...source, motionTracks: [{ id: "pose", targetId: "person", channel: "pose", keys: [
+      { id: "first", time: 0, value: { x: 0, y: 0, z: 0 }, bones: { arm: { x: 0, y: 0, z: 0 }, leg: { x: 0, y: 0, z: 0 } }, joints: ["arm", "leg"] },
+      { id: "second", time: 2, value: { x: 0, y: 0, z: 0 }, bones: { arm: { x: 1, y: 0, z: 0 }, leg: { x: 0, y: 1, z: 0 } }, joints: ["arm", "leg"] },
+    ] }] };
+    const moved = reduceCompositionCommands(start, [{ op: "pose_joint_key.move", targetId: "person", keyId: "second", bone: "arm", timeSeconds: 3 }], context).state;
+    const track = moved.motionTracks![0];
+    expect(track.keys.some((key) => key.time === 3 && key.joints?.includes("arm"))).toBe(true);
+    expect(track.keys.some((key) => key.time === 2 && key.joints?.includes("leg"))).toBe(true);
+    const grouped = reduceCompositionCommands(start, [{ op: "pose_key_group.move", targetId: "person", keyId: "second", timeSeconds: 3 }], context).state;
+    expect(grouped.motionTracks![0].keys.some((key) => key.time === 3 && key.joints?.includes("arm") && key.joints?.includes("leg"))).toBe(true);
+    const removed = reduceCompositionCommands(start, [{ op: "pose_joint_key.remove", targetId: "person", keyId: "second", bone: "arm" }], context).state;
+    expect(removed.motionTracks![0].keys.some((key) => key.id === "second" && key.joints?.includes("leg"))).toBe(true);
+    expect(removed.motionTracks![0].keys.some((key) => key.id === "second" && key.joints?.includes("arm"))).toBe(false);
+    expect(() => reduceCompositionCommands(start, [{ op: "pose_key_group.move", targetId: "person", keyId: "second", timeSeconds: 30 }], context)).toThrow();
+  });
+
   it("카메라 편집·재조회·저장은 공유 모캡 관절을 복제하거나 직렬화하지 않는다", async () => {
     const keys = Array.from({ length: 1200 }, (_, index) => ({
       id: `key-${index}`, time: index / 30, value: { x: 0, y: 0, z: 0 },

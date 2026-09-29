@@ -40,6 +40,20 @@ beforeEach(() => {
 });
 
 describe("BGM 외부 조종과 수동 편집 왕복", () => {
+  it("BGM API 버튼과 같은 요청문을 현재 곡 판에서 준비하고 낡은 판은 거절한다", async () => {
+    const { control, bgm } = await prepare();
+    const before = await control.getBgmSnapshot("b");
+    const expected = await import("./promptRequest");
+    const requestData = await import("./bgmPromptRequest");
+    const parts = await expected.buildPromptRequestText({ template: "bgm-prompt",
+      data: requestData.bgmRequestData(bgm.loadBgmProjects()[0].tracks[0]) });
+    const prepared = await control.prepareBgmPrompt({ projectId: "b", trackId: "t", expectedRevision: before.revision });
+    expect(prepared.request).toBe([parts.fixed, parts.fresh].filter(Boolean).join("\n\n---\n\n"));
+    bgm.updateBgmProjects((items) => items.map((item) => ({ ...item, description: "사람이 수정" })));
+    await expect(control.prepareBgmPrompt({ projectId: "b", trackId: "t", expectedRevision: before.revision }))
+      .rejects.toMatchObject({ code: "revision_conflict" });
+  });
+
   it("외부 편집을 화면 구독에 알리고 그 뒤 수동 수정도 최신 값에 얹어 변경 내역을 돌려준다", async () => {
     const { bgm, control } = await prepare();
     let displayed = bgm.loadBgmProjects();
@@ -53,6 +67,17 @@ describe("BGM 외부 조종과 수동 편집 왕복", () => {
     expect((await control.getBgmSnapshot("b")).project.tracks[0].styleEn).toBe("strings");
     await expect(control.updateBgmControl({ projectId: "b", expectedRevision: changed.revision, commands: [{ type: "track.update", id: "t", fields: { name: "옛 요청" } }] })).rejects.toMatchObject({ code: "revision_conflict" });
     unsubscribe();
+  });
+
+  it("조종기로 곡 프롬프트를 다시 쓰면 이전 판과 새 판을 UI 이력에 남긴다", async () => {
+    const { control } = await prepare();
+    const before = await control.getBgmSnapshot("b");
+    const first = await control.updateBgmControl({ projectId: "b", expectedRevision: before.revision,
+      commands: [{ type: "track.update", id: "t", fields: { styleKo: "밝은 현악", styleEn: "bright strings" } }] });
+    const second = await control.updateBgmControl({ projectId: "b", expectedRevision: first.revision,
+      commands: [{ type: "track.update", id: "t", fields: { styleKo: "잔잔한 현악", styleEn: "soft strings" } }] });
+    expect(second.project.tracks[0].promptHistory.map((entry: { ko: string }) => entry.ko))
+      .toEqual(["잔잔한 현악", "밝은 현악"]);
   });
 
   it("실제 파일 저장 응답을 기다리고 기다리는 동안의 수동 수정은 덮지 않는다", async () => {

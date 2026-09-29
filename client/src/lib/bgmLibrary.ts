@@ -1,5 +1,5 @@
 import { loadBgmProjects } from "@/lib/bgmProjects";
-import { assetSrc, safeFileName, saveProjectMediaAsset } from "@/lib/mediaLibrary";
+import { importProjectMediaAsset, safeFileName } from "@/lib/mediaLibrary";
 
 /**
  * **BGM 은 따로 삽니다.**
@@ -59,22 +59,17 @@ export async function importMusicToBgm(
   const stemPart = dot > 0 ? fileName.slice(0, dot) : fileName;
   const ext = dot > 0 ? fileName.slice(dot + 1).toLowerCase() : "mp3";
 
-  // 고른 파일은 `allow_file` 로 열려 있어 asset 주소로 읽을 수 있습니다(`choose_audio_files`).
-  const response = await fetch(assetSrc(sourcePath));
-  if (!response.ok) throw new Error("고른 음원을 읽지 못했습니다.");
-  const blob = await response.blob();
   const scene = where.sceneTitle?.trim() ? safeFileName(where.sceneTitle.trim()) : "";
   const cut = where.cutOrder ? `컷${String(where.cutOrder).padStart(2, "0")}` : "";
   const stem = [scene, cut, safeFileName(stemPart)].filter(Boolean).join("_");
-  const saved = await saveProjectMediaAsset(
-    new File([blob], `${stem}.${ext}`, { type: blob.type || "audio/mpeg" }),
-    {
+  if (!/^(mp3|wav|m4a|flac|ogg|aac)$/.test(ext)) throw new Error("지원하는 음원 파일을 고르세요.");
+  // 영상 길이의 음원을 JS 바이트로 복제하면 RAM이 크게 뛰므로 앱의 Rust 복사 길을 씁니다.
+  const saved = await importProjectMediaAsset(sourcePath, {
       projectName: BGM_ROOT,
       assetType: "bgm-upload",
       // 업로드는 **어느 영상 프로젝트의 것인가**로 묶습니다 — 프로젝트를 정리할 때 그 폴더만 보면 됩니다.
       ownerName: where.projectName || "프로젝트",
       stem,
-    },
-  );
+    });
   return saved?.path ? { path: saved.path, name: fileName } : null;
 }

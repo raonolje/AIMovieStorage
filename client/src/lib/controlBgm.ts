@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { createBgmProject, createBgmTrack, loadBgmProjects, patchBgmTrack, saveBgmProjectsAndConfirm, updateBgmProjectsAndConfirm, type BgmProject } from "./bgmProjects";
+import { createBgmProject, createBgmTrack, loadBgmProjects, patchBgmTrack, saveBgmProjectsAndConfirm, updateBgmProjectsAndConfirm, type BgmProject, type BgmTrack } from "./bgmProjects";
+import { appendPromptHistory } from "./promptHistory";
+import { bgmRequestData } from "./bgmPromptRequest";
+import { buildPromptRequestText } from "./promptRequest";
 import { BGM_TASK, validateBgmPayload } from "./bgmRun";
 import { whenAppSettingsReady } from "./mediaLibrary";
 import { enqueueTaskOperation } from "./taskQueue";
@@ -21,6 +24,7 @@ const trackFields = z.object({
   targetTool: z.enum(["suno", "local-minimax", "local-acestep"]).optional(),
 }).strict();
 export const bgmReadSchema = z.object({ projectId: id }).strict();
+export const bgmPromptPrepareSchema = bgmReadSchema.extend({ trackId: id, expectedRevision: id });
 export const bgmChangesSchema = bgmReadSchema.extend({ sinceRevision: id });
 export const bgmCreateSchema = projectFields.extend({ name, operationId: id });
 export const bgmUpdateSchema = bgmReadSchema.extend({ expectedRevision: id, commands: z.array(z.discriminatedUnion("type", [
@@ -58,6 +62,17 @@ function observe(project: BgmProject, source: "app" | "controller" = "app"): Obs
   return next;
 }
 const snapshot = (state: Observation) => ({ projectId: state.project.id, revision: state.revision, project: clone(state.project) });
+function patchTrackWithHistory(current: BgmTrack, fields: z.infer<typeof trackFields>): BgmTrack {
+  const next = patchBgmTrack(current, fields);
+  if (!["styleKo", "styleEn", "promptKo", "promptEn"].some((key) => key in fields)) return next;
+  let history = current.promptHistory;
+  if (current.promptKo?.trim() || current.promptEn?.trim()) history = appendPromptHistory(history, {
+    ko: current.promptKo || "", en: current.promptEn || "", negativeKo: "", negativeEn: "", note: "덮어쓰기 전",
+  });
+  return { ...next, promptHistory: appendPromptHistory(history, {
+    ko: next.promptKo || "", en: next.promptEn || "", negativeKo: "", negativeEn: "", note: "대화 조종기",
+  }) };
+}
 export async function listBgmControl() {
   await whenAppSettingsReady();
   return loadBgmProjects().map((project) => ({ id: project.id, name: project.name, description: project.description, linkedProject: project.linkedProject, trackCount: project.tracks.length, updatedAt: project.updatedAt }));
@@ -66,6 +81,21 @@ export async function getBgmSnapshot(projectId: string) {
   bgmReadSchema.parse({ projectId });
   await whenAppSettingsReady();
   return snapshot(observe(requireProject(projectId)));
+}
+/** 화면의 BGM API 버튼에 전달되는 템플릿과 곡 자료를 그대로 조종기에 돌려줍니다. */
+export async function prepareBgmPrompt(raw: unknown) {
+  const input = bgmPromptPrepareSchema.parse(raw);
+  await whenAppSettingsReady();
+  const state = observe(requireProject(input.projectId));
+  if (state.revision !== input.expectedRevision) throw revisionConflict(state);
+  const track = state.project.tracks.find((item) => item.id === input.trackId);
+  if (!track) throw new BgmControlError("target_not_found", "프롬프트를 만들 곡을 찾지 못했습니다.");
+  const parts = await buildPromptRequestText({ template: "bgm-prompt", data: bgmRequestData(track) });
+  const latest = observe(requireProject(input.projectId));
+  if (latest.revision !== state.revision) throw revisionConflict(latest);
+  return { projectId: input.projectId, trackId: input.trackId, revision: latest.revision,
+    request: [parts.fixed, parts.fresh].filter(Boolean).join("\n\n---\n\n"),
+    apply: "bgm_update track.update에 styleKo/styleEn과 필요한 lyricsKo/lyricsEn을 함께 넣으세요. 판이 바뀌면 다시 준비하세요." };
 }
 export async function getBgmChanges(raw: unknown) {
   const input = bgmChangesSchema.parse(raw);
@@ -105,10 +135,10 @@ export async function updateBgmControl(raw: unknown) {
             next = { ...next, ...command.fields };
           } else if (command.type === "track.add") {
             if (next.tracks.some((track) => track.id === command.id)) throw new BgmControlError("duplicate_id", "이미 있는 곡 열쇠입니다.");
-            next = { ...next, tracks: [...next.tracks, patchBgmTrack({ ...createBgmTrack(), id: command.id! }, command.fields)] };
+            next = { ...next, tracks: [...next.tracks, patchTrackWithHistory({ ...createBgmTrack(), id: command.id! }, command.fields)] };
           } else {
             if (!next.tracks.some((track) => track.id === command.id)) throw new BgmControlError("target_not_found", "고칠 곡을 찾지 못했습니다.");
-            next = { ...next, tracks: next.tracks.map((track) => track.id === command.id ? patchBgmTrack(track, command.fields) : track) };
+            next = { ...next, tracks: next.tracks.map((track) => track.id === command.id ? patchTrackWithHistory(track, command.fields) : track) };
           }
         }
         next = { ...next, updatedAt: Date.now() };

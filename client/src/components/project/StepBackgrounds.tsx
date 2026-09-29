@@ -30,7 +30,7 @@ import { useProjectMedia } from "@/components/project/ProjectMediaContext";
 import { fieldStyle } from "@/components/project/fieldStyle";
 import { LlmRequestButton } from "@/components/LlmRequestButton";
 import { markColor } from "@/components/ImageMarkupEditor";
-import { describeMarksForLlm } from "@/lib/imageMarkDraw";
+import { backgroundFacesRequestData } from "@/lib/supplementalPromptPayload";
 import { backgroundCardDescription } from "@/lib/promptPayloads";
 import {
   INITIAL_BACKGROUND_BLUEPRINT_BY_SPACE,
@@ -817,18 +817,7 @@ ${background.promptKo ?? ""}`),
                   template="background-faces"
                   title={`배경 6면 프롬프트 · ${background.name || "배경"}`}
                   modelId={background.promptModel}
-                  data={() => ({
-                    project: projectContext?.facts ?? null,
-                    name: background.name,
-                    location: background.location,
-                    description: background.description,
-                    analysis: background.analysis || null,
-                    spaceKind,
-                    requiredAspects: background.blueprint,
-                    // 번호·각도는 변형 창의 프롬프트 요청(usePromptCard)과 같은 함수로 — 두 창이 다른 각도를
-                    // 보내면 «앞» 이 매번 다른 뜻이 됩니다.
-                    marks: describeMarksForLlm(marks),
-                  })}
+                  data={() => backgroundFacesRequestData(projectContext?.facts ?? null, background, marks)}
                   imageCount={() => 1}
                   // 6면 요청도 결과가 네 칸으로 돌아와야 합니다. 앵커에서 뽑는
                   // 프롬프트라 조건 줄에 «앵커» 라고 남겨 어느 판인지 알아봅니다.

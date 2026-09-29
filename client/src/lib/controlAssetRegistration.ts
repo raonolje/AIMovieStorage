@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { assetSrc, importProjectMediaAsset, isVideoFile } from "./mediaLibrary";
 import { controlMediaTarget, mediaTargetSchema } from "./controlMedia";
-import { getProjectSnapshot, ProjectControlError } from "./projectControl";
+import { checkKoreanPrompt, getProjectSnapshot, ProjectControlError } from "./projectControl";
 import { projectFolderName } from "./localProjectStore";
 import { readProject, writeProjectAndConfirm } from "./projectWrite";
 import { uid, type GeneratedImageAsset, type SceneVideoAsset } from "./projectTypes";
+import { appendPromptHistory } from "./promptHistory";
+import { withCutVideoPrompt } from "./cutVideoPromptHistory";
 
 const id = z.string().min(1).max(300);
 export const mediaRegisterSchema = z.object({
@@ -18,6 +20,28 @@ export const assetSetPrimarySchema = z.object({
 }).strict();
 
 type Target = z.infer<typeof mediaTargetSchema>;
+function recordImportedImagePrompt<T extends {
+  promptKo?: string; promptEn?: string; negativeKo?: string; negativeEn?: string;
+  promptHistory?: ReturnType<typeof appendPromptHistory>;
+}>(current: T, promptKo?: string, promptEn?: string): Partial<T> {
+  if (promptKo === undefined && promptEn === undefined) return {};
+  const next = { ...current,
+    ...(promptKo === undefined ? {} : { promptKo }),
+    ...(promptEn === undefined ? {} : { promptEn }),
+  };
+  let history = current.promptHistory;
+  if (current.promptKo?.trim() || current.promptEn?.trim())
+    history = appendPromptHistory(history, {
+      ko: current.promptKo || "", en: current.promptEn || "",
+      negativeKo: current.negativeKo || "", negativeEn: current.negativeEn || "", note: "덮어쓰기 전",
+    });
+  return { ...(promptKo === undefined ? {} : { promptKo }),
+    ...(promptEn === undefined ? {} : { promptEn }),
+    promptHistory: appendPromptHistory(history, {
+    ko: next.promptKo || "", en: next.promptEn || "",
+    negativeKo: next.negativeKo || "", negativeEn: next.negativeEn || "", note: "대화 조종기 결과 등록",
+  }) } as Partial<T>;
+}
 function shelf(draft: NonNullable<ReturnType<typeof readProject>>, target: Target, video: boolean) {
   if (target.kind === "character") return draft.characters.find(item => item.id === target.id)?.generatedImages ?? [];
   if (target.kind === "background") return draft.backgrounds.find(item => item.id === target.id)?.generatedImages ?? [];
@@ -33,6 +57,9 @@ export async function registerControlMedia(raw: unknown) {
     throw new ProjectControlError("unsupported_media", "이미지 또는 영상 파일만 등록할 수 있습니다.");
   if (video && input.target.kind !== "cut")
     throw new ProjectControlError("invalid_target", "영상은 컷에 등록해야 합니다.");
+  // 한 언어만 받은 생성 결과의 원문은 에셋 출처에 보관하되 카드의 쌍은 건드리지 않습니다.
+  const updateCardPrompt = input.promptKo !== undefined && input.promptEn !== undefined;
+  if (updateCardPrompt) checkKoreanPrompt(input.promptKo!, "결과 등록 한글 프롬프트");
   const draft = readProject(input.projectId);
   if (!draft) throw new ProjectControlError("project_not_found", "프로젝트를 찾지 못했습니다.");
   const previous = shelf(draft, input.target, video).find(item => item.importOperationId === input.operationId);
@@ -67,24 +94,23 @@ export async function registerControlMedia(raw: unknown) {
     if (input.target.kind === "cut") return { ...current, scenes: current.scenes.map(scene => ({ ...scene,
       cuts: scene.cuts.map(cut => cut.id !== input.target.id ? cut : video
         ? { ...cut, videos: [...cut.videos.map(item => primary ? { ...item, isPrimary: false } : item), movie],
-          ...(input.promptKo !== undefined ? { videoPromptKo: input.promptKo } : {}),
-          ...(input.promptEn !== undefined ? { videoPromptEn: input.promptEn } : {}) }
+          ...(!updateCardPrompt ? {} : withCutVideoPrompt(cut, {
+            ko: input.promptKo ?? cut.videoPromptKo ?? "", en: input.promptEn ?? cut.videoPromptEn ?? "",
+          }, "대화 조종기 결과 등록")) }
         : { ...cut, images: [...cut.images.map(item => primary ? { ...item, isPrimary: false } : item), image],
-          ...(input.promptKo !== undefined ? { promptKo: input.promptKo } : {}),
-          ...(input.promptEn !== undefined ? { promptEn: input.promptEn } : {}) }) })) };
+          ...(!updateCardPrompt ? {} : recordImportedImagePrompt(cut, input.promptKo, input.promptEn)) }) })) };
     if (input.target.kind === "character") return { ...current, characters: current.characters.map(item => item.id !== input.target.id ? item : {
       ...item, generatedImages: [...item.generatedImages.map(asset => primary ? { ...asset, isPrimary: false } : asset), image],
-      ...(input.promptKo !== undefined ? { promptKo: input.promptKo } : {}),
-      ...(input.promptEn !== undefined ? { promptEn: input.promptEn } : {}),
+      ...(!updateCardPrompt ? {} : recordImportedImagePrompt(item, input.promptKo, input.promptEn)),
     }) };
     return { ...current, backgrounds: current.backgrounds.map(item => item.id !== input.target.id ? item : {
       ...item, generatedImages: [...item.generatedImages.map(asset => primary ? { ...asset, isPrimary: false } : asset), image],
-      ...(input.promptKo !== undefined ? { promptKo: input.promptKo } : {}),
-      ...(input.promptEn !== undefined ? { promptEn: input.promptEn } : {}),
+      ...(!updateCardPrompt ? {} : recordImportedImagePrompt(item, input.promptKo, input.promptEn)),
     }) };
   });
   if (!outcome.persisted) throw new ProjectControlError("save_failed", "파일은 복사했지만 프로젝트 등록을 확인하지 못했습니다.", { copiedPath: imported.path });
-  return { assetId, path: imported.path, reused: false, persisted: true, primary: input.makePrimary ?? !shelf(draft, input.target, video).length };
+  return { assetId, path: imported.path, reused: false, persisted: true,
+    cardPromptUpdated: updateCardPrompt, primary: input.makePrimary ?? !shelf(draft, input.target, video).length };
 }
 
 /** 선반마다 대표 한 장만 남깁니다. */
