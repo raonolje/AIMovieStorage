@@ -40,6 +40,21 @@ function gate() { let resolve!: () => void; const promise = new Promise<void>((d
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("프로젝트 대화 조종", () => {
+  it("배경 구성 칩을 조종기로 선택·수정하고 알 수 없는 칩은 거부한다", async () => {
+    const api = await import("./projectControl");
+    const first = await api.getProjectSnapshot("p");
+    const added = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "background.add", id: "b1", fields: { name: "골목", blueprint: ["view-eye-exterior"], promptKo: "16:9 골목 화면", promptEn: "16:9 alley composition" } },
+    ] });
+    expect(current().backgrounds[0].blueprint).toEqual(["view-eye-exterior"]);
+    const changed = await api.updateProjectControl({ projectId: "p", expectedRevision: added.revision, commands: [
+      { type: "background.update", id: "b1", fields: { blueprint: ["master-birdseye"] } },
+    ] });
+    expect(current().backgrounds[0].blueprint).toEqual(["master-birdseye"]);
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: changed.revision, commands: [
+      { type: "background.update", id: "b1", fields: { blueprint: ["nonexistent-chip"] } },
+    ] })).rejects.toMatchObject({ code: "invalid_request" });
+  });
   it("선택한 이미지·영상 모델을 앱 카드와 프로젝트 설정에 저장한다", async () => {
     const api = await import("./projectControl");
     current().characters = [{ ...newCharacter(), id: "c1", name: "서아" }];

@@ -134,6 +134,15 @@ const PREVIEW_TTL = 10 * 60_000;
 function fail(code: string, message: string, details?: unknown): never {
   throw new ProjectControlError(code, t(message), details);
 }
+
+/** 프롬프트에 출력 비율이 한 가지로 명시되면 구성 칩의 생성기 비율과 충돌하지 않게 합니다. */
+function assertBackgroundPromptAspect(prompt: string, aspectRatio: string, blueprint: string[]) {
+  const ratios = [...new Set(prompt.match(/\b(?:21:9|16:9|9:16|4:3|3:4|3:2|2:3|1:1)\b/g) ?? [])];
+  if (ratios.length !== 1 || ratios[0] === aspectRatio) return;
+  fail("aspect_ratio_conflict",
+    `배경 프롬프트는 ${ratios[0]}을 요청하지만 구성 칩의 생성기 비율은 ${aspectRatio}입니다. 배경 구성 칩이나 프롬프트를 맞춘 뒤 다시 미리 보세요.`,
+    { promptAspectRatio: ratios[0], composeAspectRatio: aspectRatio, blueprint });
+}
 async function current(projectId: string, expectedRevision: string) {
   // 요약 조회는 revision만 확인하는 용도입니다. 수백 MB의 모캡 전체 사본을 만들지 않습니다.
   const snapshot = await getProjectSnapshot(projectId, "summary");
@@ -413,6 +422,7 @@ export async function previewControlMagnificSheet(raw: unknown) {
     ? backgroundComposeAspect(blueprint, isOutdoorSpaceChipId(unfoldChipOf(blueprint) ?? "")
       ? background.exteriorSpace : background.panoramaSpace) ?? "16:9"
     : "16:9";
+  if (background && blueprint) assertBackgroundPromptAspect(prompt, aspectRatio, blueprint);
   const plan: Plan = {
     kind: "image", prompt, referencePaths, model, aspectRatio, count: request.count ?? 4,
     owner: { kind: request.target.kind, name: entity.name },

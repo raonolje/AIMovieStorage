@@ -920,6 +920,17 @@ pub struct Creation {
     pub created_at: String,
 }
 
+fn filter_creations_by_name(creations: Vec<Creation>, query: Option<&str>) -> Vec<Creation> {
+    let Some(needle) = query.map(str::trim).filter(|value| !value.is_empty()) else {
+        return creations;
+    };
+    let needle = needle.to_lowercase();
+    creations.into_iter().filter(|item| {
+        item.name.to_lowercase().contains(&needle)
+            || item.identifier.to_lowercase().contains(&needle)
+    }).collect()
+}
+
 /// 마그니픽에 만들어 둔 것들 — 새 것부터.
 #[tauri::command]
 pub async fn magnific_recent(limit: Option<u32>, query: Option<String>) -> Res<Vec<Creation>> {
@@ -947,7 +958,7 @@ pub async fn magnific_recent(limit: Option<u32>, query: Option<String>) -> Res<V
     let field = |row: &serde_json::Map<String, Value>, key: &str| {
         row.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
     };
-    Ok(rows
+    let creations: Vec<Creation> = rows
         .into_iter()
         .map(|row| {
             let thumb = field(&row, "thumbnailUrl");
@@ -963,7 +974,10 @@ pub async fn magnific_recent(limit: Option<u32>, query: Option<String>) -> Res<V
         })
         // 아직 만드는 중인 것은 내려받을 주소가 없습니다.
         .filter(|item| !item.identifier.is_empty() && item.url.starts_with("http"))
-        .collect())
+        .collect();
+    // 공급자가 query를 무시하고 최근 목록 전체를 주는 경우가 있습니다. 앱 검색과 조종기
+    // 결과 선택이 다른 작업의 ID를 섞지 않도록, 내려온 목록에도 같은 이름/ID 필터를 적용합니다.
+    Ok(filter_creations_by_name(creations, query.as_deref()))
 }
 
 /// 조종기가 사용자가 고른 결과 ID만 임시 파일로 내려받아 앱의 media_register 경로에 넘깁니다.
@@ -985,6 +999,19 @@ pub async fn magnific_download_creation(identifier: String) -> Res<String> {
 
 #[cfg(test)]
 mod creation_import_tests {
+    use super::*;
+
+    #[test]
+    fn filters_unrelated_results_when_provider_ignores_query() {
+        let make = |identifier: &str, name: &str| Creation {
+            identifier: identifier.into(), name: name.into(), url: "https://example.com/image.png".into(),
+            thumbnail_url: String::new(), tool: "image".into(), status: "completed".into(), created_at: String::new(),
+        };
+        let results = filter_creations_by_name(vec![make("old", "다른 작업"), make("new", "비 내린 서울 골목")], Some("서울"));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].identifier, "new");
+    }
+
     #[tokio::test]
     async fn rejects_a_url_instead_of_a_creation_id_before_network_access() {
         assert!(super::magnific_download_creation("https://example.com/file.png".into()).await.is_err());

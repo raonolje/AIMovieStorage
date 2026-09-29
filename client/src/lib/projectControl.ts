@@ -4,7 +4,7 @@ import { controlDetailSchema, projectControlValue, type ControlDetail } from "./
 import { z } from "zod";
 import { relinkCutCharacterPrompts } from "@/lib/cutCharacterLinks";
 import { relinkCharacterBlueprintPrompts } from "@/lib/characterBlueprintPrompt";
-import { CHARACTER_BLUEPRINT_GROUPS } from "@/lib/blueprint";
+import { BACKGROUND_BLUEPRINT_GROUPS, CHARACTER_BLUEPRINT_GROUPS } from "@/lib/blueprint";
 import { appendPromptHistory } from "@/lib/promptHistory";
 import { withStoryboardPrompt } from "@/lib/storyboardPromptHistory";
 import { applyAppPromptResult } from "@/lib/appPromptRequest";
@@ -21,11 +21,13 @@ const name = z.string().trim().min(1).max(300);
 const prompts = { promptKo: text.optional(), promptEn: text.optional(), negativeKo: text.optional(), negativeEn: text.optional() };
 const characterBlueprintIds = new Set(CHARACTER_BLUEPRINT_GROUPS.flatMap((group) => group.options.map((item) => item.id)));
 const characterBlueprint = z.array(z.string().refine((value) => characterBlueprintIds.has(value), "모르는 캐릭터 구성 항목입니다.")).max(100);
+const backgroundBlueprintIds = BACKGROUND_BLUEPRINT_GROUPS.flatMap((group) => group.options.map((item) => item.id)) as [string, ...string[]];
+const backgroundBlueprint = z.array(z.enum(backgroundBlueprintIds)).max(100);
 const imageModel = z.string().refine((value) => IMAGE_ONLY_MODELS.some((model) => model.id === value), "앱에서 지원하는 이미지 모델을 고르세요.");
 const videoModel = z.string().refine((value) => targetModelOf(value)?.kind === "video", "앱에서 지원하는 영상 모델을 고르세요.");
 const projectFields = z.object({ title: name.optional(), logline: text.optional(), synopsis: text.optional(), tone: text.optional(), runtime: text.optional(), storyboardNote: text.optional(), videoModel: videoModel.optional() }).strict();
 const characterFields = z.object({ name: name.optional(), role: text.optional(), gender: text.optional(), description: text.optional(), heightCm: z.number().finite().min(1).max(1000).optional(), build: z.enum(["slim", "average", "athletic", "broad"]).optional(), kind: z.enum(["human", "animal", "creature"]).optional(), blueprint: characterBlueprint.optional(), promptModel: imageModel.optional(), ...prompts }).strict();
-const backgroundFields = z.object({ name: name.optional(), location: text.optional(), description: text.optional(), spaceKind: z.enum(["interior", "exterior"]).optional(), promptModel: imageModel.optional(), ...prompts }).strict();
+const backgroundFields = z.object({ name: name.optional(), location: text.optional(), description: text.optional(), spaceKind: z.enum(["interior", "exterior"]).optional(), blueprint: backgroundBlueprint.optional(), promptModel: imageModel.optional(), ...prompts }).strict();
 const sceneFields = z.object({ title: text.optional(), summary: text.optional(), storyboardPromptKo: text.optional(), storyboardPromptEn: text.optional() }).strict();
 const cutFields = z.object({ title: text.optional(), description: text.optional(), acting: text.optional(), actingEn: text.optional(), backgroundMotion: text.optional(), backgroundMotionEn: text.optional(), vfx: text.optional(), vfxEn: text.optional(), plannedSeconds: z.number().finite().positive().max(3600).optional(), characterIds: z.array(id).max(100).optional(), backgroundId: id.optional(), useComposition: z.boolean().optional(), useRefVideo: z.boolean().optional(), videoPromptKo: text.optional(), videoPromptEn: text.optional(), ...prompts }).strict();
 export const appPromptTargetSchema = z.discriminatedUnion("kind", [

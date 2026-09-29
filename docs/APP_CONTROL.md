@@ -66,7 +66,9 @@ Codex와 Claude는 인물·장소·컷 이미지·컷 영상·장면 영상을 �
 
 이미지 생성에 앱의 Magnific «구성»을 쓰려면 인물·장소 카드에는 `magnific_sheet_compose_preview`, 컷에는 `magnific_compose_preview`를 호출합니다. 이미지 미리보기의 `count`는 기본 4장, 선택 범위는 1~4장입니다. 생성기 하나의 Magnific `numberOfGenerations`에 이 값을 넣어 한 번 실행으로 여러 선택지를 받습니다. 이미지가 여러 개라면 각각 미리보기를 확인한 뒤 `magnific_compose_batch`에 `previewIds`를 원하는 순서로 보냅니다. `runAfterCompose`를 켜면 각 구성 직후 **방금 만든 이미지 생성기만** 선택해 순차 실행합니다. Magnific 화면에서 2K와 무한대(크레딧 없음) 표시를 모두 확인하지 못하거나 정확한 선택에 실패하면 누르지 않고 멈춥니다. 생략하면 생성기를 구성만 합니다. `Ctrl+A`로 기존 보드 전체를 실행하지 않습니다. 카드의 저장 프롬프트·선택 모델·`@`로 연결된 참조와 배경 비율을 그대로 사용하며, 같은 보드·페이지에 이전에 올린 같은 내용의 레퍼런스 파일은 업로드 ID를 재사용합니다. 실행 제출은 결과 완성을 뜻하지 않습니다. 완료된 후보는 `magnific_results_list`에서 확인하고, 고른 결과 ID만 `magnific_result_register`로 인물·장소·컷에 저장합니다. 대표 이미지만 `makePrimary`로 지정합니다. 영상 및 유료 모델의 자동 실행은 이 경로에서 지원하지 않습니다.
 
-Magnific의 [허용 사용 정책](https://www.magnific.com/legal/acceptable-use-policy)은 외부 도구를 통한 자동 조작을 제한합니다. 기존 데스크톱 구성 경로도 이 정책과의 관계를 공급자에게 확인해야 합니다. Generate 버튼 자동 클릭은 추가하지 않았으며, 자동 생성이 필요하면 Magnific가 공식 제공하는 MCP 경로를 사용합니다.
+배경 구성의 출력 비율은 프롬프트 문장보다 `blueprint` 칩이 우선합니다. 조종기 `background.add`/`background.update`에서 칩을 지정할 수 있으며, 기본 실외 마스터 `master-birdseye`는 1:1, 일반 실외 눈높이 `view-eye-exterior`는 16:9입니다. 미리보기의 `aspectRatio`를 확인하세요. 프롬프트가 다른 비율 하나를 명시하면 구성 전에 `aspect_ratio_conflict`로 중단합니다.
+
+Magnific의 [허용 사용 정책](https://www.magnific.com/legal/acceptable-use-policy)은 외부 도구를 통한 자동 조작을 금지합니다. `runAfterCompose`는 생성 버튼을 자동으로 누르는 기능이므로, 이 경로를 계속 운영하거나 배포하기 전에 공급자의 허가 또는 공식적으로 허용된 연동 방식인지 확인해야 합니다.
 
 `cut.add`는 화면에 사람이 없는 컷도 `characterIds: []`를 명시해야 합니다. 인물이 있다면 먼저 `project_get`에서 캐릭터 ID를 확인해 이 배열에 넣으세요. 컷 제목·대사에 이름만 적고 ID를 빠뜨리면 생성 프롬프트의 인물 시트와 `@` 참조가 연결되지 않으므로 요청을 거절합니다. `cut.update`로 등장인물을 바꾸면 기존 프롬프트의 참조 부분도 함께 갱신되며, 저장 후 컷의 `characterIds`와 프롬프트를 다시 읽어 확인하세요.
 

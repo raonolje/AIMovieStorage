@@ -266,6 +266,19 @@ describe("Magnific 데스크톱 조종의 미리보기와 실행", () => {
       aspectRatio: "4:3", paths: ["/library/작품/room_template.png"],
     }));
   });
+  it("LLM이 쓴 16:9 프롬프트와 기본 1:1 배경 칩이 충돌하면 생성 전에 멈춘다", async () => {
+    const { control } = await prepare();
+    const background = state.draft!.backgrounds[0];
+    background.promptModel = "nano-banana";
+    background.promptEn = "Rainy Seoul alley, 16:9 composition.";
+    const input = { projectId: "p", expectedRevision: "r1", target: { kind: "background" as const, id: "b" } };
+    await expect(control.previewControlMagnificSheet(input)).rejects.toMatchObject({
+      code: "aspect_ratio_conflict",
+      details: { promptAspectRatio: "16:9", composeAspectRatio: "1:1" },
+    });
+    background.blueprint = ["view-eye-exterior"];
+    await expect(control.previewControlMagnificSheet(input)).resolves.toMatchObject({ aspectRatio: "16:9", count: 4 });
+  });
   it("본문 그대로 모드는 명시 본문만 전송하고 Unicode 글자·공백 단어 수를 재며 참조·해상도 검사는 유지한다", async () => {
     const { q, control } = await prepare();
     await expect(
