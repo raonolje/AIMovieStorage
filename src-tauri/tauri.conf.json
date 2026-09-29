@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "AIMovieStorage",
-  "version": "0.3.12",
+  "version": "0.3.14",
   "identifier": "com.aivideostorage.local",
   "build": {
     "frontendDist": "../dist/public",
@@ -36,12 +36,16 @@
         "https://github.com/raonolje/AIMovieStorage/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhCOEFGN0M0NjY5Rjc4N0MKUldSOGVKOW14UGVLaS8yVGR1MEN6OG5tQ0xoOHkzdWNoRFNJRFBpcEhXZGVYZm05eUQwdjhGMFoK",
-      "windows": { "installMode": "passive" }
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "createUpdaterArtifacts": true,
     "resources": [
       "resources/upscale/*.py",
@@ -53,12 +57,16 @@
       "resources/local/h3-ref2va-preset.json",
       "resources/local/engines/*.py",
       "resources/local/engines/*/requirements.txt",
-      "resources/local/engines/*/manifest.json",
-      "resources/local/engines/gvhmr/pytorch3d_shim/**/*"
+      "resources/local/engines/*/manifest.json"
     ],
     "windows": {
       "nsis": {
-        "languages": ["Korean", "English", "Japanese", "SimpChinese"],
+        "languages": [
+          "Korean",
+          "English",
+          "Japanese",
+          "SimpChinese"
+        ],
         "displayLanguageSelector": true,
         "installerHooks": "nsis/installer-language.nsh"
       }

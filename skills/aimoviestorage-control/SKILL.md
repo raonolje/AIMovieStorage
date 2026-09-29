@@ -1,11 +1,11 @@
 ---
 name: aimoviestorage-control
-description: Control AIMovieStorage from Codex to create or continue film and music-video projects, including Korean requests such as "라온올제 국호 프로젝트 만들어줘"; register prompts, images, and videos in the app.
+description: Control AIMovieStorage from Codex to create or continue film and music-video projects, including Korean requests such as "사용자올제 국호 프로젝트 만들어줘"; register prompts, images, and videos in the app.
 ---
 
 # AIMovieStorage project work
 
-Use this skill when the user wants to create or continue an AIMovieStorage drama, music video, scene, or shot from a Codex chat. The short Korean request "라온올제 <이름> 프로젝트 만들어줘" means to work in the AIMovieStorage project named <이름>; "이어줘" means to continue it. First inspect the app and continue an existing matching project instead of creating a duplicate. Ask which project only if the app lists several plausible matches and the choice changes the work.
+Use this skill when the user wants to create or continue an AIMovieStorage drama, music video, scene, or shot from a Codex chat. The short Korean request "사용자올제 <이름> 프로젝트 만들어줘" means to work in the AIMovieStorage project named <이름>; "이어줘" means to continue it. First inspect the app and continue an existing matching project instead of creating a duplicate. Ask which project only if the app lists several plausible matches and the choice changes the work.
 
 ## Connect and inspect
 
@@ -32,6 +32,8 @@ Write Korean and English together for each cut image prompt (`promptKo`/`promptE
 For scene storyboards, provide Korean `storyboardPromptKo` and English `storyboardPromptEn` as separate prose. The app rejects a Korean field whose body is mostly English, including cut and character prompts. Do not copy an English scene summary into the Korean field just to make it nonempty; translate the action, dialogue guidance and camera instructions into natural Korean, then read back both fields.
 
 Local image/video/music generation and ComfyUI can be requested through the app only if the installed server lists their tools. Generation submission is not completion: inspect the task, inspect its saved project target, and do not duplicate a job after a lost response. For the app's Magnific image path, use `magnific_sheet_compose_preview` for a character/background or `magnific_compose_preview` for a cut, then `magnific_compose` with its preview ID. These commands use the app's saved prompt, selected references and image model; the background command also follows the app's aspect ratio. They prepare/upload a board but do not press Generate or spend credits. Confirm actual provider output separately before recording it as a result. For music-video composition, keep the exact timeline segment in the reference MP4 and use its matching audio file as a separate audio reference with music enabled; mention both references in the prompt with their actual `@` names. Do not substitute the full song for a 15-second segment.
+
+For several Magnific images, set each image preview's `count` to the requested number of choices (default four, maximum four). Inspect every preview, then send their IDs in canvas order to `magnific_compose_batch` with one stable `operationId`. Read `job_get` and reconcile a partial batch on the board before another submission. The batch puts one generator with `numberOfGenerations` set to the choice count for each image. It does not press Run. On a dedicated empty Magnific page, the user can select the newly placed nodes and run them together after checking the displayed cost. Selecting all on a page with earlier generators may run those again.
 
 ## Keep the project complete
 

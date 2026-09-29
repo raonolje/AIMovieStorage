@@ -149,6 +149,7 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
       ["magnific_compose_preview", magnific.magnificComposePreviewSchema],
       ["magnific_sheet_compose_preview", magnific.magnificSheetComposePreviewSchema],
       ["magnific_compose", magnific.magnificComposeExecuteSchema],
+      ["magnific_compose_batch", magnific.magnificComposeBatchExecuteSchema],
       ["comfy_workflow_get", comfy.comfyWorkflowSchema],
       ["comfy_generate", comfy.comfyGenerateSchema],
     ] as const) {

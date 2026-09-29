@@ -67,6 +67,14 @@ describe("Magnific 전송 직전 거절", () => {
     expect(mocks.compose).toHaveBeenCalledWith(expect.objectContaining({ prompt, paths: references, durationSeconds: 15, resolution: "1080p" }));
   });
 
+  it("이미지 구성은 기본 네 장을 한 생성기에 요청하고 영상 기본값은 한 개로 유지한다", async () => {
+    await composeInMagnific({ kind: "image", prompt: "A portrait", referencePaths: [] });
+    expect(mocks.compose).toHaveBeenCalledWith(expect.objectContaining({ kind: "image", count: 4 }));
+    mocks.compose.mockClear();
+    await composeInMagnific({ kind: "video", prompt: "A dancer", referencePaths: [], seconds: 5 });
+    expect(mocks.compose).toHaveBeenCalledWith(expect.objectContaining({ kind: "video", count: 1 }));
+  });
+
   it("720p 구성은 카탈로그 검사와 실제 생성기 인자에 같은 해상도를 쓴다", async () => {
     const model = models.find(item => item.slug === "bytedance-seedance-pro-2.5")!;
     returnedModels = [{ ...model, details: { ...model.details, references: [

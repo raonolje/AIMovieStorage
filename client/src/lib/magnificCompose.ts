@@ -9,8 +9,8 @@ import { assertVideoDuration } from "./videoDuration";
  * 마그니픽 캔버스에 «레퍼런스 그림 → 이미지 생성기(프롬프트 + @칩)» 를 «구성» 한 번으로 만듭니다.
  *
  * 실제 일은 Rust `magnific_compose_auto` 가 마그니픽 데스크톱을 CDP 로 조종해 합니다(2026-09-08):
- * 그림 붙여넣기 → 새 노드 감지 → 페이지 안 Ctrl+C 로 업로드 id 읽기 → 방금 올린 노드만 Delete →
- * 그림 사본 + 생성기 JSON(마그니픽 복사 형식) 붙여넣기. 조건은 마그니픽을 우리 앱에서 켜는 것 —
+ * 같은 보드에 올린 파일은 내용 지문으로 재사용 → 새 파일만 업로드 →
+ * 빈 영역에 레퍼런스 사본과 생성기를 정렬해 붙여넣기. 조건은 마그니픽을 우리 앱에서 켜는 것 —
  * 안 켜져 있으면 Rust 가 켜 주고, 밖에서 켜져 있으면 닫고 다시 누르라고 알립니다.
  *
  * 왜 이 모양인지: 같이 붙여넣은 요소끼리만 확실히 이어지고, 붙여넣을 때 칩 id 를 고쳐 주는 건
@@ -88,7 +88,7 @@ export async function composeInMagnific(input: MagnificComposeInput): Promise<st
   const what = input.kind === "video" ? "영상" : "이미지";
   say(
     paths.length
-      ? `레퍼런스 ${paths.length}개를 올리고 ${what} 생성기까지 자동으로 구성하는 중…`
+      ? `레퍼런스 ${paths.length}개를 확인하고 ${what} 생성기까지 자동으로 구성하는 중…`
       : `프롬프트만 든 ${what} 생성기를 붙여넣는 중…`,
   );
   return composeMagnificAuto({
@@ -102,7 +102,7 @@ export async function composeInMagnific(input: MagnificComposeInput): Promise<st
       input.model ??
       (input.kind === "video" ? MAGNIFIC_VIDEO_MODEL : MAGNIFIC_IMAGE_MODEL),
     aspectRatio: input.aspectRatio ?? "16:9",
-    count: input.count ?? 1,
+    count: input.count ?? (input.kind === "video" ? 1 : 4),
     beforeCompose: async () => {
       await input.beforeCompose?.();
       // 충돌 검사에서 멈춘 요청을 실제로 보낸 기록으로 남기지 않습니다.

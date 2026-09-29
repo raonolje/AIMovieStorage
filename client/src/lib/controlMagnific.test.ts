@@ -166,7 +166,7 @@ describe("Magnific 데스크톱 조종의 미리보기와 실행", () => {
     const preview = await control.previewControlMagnificSheet({
       projectId: "p", expectedRevision: "r1", target: { kind: "character", id: "c0" },
     });
-    expect(preview).toMatchObject({ model: "imagen-nano-banana-2", paidGeneration: false });
+    expect(preview).toMatchObject({ model: "imagen-nano-banana-2", count: 4, paidGeneration: false });
     expect(preview.references.map(ref => ref.name)).toEqual(["identity.png"]);
     expect(state.native).not.toHaveBeenCalled();
     const job = await control.enqueueControlMagnific({
@@ -174,8 +174,59 @@ describe("Magnific 데스크톱 조종의 미리보기와 실행", () => {
     });
     expect((await finish(q, job.jobId)).status).toBe("done");
     expect(state.native).toHaveBeenCalledWith(expect.objectContaining({
-      prompt: character.promptEn, paths: ["/library/작품/identity.png"], model: "imagen-nano-banana-2",
+      prompt: character.promptEn, paths: ["/library/작품/identity.png"], model: "imagen-nano-banana-2", count: 4,
     }));
+  });
+  it("여러 이미지 미리보기를 지정한 순서로 한 작업에 구성하고 중복 재요청은 재전송하지 않는다", async () => {
+    const { q, control } = await prepare();
+    const character = state.draft!.characters[0];
+    character.promptModel = "nano-banana";
+    character.promptEn = "Portrait of the actor";
+    const background = state.draft!.backgrounds[0];
+    background.promptModel = "nano-banana";
+    background.promptEn = "Concert stage";
+    const actor = await control.previewControlMagnificSheet({
+      projectId: "p", expectedRevision: "r1", target: { kind: "character", id: "c0" },
+    });
+    const stage = await control.previewControlMagnificSheet({
+      projectId: "p", expectedRevision: "r1", target: { kind: "background", id: "b" }, count: 2,
+    });
+    expect([actor.count, stage.count]).toEqual([4, 2]);
+    const request = { projectId: "p", expectedRevision: "r1",
+      previewIds: [actor.previewId, stage.previewId], operationId: "batch" };
+    const job = await control.enqueueControlMagnificBatch(request);
+    const done = await finish(q, job.jobId);
+    expect(done.status).toBe("done");
+    expect(done.externalCheckpoint).toMatchObject({ phase: "completed", completed: 2, total: 2 });
+    expect(state.native.mock.calls.map(([input]) => [input.prompt, input.count])).toEqual([
+      ["Portrait of the actor", 4], ["Concert stage", 2],
+    ]);
+    expect(await control.enqueueControlMagnificBatch(request)).toEqual({ jobId: job.jobId, reused: true });
+    expect(state.native).toHaveBeenCalledTimes(2);
+  });
+  it("일괄 구성의 중간 실패는 완료 수를 남기고 자동으로 같은 노드를 다시 올리지 않는다", async () => {
+    const { q, control } = await prepare();
+    const character = state.draft!.characters[0];
+    character.promptModel = "nano-banana";
+    character.promptEn = "Portrait";
+    const background = state.draft!.backgrounds[0];
+    background.promptModel = "nano-banana";
+    background.promptEn = "Stage";
+    const actor = await control.previewControlMagnificSheet({
+      projectId: "p", expectedRevision: "r1", target: { kind: "character", id: "c0" },
+    });
+    const stage = await control.previewControlMagnificSheet({
+      projectId: "p", expectedRevision: "r1", target: { kind: "background", id: "b" },
+    });
+    state.native.mockResolvedValueOnce("첫 구성 완료").mockRejectedValueOnce(new Error("두 번째 구성 실패"));
+    const job = await control.enqueueControlMagnificBatch({ projectId: "p", expectedRevision: "r1",
+      previewIds: [actor.previewId, stage.previewId], operationId: "partial" });
+    const failed = await finish(q, job.jobId);
+    expect(failed.status).toBe("failed");
+    expect(failed.externalCheckpoint).toMatchObject({ phase: "unknown", completed: 1, total: 2 });
+    q.retryTask(job.jobId);
+    await finish(q, job.jobId);
+    expect(state.native).toHaveBeenCalledTimes(2);
   });
   it("배경 전개도 구성은 카드의 4:3 비율과 틀 참조를 유지한다", async () => {
     const { q, control } = await prepare();

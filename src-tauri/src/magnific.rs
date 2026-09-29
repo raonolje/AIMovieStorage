@@ -11,7 +11,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{ensure_inside, err, extension_allowed, file_fingerprint, LockSafe, Res};
 
@@ -1165,7 +1166,7 @@ pub fn build_flow_payload(
     model: &str,
     aspect_ratio: &str,
     count: u32,
-    // 그림이 없을 때 생성기를 놓을 캔버스 좌표. 없으면 그림 오른쪽.
+    // 이번 구성 묶음의 왼쪽 위 캔버스 좌표.
     origin: Option<(f64, f64)>,
     // "image" 또는 "video". 노드 종류와 data 만 갈립니다.
     kind: Option<&str>,
@@ -1193,13 +1194,17 @@ pub fn build_flow_payload(
         let (port, data_type) = reference_input(creation, kind)?;
         Ok(connection(&creation.id, reference_output(creation), target, port, data_type))
     };
-    // 자리: 그림 사본은 원본 자리 그대로, 그 오른쪽에 생성기.
+    // 레퍼런스 원본의 자리는 업로드 때 매번 같은 화면 중앙이므로 사용하지 않습니다.
+    // 이번 구성 전체를 새 영역에 놓고, 참조는 두 열로 배열합니다.
     let page = creations.first().map(|c| c.page.clone()).unwrap_or_else(|| "1".into());
     let board = creations.iter().find_map(|c| c.source_board_uuid.clone());
-    let right = creations.iter().map(|c| c.x + c.width).fold(f64::MIN, f64::max);
-    let top = creations.iter().map(|c| c.y).fold(f64::MAX, f64::min);
-    let (gen_x, gen_y) = if creations.is_empty() { origin.unwrap_or((0.0, 0.0)) } else { (right + 140.0, top) };
-    let gen_ids: Vec<String> = (0..count).map(|_| pikaso::uuid_v4()).collect();
+    let (left, top) = origin.unwrap_or((0.0, 0.0));
+    let (step_x, step_y) = reference_spacing(creations);
+    let (gen_x, gen_y) = if creations.is_empty() { (left, top) } else { (left + 2.0 * step_x + 100.0, top) };
+    // Image generators have a native multi-generation setting. Keep four choices
+    // in one node so a batch can be selected and run without four overlapping cards.
+    let generator_nodes = if kind == Some("video") { count } else { 1 };
+    let gen_ids: Vec<String> = (0..generator_nodes).map(|_| pikaso::uuid_v4()).collect();
 
     // 그림 사본: 새 id, 같은 creationIdentifier. 칩과 연결은 사본 id 로(붙여넣을 때 마그니픽이 새 id 로 고침).
     let copies: Vec<CopiedCreation> = creations
@@ -1207,7 +1212,7 @@ pub fn build_flow_payload(
         .map(|c| CopiedCreation { id: pikaso::uuid_v4(), ..c.clone() })
         .collect();
     let mut elements: Vec<serde_json::Value> = Vec::new();
-    for copy in &copies {
+    for (index, copy) in copies.iter().enumerate() {
         let outgoing: Vec<serde_json::Value> =
             gen_ids.iter().map(|g| reference_connection(copy, g)).collect::<Res<_>>()?;
         elements.push(serde_json::json!({
@@ -1215,8 +1220,8 @@ pub fn build_flow_payload(
             "type": "creation",
             "name": copy.name,
             "page": page,
-            "x": copy.x,
-            "y": copy.y,
+            "x": left + (index % 2) as f64 * step_x,
+            "y": top + (index / 2) as f64 * step_y,
             "width": copy.width,
             "height": copy.height,
             "locked": false,
@@ -1245,7 +1250,7 @@ pub fn build_flow_payload(
         } else { serde_json::json!({
             "aspectRatio": aspect_ratio,
             "mode": model,
-            "numberOfGenerations": 1,
+            "numberOfGenerations": count,
             "prompt": prompt_with_chips.clone(),
             "version": "v2",
             "quality": "", "resolution": "2k", "smartPrompt": true, "thinkingLevel": "",
@@ -1278,7 +1283,7 @@ pub fn build_flow_payload(
         "timestamp": millis,
         "version": "1.0",
     });
-    Ok((payload, count as usize))
+    Ok((payload, gen_ids.len()))
 }
 
 /// 마그니픽 복사 형식 JSON 을 클립보드(text/html + text/plain)에 넣습니다.
@@ -1438,12 +1443,12 @@ pub struct ComposeResult {
 
 /// «구성» — 그림 올리기 → 생성기까지를 사람 손 없이. 마그니픽 데스크톱을 CDP 로 조종합니다.
 ///
-/// 1. 그림 파일을 클립보드에 넣고 페이지 안 Ctrl+V(안 되면 창 앞으로 + OS Ctrl+V) → 새 노드 감지.
+/// 1. 같은 보드·페이지에서 전체 내용 지문이 일치하는 파일은 재사용하고, 나머지만 붙여넣어 새 노드 감지.
 /// 2. 새 노드가 선택돼 있는지 확인(아니면 클릭해 고름) → 페이지 안 Ctrl+C → 클립보드에서 업로드 id 읽기.
 /// 올라가는 중이면 id 가 placeholder 라 될 때까지 되풀이.
 /// 3. 선택이 **방금 올린 그 노드들과 정확히 같을 때만** Delete(원본은 사본으로 대체되므로 중복).
 /// 사용자가 «원본 삭제까지 자동으로» 를 원했고(2026-09-08), 우리가 방금 만든 노드만 지웁니다.
-/// 4. 그림 사본 + 생성기(프롬프트·칩) JSON 을 클립보드에 넣고 붙여넣기 → 새 노드 감지.
+/// 4. 새 빈 영역에 그림 사본 + 생성기(프롬프트·칩) JSON 을 붙여넣기 → 새 노드 감지.
 ///
 /// 여기는 잠금과 **전체 마감**만 쥡니다. 본체는 [`compose_body`].
 #[tauri::command]
@@ -1513,6 +1518,103 @@ fn is_video_path(path: &Path) -> bool {
     )
 }
 
+fn space_cache_key(page_url: &str) -> Option<String> {
+    let url = reqwest::Url::parse(page_url).ok()?;
+    let space_id = space_id_from_url(page_url)?;
+    let page = url.query_pairs().find(|(name, _)| name == "page")
+        .map(|(_, value)| value.into_owned()).unwrap_or_else(|| "1".into());
+    Some(format!("{space_id}:{page}"))
+}
+
+fn reference_spacing(references: &[CopiedCreation]) -> (f64, f64) {
+    let width = references.iter().map(|item| item.width).fold(465.0_f64, f64::max);
+    let height = references.iter().map(|item| item.height).fold(278.0_f64, f64::max);
+    (width + 40.0, height + 48.0)
+}
+
+fn composition_width(references: &[CopiedCreation]) -> f64 {
+    if references.is_empty() { 697.0 } else { 2.0 * reference_spacing(references).0 + 100.0 + 697.0 }
+}
+
+fn composition_height(references: &[CopiedCreation], count: u32) -> f64 {
+    let reference_height = references.len().div_ceil(2) as f64 * reference_spacing(references).1;
+    reference_height.max(count.clamp(1, 4) as f64 * 440.0)
+}
+
+const COMPOSITION_VERTICAL_GAP: f64 = 240.0;
+
+fn choose_composition_origin(view: (f64, f64, f64), reserved_bottom: f64, column_x: Option<f64>, references: &[CopiedCreation], count: u32) -> (f64, f64) {
+    let (center_x, center_y, visible_bottom) = view;
+    (
+        column_x.unwrap_or(center_x - composition_width(references) / 2.0),
+        (center_y - composition_height(references, count) / 2.0)
+            .max(visible_bottom + COMPOSITION_VERTICAL_GAP)
+            .max(reserved_bottom),
+    )
+}
+
+async fn board_composition_origin(cdp: &mut magnific_cdp::Cdp, reserved_bottom: f64, column_x: Option<f64>, references: &[CopiedCreation], count: u32) -> Res<(f64, f64)> {
+    // 생성된 이미지가 오른쪽으로 늘어나므로 새 묶음은 아래에 둡니다.
+    // DOM에 없는 화면 밖 묶음은 저장한 next_y가 보호합니다.
+    let js = r#"(()=>{const b=document.querySelector('.vue-flow'),p=document.querySelector('.vue-flow__transformationpane');if(!b||!p)return null;const m=new DOMMatrixReadOnly(getComputedStyle(p).transform),r=b.getBoundingClientRect();if(!m.a||!m.d)return null;let bottom=-1e9;for(const n of document.querySelectorAll('.vue-flow__node')){const t=new DOMMatrixReadOnly(getComputedStyle(n).transform);bottom=Math.max(bottom,t.f+n.offsetHeight)}return JSON.stringify([(r.width/2-m.e)/m.a,(r.height/2-m.f)/m.d,bottom])})()"#;
+    let value = cdp.eval(js).await?;
+    let view: (f64, f64, f64) = value.as_str().and_then(|text| serde_json::from_str(text).ok())
+        .ok_or("Magnific 캔버스 위치를 읽지 못했습니다. 보드가 완전히 열린 뒤 다시 구성하세요.")?;
+    Ok(choose_composition_origin(view, reserved_bottom, column_x, references, count))
+}
+
+/// Magnific의 내부 붙여넣기는 클립보드의 절대 x/y를 그대로 쓰지 않고 현재 마우스의
+/// 캔버스 좌표를 묶음 중심으로 사용합니다. 새 영역을 보이게 팬한 다음 그 중심에 마우스를
+/// 놓아야 연속 구성이 같은 자리에 쌓이지 않습니다.
+async fn point_canvas_at_composition(
+    cdp: &mut magnific_cdp::Cdp,
+    origin: (f64, f64),
+    references: &[CopiedCreation],
+    count: u32,
+) -> Res<()> {
+    let center_x = origin.0 + composition_width(references) / 2.0;
+    let center_y = origin.1 + composition_height(references, count) / 2.0;
+    let geometry = cdp.eval(r#"(()=>{const b=document.querySelector('.vue-flow'),p=document.querySelector('.vue-flow__transformationpane');if(!b||!p)return null;const r=b.getBoundingClientRect(),m=new DOMMatrixReadOnly(getComputedStyle(p).transform);return JSON.stringify([r.x,r.y,r.width,r.height,m.a,m.d,m.e,m.f])})()"#).await?;
+    let [board_x, board_y, width, height, zoom_x, zoom_y, pan_x, pan_y]: [f64; 8] =
+        serde_json::from_str(geometry.as_str().unwrap_or(""))
+            .map_err(|_| "Magnific 캔버스 확대율을 읽지 못했습니다.".to_string())?;
+    if width <= 0.0 || height <= 0.0 || zoom_x <= 0.0 || zoom_y <= 0.0 {
+        return Err("Magnific 캔버스 크기가 올바르지 않습니다.".into());
+    }
+    let wanted_x = width / 2.0 - center_x * zoom_x;
+    let wanted_y = height / 2.0 - center_y * zoom_y;
+    let mut remaining_x = wanted_x - pan_x;
+    let mut remaining_y = wanted_y - pan_y;
+    let mouse_x = board_x + width / 2.0;
+    let mouse_y = board_y + height / 2.0;
+    while remaining_x.abs() > 1.0 || remaining_y.abs() > 1.0 {
+        let dx = remaining_x.clamp(-300.0, 300.0);
+        let dy = remaining_y.clamp(-250.0, 250.0);
+        cdp.call("Input.dispatchMouseEvent", serde_json::json!({"type":"mouseMoved","x":mouse_x,"y":mouse_y})).await?;
+        cdp.call("Input.dispatchMouseEvent", serde_json::json!({"type":"mousePressed","x":mouse_x,"y":mouse_y,"button":"middle","buttons":4,"clickCount":1})).await?;
+        cdp.call("Input.dispatchMouseEvent", serde_json::json!({"type":"mouseMoved","x":mouse_x+dx,"y":mouse_y+dy,"button":"middle","buttons":4})).await?;
+        cdp.call("Input.dispatchMouseEvent", serde_json::json!({"type":"mouseReleased","x":mouse_x+dx,"y":mouse_y+dy,"button":"middle","buttons":0,"clickCount":1})).await?;
+        remaining_x -= dx;
+        remaining_y -= dy;
+    }
+    let actual = cdp.eval(r#"(()=>{const p=document.querySelector('.vue-flow__transformationpane');if(!p)return null;const m=new DOMMatrixReadOnly(getComputedStyle(p).transform);return JSON.stringify([m.e,m.f])})()"#).await?;
+    let [actual_x, actual_y]: [f64; 2] = serde_json::from_str(actual.as_str().unwrap_or(""))
+        .map_err(|_| "Magnific 캔버스 이동 결과를 읽지 못했습니다.".to_string())?;
+    if (actual_x - wanted_x).abs() > 30.0 || (actual_y - wanted_y).abs() > 30.0 {
+        return Err("Magnific 캔버스를 새 구성 위치로 이동하지 못했습니다. 보드를 확인한 뒤 다시 구성하세요.".into());
+    }
+    cdp.call("Input.dispatchMouseEvent", serde_json::json!({"type":"mouseMoved","x":mouse_x,"y":mouse_y})).await?;
+    Ok(())
+}
+
+async fn pasted_bottom_edge(cdp: &mut magnific_cdp::Cdp, before: &std::collections::BTreeSet<String>, expected: usize) -> Option<f64> {
+    let previous = serde_json::to_string(before).ok()?;
+    let js = format!("JSON.stringify((()=>{{const old=new Set({previous});return [...document.querySelectorAll('.vue-flow__node')].filter(n=>!old.has(n.dataset.id)).map(n=>{{const m=new DOMMatrixReadOnly(getComputedStyle(n).transform);return m.f+n.offsetHeight}})}})())");
+    let value = cdp.eval(&js).await.ok()?;
+    let edges: Vec<f64> = serde_json::from_str(value.as_str()?).ok()?;
+    (edges.len() == expected).then(|| edges.into_iter().fold(f64::NEG_INFINITY, f64::max))
+}
+
 /// «구성» 본체. 잠금과 마감은 [`magnific_compose_auto`] 가 밖에서 겁니다 — 여기서는 모릅니다.
 /// 단계마다 `cdp.set_stage` 로 이름을 남겨, 페이지가 멈추면 오류 문구에 «어느 단계» 가 찍힙니다.
 #[allow(clippy::too_many_arguments)]
@@ -1550,6 +1652,23 @@ async fn compose_body(
     if !page_url.contains("/app/spaces/") {
         return Err("마그니픽에서 스페이스 보드를 연 뒤 «구성» 을 누르세요.".into());
     }
+    let space_id = space_id_from_url(&page_url).ok_or("Magnific 보드 ID를 확인하지 못했습니다.")?;
+    let cache_key = space_cache_key(&page_url).ok_or("Magnific 보드 페이지를 확인하지 못했습니다.")?;
+    let mut cache = read_compose_cache();
+    // 사람이 보드를 비웠다면 이전에 이 보드에 있던 생성물 ID를 그대로 믿지 않습니다.
+    if saved_board_snapshot(&space_id).await.is_ok_and(|snapshot| snapshot.nodes.is_empty()) {
+        cache.spaces.remove(&cache_key);
+    }
+    let (files, _) = if paths.is_empty() { (Vec::new(), Vec::new()) } else { resolve_image_files(&base_directory, &paths)? };
+    let wanted_references = upload_references(&files)?;
+    let digests: Vec<String> = files.iter().map(|file| reference_digest(file)).collect::<Res<_>>()?;
+    let slots: Vec<Option<CopiedCreation>> = wanted_references.iter().zip(&digests)
+        .map(|(reference, digest)| cache.spaces.get(&cache_key)
+            .and_then(|space| cached_creation(space, digest, reference)))
+        .collect();
+    let missing_files: Vec<PathBuf> = files.iter().zip(&slots)
+        .filter_map(|(file, saved)| saved.is_none().then_some(file.clone())).collect();
+    let missing_references = upload_references(&missing_files)?;
     let mut cdp = magnific_cdp::Cdp::connect(&ws_url).await?;
     let sleep = |ms: u64| tokio::time::sleep(std::time::Duration::from_millis(ms));
     let set_of = |ids: &[String]| ids.iter().cloned().collect::<std::collections::BTreeSet<_>>();
@@ -1568,23 +1687,22 @@ async fn compose_body(
 
     // 레퍼런스 그림이 없으면(에셋·아직 그림 없는 인물) 올리기·id 읽기·원본 정리를 건너뛰고
     // 프롬프트만 든 생성기를 붙여넣습니다().
-    let (creations, removed, fingerprints): (Vec<CopiedCreation>, bool, Vec<String>) = if paths.is_empty() {
+    let (uploaded, removed, fingerprints): (Vec<CopiedCreation>, bool, Vec<String>) = if missing_files.is_empty() {
         (Vec::new(), true, Vec::new())
     } else {
         // ── 1. 그림 올리기 ──────────────────────────────────────────────────────
         cdp.set_stage("1단계 그림 올리기");
-        let (files, fingerprints) = resolve_image_files(&base_directory, &paths)?;
-        let wanted_references = upload_references(&files)?;
+        let fingerprints = missing_files.iter().filter_map(|file| file_fingerprint(file)).collect();
         let before = set_of(&cdp.node_ids(false).await?);
         cdp.key("Escape", 27, false, false).await?;
-        magnific_window::set_clipboard_files(&files)?;
+        magnific_window::set_clipboard_files(&missing_files)?;
         cdp.key("KeyV", 86, true, false).await?;
         let mut new_ids: Vec<String> = Vec::new();
         for _ in 0..40 {
             sleep(250).await;
             let now = cdp.node_ids(false).await?;
             new_ids = now.into_iter().filter(|id| !before.contains(id)).collect();
-            if new_ids.len() >= files.len() {
+            if new_ids.len() >= missing_files.len() {
                 break;
             }
         }
@@ -1595,7 +1713,7 @@ async fn compose_body(
                 sleep(250).await;
                 let now = cdp.node_ids(false).await?;
                 new_ids = now.into_iter().filter(|id| !before.contains(id)).collect();
-                if new_ids.len() >= files.len() {
+                if new_ids.len() >= missing_files.len() {
                     break;
                 }
             }
@@ -1655,9 +1773,9 @@ async fn compose_body(
                 if let Some(encoded) = pikaso::extract(&html) {
                     if let Ok(value) = pikaso::decode(&encoded) {
                         let all = copied_creations(&value);
-                        let picked = match_uploaded_creations(&wanted_references, &all)?;
+                        let picked = match_uploaded_creations(&missing_references, &all)?;
                         last_seen = format!("복사된 그림: [{}]", all.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", "));
-                        if picked.len() >= wanted_references.len() {
+                        if picked.len() >= missing_references.len() {
                             creations = picked;
                             break;
                         }
@@ -1688,15 +1806,20 @@ async fn compose_body(
         (creations, removed, fingerprints)
     };
 
-    // 그림이 없으면 생성기를 지금 보이는 캔버스 가운데에 놓습니다(Vue Flow 변환 행렬로 계산).
-    let origin: Option<(f64, f64)> = if creations.is_empty() {
-        cdp.set_stage("생성기 자리 잡기");
-        let js = r#"(()=>{const p=document.querySelector('.vue-flow__transformationpane');const v=document.querySelector('.vue-flow__viewport')||(p&&p.parentElement);if(!p||!v)return null;const m=new DOMMatrixReadOnly(getComputedStyle(p).transform);const r=v.getBoundingClientRect();return JSON.stringify([(r.width/2-m.e)/m.a-348,(r.height/2-m.f)/m.d-196])})()"#;
-        let v = cdp.eval(js).await.unwrap_or(serde_json::Value::Null);
-        v.as_str().and_then(|t| serde_json::from_str::<(f64, f64)>(t).ok())
-    } else {
-        None
-    };
+    let mut new_creations = uploaded.into_iter();
+    let creations: Vec<CopiedCreation> = slots.into_iter().map(|saved| {
+        saved.unwrap_or_else(|| new_creations.next().expect("확인한 업로드 수와 누락 수가 같습니다"))
+    }).collect();
+    for (file, expected) in files.iter().zip(&digests) {
+        if reference_digest(file)? != *expected {
+            return Err(format!("구성하는 사이 레퍼런스 파일이 바뀌었습니다({}). 새 내용으로 다시 구성하세요.", file.display()));
+        }
+    }
+
+    cdp.set_stage("새 구성 자리 잡기");
+    let reserved_bottom = cache.spaces.get(&cache_key).map(|entry| entry.next_y).unwrap_or(0.0);
+    let column_x = cache.spaces.get(&cache_key).and_then(|entry| entry.column_x);
+    let origin = board_composition_origin(&mut cdp, reserved_bottom, column_x, &creations, count).await?;
 
     // ── 4. 그림 사본 + 생성기 붙여넣기 ─────────────────────────────────────────
     cdp.set_stage("4단계 사본·생성기 붙여넣기");
@@ -1706,7 +1829,7 @@ async fn compose_body(
         &model,
         &aspect_ratio,
         count,
-        origin,
+        Some(origin),
         kind.as_deref(),
         duration_seconds,
         resolution.as_deref(),
@@ -1715,14 +1838,11 @@ async fn compose_body(
     // 현재 페이지 DOM은 화면 밖 노드를 렌더링하지 않습니다. 붙여넣기 전 저장된 보드를
     // 기록해 두면, 아래 화면 검사에서 일부만 보일 때 실제 저장 결과로 재확인할 수 있습니다.
     // MCP 연결이 없는 데스크톱 사용자에게는 기존 DOM 확인 경로를 유지합니다.
-    let saved_before = if let Some(space_id) = space_id_from_url(&page_url) {
-        saved_board_snapshot(&space_id).await.ok().map(|snapshot| (space_id, snapshot))
-    } else {
-        None
-    };
+    let saved_before = saved_board_snapshot(&space_id).await.ok().map(|snapshot| (space_id, snapshot));
     put_flow_on_clipboard(&payload)?;
     let before = set_of(&cdp.node_ids(false).await?);
     cdp.key("Escape", 27, false, false).await?;
+    point_canvas_at_composition(&mut cdp, origin, &creations, count).await?;
     cdp.key("KeyV", 86, true, false).await?;
     let expected = creations.len() + gen_count;
     let mut pasted = 0usize;
@@ -1755,6 +1875,7 @@ async fn compose_body(
         }
         if !saved_complete { require_complete_paste(pasted, expected)?; }
     }
+    let actual_bottom = pasted_bottom_edge(&mut cdp, &before, expected).await;
     let what = if kind.as_deref() == Some("video") { "영상" } else { "이미지" };
     let mut message = if creations.is_empty() {
         format!("마그니픽 캔버스에 {what} 생성기 {gen_count}개(프롬프트만)를 놓았습니다.")
@@ -1766,6 +1887,25 @@ async fn compose_body(
     };
     if !removed {
         message.push_str(" 처음 올린 원본 그림은 선택이 바뀌어 지우지 않았습니다 — 중복이면 Delete 로 지우세요.");
+    }
+    // 보드에 노드가 실제로 놓인 다음에만 재사용 정보를 남깁니다. 다음 구성은 같은
+    // 바이너리의 업로드를 건너뛰고 이 생성물 ID로 새 연결용 사본만 만듭니다.
+    let space = cache.spaces.entry(cache_key).or_default();
+    for (digest, creation) in digests.iter().zip(&creations) {
+        space.references.insert(digest.clone(), CachedReference {
+            creation_identifier: creation.creation_identifier.clone(), page: creation.page.clone(),
+            source_board_uuid: creation.source_board_uuid.clone(),
+            media_type: creation.media_type.expect("레퍼런스 종류를 검사했습니다"),
+            width: creation.width, height: creation.height,
+        });
+    }
+    space.column_x = Some(origin.0);
+    space.next_y = actual_bottom.unwrap_or(origin.1 + composition_height(&creations, count)) + COMPOSITION_VERTICAL_GAP;
+    if let Err(error) = write_compose_cache(&cache) {
+        message.push_str(&format!(" 재사용 기록을 저장하지 못해 다음 구성에서는 레퍼런스를 다시 올릴 수 있습니다: {error}"));
+    }
+    if files.len() > missing_files.len() {
+        message.push_str(&format!(" 기존 레퍼런스 {}개는 재업로드 없이 사용했습니다.", files.len() - missing_files.len()));
     }
     Ok(ComposeResult { message, fingerprints })
 }
@@ -1930,6 +2070,78 @@ pub async fn send_prompt_to_magnific(text: String) -> Res<String> {
     }
 }
 
+/// 같은 스페이스에서 이미 올린 원본을 재사용합니다. 파일 이름만 같다고 재사용하지 않고
+/// 전체 내용 SHA-256을 확인합니다. 서비스가 생성물 id를 무효화한 경우 캐시를 지우면 다시 올립니다.
+#[derive(Default, Serialize, Deserialize)]
+struct ComposeCache {
+    spaces: std::collections::BTreeMap<String, SpaceComposeCache>,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+struct SpaceComposeCache {
+    references: std::collections::BTreeMap<String, CachedReference>,
+    next_y: f64,
+    column_x: Option<f64>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct CachedReference {
+    creation_identifier: String,
+    page: String,
+    source_board_uuid: Option<String>,
+    media_type: ReferenceMediaType,
+    width: f64,
+    height: f64,
+}
+
+fn compose_cache_path() -> Res<PathBuf> {
+    let dir = dirs::config_dir().ok_or("앱 설정 폴더를 찾지 못했습니다.")?.join("ai-video-storage");
+    fs::create_dir_all(&dir).map_err(|e| err("Magnific 캐시 폴더를 만들지 못했습니다", e))?;
+    Ok(dir.join("magnific-compose-cache.json"))
+}
+
+fn read_compose_cache() -> ComposeCache {
+    compose_cache_path().ok().and_then(|path| fs::read(path).ok())
+        .and_then(|raw| serde_json::from_slice(&raw).ok()).unwrap_or_default()
+}
+
+fn write_compose_cache(cache: &ComposeCache) -> Res<()> {
+    use std::io::Write;
+    let path = compose_cache_path()?;
+    let raw = serde_json::to_vec(cache).map_err(|e| err("Magnific 캐시를 만들지 못했습니다", e))?;
+    let mut temporary = tempfile::NamedTempFile::new_in(path.parent().ok_or("Magnific 캐시 폴더가 없습니다.")?)
+        .map_err(|e| err("Magnific 임시 캐시를 만들지 못했습니다", e))?;
+    temporary.write_all(&raw).map_err(|e| err("Magnific 캐시를 쓰지 못했습니다", e))?;
+    temporary.flush().map_err(|e| err("Magnific 캐시를 확정하지 못했습니다", e))?;
+    temporary.persist(&path).map_err(|e| err("Magnific 캐시를 교체하지 못했습니다", e))?;
+    Ok(())
+}
+
+fn reference_digest(path: &Path) -> Res<String> {
+    use std::io::Read;
+    let mut file = fs::File::open(path).map_err(|e| err("레퍼런스를 읽지 못했습니다", e))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let bytes = file.read(&mut buffer).map_err(|e| err("레퍼런스 지문을 읽지 못했습니다", e))?;
+        if bytes == 0 { break; }
+        hasher.update(&buffer[..bytes]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn cached_creation(cache: &SpaceComposeCache, digest: &str, reference: &UploadReference) -> Option<CopiedCreation> {
+    let saved = cache.references.get(digest)?;
+    if saved.creation_identifier.is_empty() || saved.media_type != reference.media_type { return None; }
+    Some(CopiedCreation {
+        id: pikaso::uuid_v4(), name: reference.name.clone(),
+        creation_identifier: saved.creation_identifier.clone(), x: 0.0, y: 0.0,
+        width: saved.width, height: saved.height, page: saved.page.clone(),
+        source_board_uuid: saved.source_board_uuid.clone(), media_type: Some(reference.media_type),
+    })
+}
+
 #[cfg(test)]
 mod compose_regression_tests {
     use super::*;
@@ -2061,6 +2273,77 @@ mod compose_regression_tests {
         assert_eq!(elements[2]["type"], "video-generator");
         assert_eq!(elements[2]["data"]["duration"], 5.0);
         assert_eq!(elements[2]["data"]["resolution"], "720p");
+    }
+
+    #[test]
+    fn repeated_compositions_reserve_new_canvas_regions_and_arrange_references() {
+        let references = (0..5).map(|index| creation(&index.to_string(), &format!("ref{index}"))).collect::<Vec<_>>();
+        let first = choose_composition_origin((500.0, 400.0, 300.0), 0.0, None, &references, 4);
+        let second = choose_composition_origin((500.0, 400.0, 300.0), first.1 + composition_height(&references, 4) + COMPOSITION_VERTICAL_GAP, Some(first.0), &references, 4);
+        assert_eq!(second.0, first.0);
+        assert!(second.1 >= first.1 + composition_height(&references, 4) + COMPOSITION_VERTICAL_GAP);
+        let (payload, _) = build_flow_payload("@ref0", &references, "image-model", "16:9", 1, Some(first), Some("image"), None, None, false).unwrap();
+        let nodes = payload["elements"].as_array().unwrap();
+        assert_eq!(nodes[0]["x"], first.0);
+        assert_eq!(nodes[1]["x"], first.0 + 505.0);
+        assert_eq!(nodes[2]["y"], first.1 + 326.0);
+        assert_eq!(nodes[5]["x"], first.0 + 1110.0);
+        let mut wide = references.clone();
+        wide[0].width = 700.0;
+        let (wider, _) = build_flow_payload("@ref0", &wide, "image-model", "16:9", 1, Some(first), Some("image"), None, None, false).unwrap();
+        assert_eq!(wider["elements"][1]["x"], first.0 + 740.0);
+        assert_eq!(wider["elements"][5]["x"], first.0 + 1580.0);
+    }
+
+    #[test]
+    fn four_image_choices_use_one_generator_with_native_generation_count() {
+        let references = vec![creation("ref", "actor")];
+        let (payload, generators) = build_flow_payload(
+            "@actor portrait", &references, "imagen-nano-banana-2", "16:9", 4,
+            None, Some("image"), None, None, false,
+        ).unwrap();
+        assert_eq!(generators, 1);
+        let nodes = payload["elements"].as_array().unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[1]["data"]["numberOfGenerations"], 4);
+        assert_eq!(nodes[0]["workflowConnections"]["outgoing"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn content_cache_reuses_only_exact_bytes_on_the_same_board_page() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        fs::write(file.path(), b"camera frames one").unwrap();
+        let first = reference_digest(file.path()).unwrap();
+        fs::write(file.path(), b"camera frames two").unwrap();
+        let changed = reference_digest(file.path()).unwrap();
+        assert_ne!(first, changed);
+        let mut space = SpaceComposeCache::default();
+        space.references.insert(first.clone(), CachedReference {
+            creation_identifier: "existing-video-id".into(), page: "1".into(),
+            source_board_uuid: Some("board-uuid".into()),
+            media_type: ReferenceMediaType::Video,
+            width: 465.0, height: 278.0,
+        });
+        let reference = UploadReference { name: "new-filename".into(), media_type: ReferenceMediaType::Video };
+        let reused = cached_creation(&space, &first, &reference).unwrap();
+        assert_eq!(reused.creation_identifier, "existing-video-id");
+        assert_eq!(reused.name, "new-filename");
+        assert_eq!(reused.media_type, Some(ReferenceMediaType::Video));
+        assert!(cached_creation(&space, &changed, &reference).is_none());
+        assert!(cached_creation(&space, &first, &UploadReference { name: "renamed-image".into(), media_type: ReferenceMediaType::Image }).is_none());
+        assert_ne!(space_cache_key("https://www.magnific.com/app/spaces/board?page=1"), space_cache_key("https://www.magnific.com/app/spaces/board?page=2"));
+    }
+
+    #[test]
+    fn previous_horizontal_compose_cache_keeps_reusable_references() {
+        let old = serde_json::json!({"references": {"digest": {
+            "creation_identifier": "existing-id", "page": "1", "source_board_uuid": null,
+            "media_type": "image", "width": 465.0, "height": 278.0
+        }}, "next_x": 4000.0});
+        let space: SpaceComposeCache = serde_json::from_value(old).unwrap();
+        assert_eq!(space.references["digest"].creation_identifier, "existing-id");
+        assert_eq!(space.next_y, 0.0);
+        assert_eq!(space.column_x, None);
     }
 
     #[test]

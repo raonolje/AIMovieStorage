@@ -1,6 +1,6 @@
 [package]
 name = "aimoviestorage"
-version = "0.3.12"
+version = "0.3.14"
 description = "AIMovieStorage local AI preproduction workspace"
 authors = ["AIMovieStorage"]
 license = ""
@@ -16,7 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 # 실행 파일 이름을 **따로** 적습니다.
 #
-# 라온 2026-09-23: 「frameforge라는 이름은 이제 버려도 돼」. 설치 폴더·제품 이름은
+# 설치 폴더·제품 이름은
 # `AIMovieStorage` 인데 실행 파일만 `frameforge.exe` 였고, 무설치본 이름도 그것을 따라
 # `frameforge_portable.zip` 이 됐습니다(릴리스 목록에서 둘이 섞여 보였습니다).
 #
@@ -46,10 +46,10 @@ image = "0.25"
 # 살아남은 사본이 8월 12일 판이라 그 뒤에 추가된 것들이 빠져 있었습니다.
 #
 # reqwest — LLM 을 Rust 쪽에서 부릅니다. 브라우저에서 직접 부르면 API 키가
-#           개발자 도구에 그대로 보이고 CORS 에도 걸립니다.
-# base64  — 레퍼런스 이미지를 LLM 에 실어 보낼 때 씁니다.
-# tokio   — reqwest 가 비동기라 런타임이 필요합니다.
-# dirs    — API 키를 둘 앱 설정 폴더를 찾습니다.
+# 개발자 도구에 그대로 보이고 CORS 에도 걸립니다.
+# base64 — 레퍼런스 이미지를 LLM 에 실어 보낼 때 씁니다.
+# tokio — reqwest 가 비동기라 런타임이 필요합니다.
+# dirs — API 키를 둘 앱 설정 폴더를 찾습니다.
 reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "rustls-tls",

@@ -45,6 +45,8 @@ export const magnificComposePreviewSchema = z
     cutId: id,
     expectedRevision: z.string().min(1).max(200),
     kind: z.enum(["image", "video"]),
+    /** One image generator can return several choices in a single canvas run. */
+    count: z.number().int().min(1).max(4).optional(),
     language: z.enum(["ko", "en"]).default("en"),
     prompt: z.string().trim().min(1).max(32_000).optional(),
     promptMode: z.enum(["guided", "exact"]).default("guided"),
@@ -61,15 +63,23 @@ export const magnificComposeExecuteSchema = z
     operationId: id,
   })
   .strict();
+export const magnificComposeBatchExecuteSchema = z.object({
+  projectId: id,
+  expectedRevision: z.string().min(1).max(200),
+  previewIds: z.array(id).min(1).max(20),
+  operationId: id,
+}).strict();
 export const magnificSheetComposePreviewSchema = z.object({
   projectId: id,
   expectedRevision: z.string().min(1).max(200),
   target: z.object({ kind: z.enum(["character", "background"]), id }).strict(),
   language: z.enum(["ko", "en"]).default("en"),
+  count: z.number().int().min(1).max(4).optional(),
 }).strict();
 type PreviewRequest = z.infer<typeof magnificComposePreviewSchema>;
 type SheetPreviewRequest = z.infer<typeof magnificSheetComposePreviewSchema>;
 type ExecuteRequest = z.infer<typeof magnificComposeExecuteSchema>;
+type BatchExecuteRequest = z.infer<typeof magnificComposeBatchExecuteSchema>;
 type Plan = Omit<MagnificComposeInput, "onStatus" | "beforeCompose">;
 interface Preview {
   request: PreviewRequest | SheetPreviewRequest;
@@ -84,6 +94,7 @@ interface Payload extends Preview {
 }
 const previews = new Map<string, Preview>();
 const KIND = "control.magnific-compose";
+const BATCH_KIND = "control.magnific-compose-batch";
 const PREVIEW_TTL = 10 * 60_000;
 
 function fail(code: string, message: string, details?: unknown): never {
@@ -282,7 +293,7 @@ export async function previewControlMagnific(raw: unknown) {
     aspectRatio: "16:9",
     videoResolution: request.videoResolution,
     musicEnabled,
-    count: 1,
+    count: request.kind === "image" ? (request.count ?? 4) : 1,
   };
   await validateMagnificComposition(plan);
   await current(request.projectId, request.expectedRevision);
@@ -323,6 +334,7 @@ export async function previewControlMagnific(raw: unknown) {
     resolution: request.kind === "video" ? plan.videoResolution : undefined,
     musicEnabled: request.kind === "video" ? plan.musicEnabled : undefined,
     aspectRatio: plan.aspectRatio,
+    count: plan.count,
     references: plan.referencePaths.map((path) => ({
       name: path.split(/[\\/]/).pop(),
       tag: refs.tagOf(path),
@@ -368,7 +380,7 @@ export async function previewControlMagnificSheet(raw: unknown) {
       ? background.exteriorSpace : background.panoramaSpace) ?? "16:9"
     : "16:9";
   const plan: Plan = {
-    kind: "image", prompt, referencePaths, model, aspectRatio, count: 1,
+    kind: "image", prompt, referencePaths, model, aspectRatio, count: request.count ?? 4,
     owner: { kind: request.target.kind, name: entity.name },
   };
   await validateMagnificComposition(plan);
@@ -381,14 +393,14 @@ export async function previewControlMagnificSheet(raw: unknown) {
   return {
     previewId, projectId: request.projectId, revision: request.expectedRevision,
     target: request.target, expiresAt, kind: "image", language: request.language,
-    prompt, model, aspectRatio,
+    prompt, model, aspectRatio, count: plan.count,
     references: referencePaths.map(path => ({ name: path.split(/[\\/]/).pop(), tag: `@${path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "")}` })),
     paidGeneration: false,
     limitation: "앱의 «구성»과 같이 보드에 생성기를 올립니다. 생성 버튼은 누르지 않습니다.",
   };
 }
 
-async function validateCurrent(payload: Payload) {
+async function validateCurrent(payload: Preview) {
   const draft = await current(
     payload.request.projectId,
     payload.request.expectedRevision,
@@ -520,6 +532,100 @@ registerTaskRunner(KIND, async (raw, report, task) => {
     projectId: payload.request.projectId,
     ...( "cutId" in payload.request ? { cutId: payload.request.cutId } : { target: payload.request.target }),
     sourceRevision: payload.request.expectedRevision,
+  };
+  await saveTaskExternalCheckpoint(task.id, result);
+  return { data: result };
+});
+
+interface BatchPayload {
+  requestExecution: BatchExecuteRequest;
+  items: Preview[];
+}
+
+/** One queued job prepares all inspected image compositions in canvas order. */
+export async function enqueueControlMagnificBatch(raw: unknown) {
+  const request = magnificComposeBatchExecuteSchema.parse(raw);
+  if (new Set(request.previewIds).size !== request.previewIds.length)
+    fail("duplicate_preview", "같은 Magnific 미리보기를 묶음에 두 번 넣을 수 없습니다.");
+  await whenTaskJournalReady();
+  const previous = getTaskByOperationId(request.operationId);
+  if (previous) {
+    const payload = previous.payload as BatchPayload;
+    if (previous.kind !== BATCH_KIND ||
+      JSON.stringify(payload?.requestExecution) !== JSON.stringify(request))
+      fail("operation_conflict", "같은 작업 요청 열쇠에 다른 내용이 들어왔습니다.");
+    return enqueueTaskOperation({
+      lane: "media", kind: BATCH_KIND, projectId: previous.projectId,
+      projectTitle: previous.projectTitle, label: previous.label,
+      operationId: request.operationId, payload: previous.payload,
+    });
+  }
+  const items = request.previewIds.map(previewId => {
+    const preview = previews.get(previewId);
+    if (!preview || preview.expiresAt < Date.now())
+      fail("preview_expired", "Magnific 구성 미리보기가 만료되었습니다. 미리보기를 다시 요청해 주세요.");
+    if (preview.request.projectId !== request.projectId ||
+        preview.request.expectedRevision !== request.expectedRevision)
+      fail("preview_mismatch", "미리보기의 프로젝트나 판이 실행 요청과 다릅니다.");
+    if (preview.plan.kind === "video")
+      fail("image_batch_only", "Magnific 일괄 이미지 구성에는 영상 미리보기를 섞을 수 없습니다.");
+    return preview;
+  });
+  for (const item of items) await validateCurrent(item);
+  return enqueueTaskOperation({
+    lane: "media", kind: BATCH_KIND, projectId: request.projectId,
+    projectTitle: items[0].projectTitle, label: t("외부 조종 · Magnific 이미지 일괄 구성"),
+    operationId: request.operationId, payload: { requestExecution: request, items } satisfies BatchPayload,
+  });
+}
+
+registerTaskRunner(BATCH_KIND, async (raw, report, task) => {
+  const payload = raw as BatchPayload;
+  const saved = getTask(task.id)!;
+  if (saved.externalCheckpoint?.phase === "completed") return { data: saved.externalCheckpoint };
+  if (saved.externalEffectStartedAt)
+    fail("external_result_unknown", "Magnific 일괄 구성의 완료 여부를 확인하지 못했습니다. 보드를 확인한 뒤 새 작업으로 요청해 주세요.");
+  let completed = 0;
+  try {
+    for (const item of payload.items) {
+      if (isStopping(task.id)) throw new Error(t("Magnific 구성을 시작하기 전에 취소했습니다."));
+      await validateCurrent(item);
+      await composeInMagnific({
+        ...item.plan,
+        onStatus: step => report({ step: `${completed + 1}/${payload.items.length} · ${step}` }),
+        beforeCompose: async () => {
+          if (isStopping(task.id)) throw new Error(t("Magnific 구성을 시작하기 전에 취소했습니다."));
+          await validateCurrent(item);
+          if (!getTask(task.id)?.externalEffectStartedAt)
+            await markTaskExternalEffectStarted(task.id);
+          await validateCurrent(item);
+        },
+      });
+      completed++;
+      await saveTaskExternalCheckpoint(task.id, {
+        phase: "partial", completed, total: payload.items.length, paidGeneration: false,
+      });
+    }
+  } catch (error) {
+    if (getTask(task.id)?.externalEffectStartedAt) {
+      const cause = (error instanceof Error ? error.message : String(error))
+        .replace(/Bearer\s+\S+/gi, "Bearer [숨김]")
+        .replace(/https?:\/\/\S+/g, "[외부 주소]")
+        .replace(/\s+/g, " ").trim().slice(0, 400);
+      const message = `Magnific 이미지 ${completed}/${payload.items.length}개 구성을 확인했습니다. 나머지는 일부 업로드됐을 수 있어 자동으로 반복하지 않습니다. 보드를 확인하세요.${cause ? ` 원인: ${cause}` : ""}`;
+      await saveTaskExternalCheckpoint(task.id, {
+        phase: "unknown", completed, total: payload.items.length,
+        paidGeneration: false, message,
+      }).catch(() => undefined);
+      throw new ProjectControlError("external_result_unknown", message);
+    }
+    throw error;
+  }
+  const result = {
+    phase: "completed", completed, total: payload.items.length,
+    message: `Magnific 이미지 ${completed}개를 캔버스에 구성했습니다. 각 생성기는 1~4장의 결과를 설정했습니다.`,
+    paidGeneration: false, projectId: payload.requestExecution.projectId,
+    sourceRevision: payload.requestExecution.expectedRevision,
   };
   await saveTaskExternalCheckpoint(task.id, result);
   return { data: result };
