@@ -58,12 +58,30 @@ describe("프로젝트 대화 조종", () => {
     current().scenes = [{ ...newScene(), id: "s1", cuts: [] }];
     const first = await api.getProjectSnapshot("p");
     await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
-      { type: "cut.add", sceneId: "s1", fields: { characterIds: ["c1"], promptEn: "Seo Jinwoo opens the list", videoPromptEn: "Seo Jinwoo turns to camera" } },
+      { type: "cut.add", sceneId: "s1", fields: { characterIds: ["c1"], promptKo: "서진우가 명단을 연다", promptEn: "Seo Jinwoo opens the list", videoPromptKo: "서진우가 카메라를 본다", videoPromptEn: "Seo Jinwoo turns to camera" } },
     ] });
     const cut = current().scenes[0].cuts[0];
     expect(cut.characterIds).toEqual(["c1"]);
     expect(cut.promptEn).toContain("@서진우_001");
+    expect(cut.promptKo).toContain("@서진우_001");
     expect(cut.videoPromptEn).toContain("@서진우_001");
+    expect(cut.videoPromptKo).toContain("@서진우_001");
+  });
+
+  it("조종기가 영문만 보낸 새 컷과 기존 컷을 거절하고 한글 보완은 허용한다", async () => {
+    const api = await import("./projectControl");
+    current().scenes = [{ ...newScene(), id: "s1", cuts: [{ ...newCut(1), id: "k1", promptEn: "A close-up" }] }];
+    const first = await api.getProjectSnapshot("p");
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "cut.add", sceneId: "s1", fields: { characterIds: [], promptEn: "A wide shot" } },
+    ] })).rejects.toMatchObject({ code: "bilingual_prompt_required" });
+    await expect(api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "cut.update", sceneId: "s1", id: "k1", fields: { promptEn: "A new close-up" } },
+    ] })).rejects.toMatchObject({ code: "bilingual_prompt_required" });
+    await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [
+      { type: "cut.update", sceneId: "s1", id: "k1", fields: { promptKo: "인물 클로즈업" } },
+    ] });
+    expect(current().scenes[0].cuts[0].promptKo).toBe("인물 클로즈업");
   });
 
   it("5인 긴 구도는 요약 조회·수정에서 키를 줄이되 원본 키와 전체 리비전 검사를 유지한다", async () => {
@@ -80,7 +98,7 @@ describe("프로젝트 대화 조종", () => {
     expect(first.draft.scenes[0].cuts[0].composition?.motionTracks?.[0]).toMatchObject({ keys: [], keyCount: 1983, keyTimeRange: [0, 1982 / 30] });
     expect(first.projection.truncated).toBe(true);
     expect(JSON.stringify(first).length).toBeLessThan(50_000);
-    const changed = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [{ type: "cut.update", sceneId: "s", id: "k", fields: { promptEn: "new prompt" } }] });
+    const changed = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [{ type: "cut.update", sceneId: "s", id: "k", fields: { promptKo: "새 프롬프트", promptEn: "new prompt" } }] });
     expect(changed.projection.detail).toBe("summary");
     expect(current().scenes[0].cuts[0].composition?.motionTracks?.[0].keys).toHaveLength(1983);
     // 실제 구도·컷 저장처럼 바뀐 경로를 새 객체로 올립니다. 이전 판의 모캡은 불변입니다.
@@ -160,7 +178,7 @@ describe("프로젝트 대화 조종", () => {
       { type: "character.add", id: "c1", fields: { name: "주인공", promptEn: "a traveler" } },
       { type: "background.add", id: "b1", fields: { name: "숲" } },
       { type: "scene.add", id: "s1", fields: { title: "등장" } },
-      { type: "cut.add", id: "k1", sceneId: "s1", fields: { title: "걸어온다", characterIds: ["c1"], backgroundId: "b1", promptKo: "숲 속을 걷는 여행자" } },
+      { type: "cut.add", id: "k1", sceneId: "s1", fields: { title: "걸어온다", characterIds: ["c1"], backgroundId: "b1", promptKo: "숲 속을 걷는 여행자", promptEn: "A traveler walks through a forest" } },
     ] });
     expect(result.persisted).toBe(true);
     expect(current().characters[0]).toMatchObject({ id: "c1", promptEn: "a traveler", generatedImages: [] });
@@ -248,7 +266,7 @@ describe("프로젝트 대화 조종", () => {
     const cut = { ...newCut(1), id: "k", guideImagePath: "p/guide.png", videos: [{ id: "v", name: "영상", filePath: "p/video.mp4", createdAt: "now" }] };
     current().scenes = [{ ...newScene(), id: "s", cuts: [cut] }];
     const first = await api.getProjectSnapshot("p");
-    await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [{ type: "cut.update", sceneId: "s", id: "k", fields: { promptEn: "new prompt" } }] });
+    await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision, commands: [{ type: "cut.update", sceneId: "s", id: "k", fields: { promptKo: "새 프롬프트", promptEn: "new prompt" } }] });
     expect(current().scenes[0].cuts[0]).toMatchObject({ guideImagePath: "p/guide.png", videos: cut.videos, promptEn: "new prompt" });
   });
 
@@ -267,10 +285,11 @@ describe("프로젝트 대화 조종", () => {
     const again = await api.getProjectSnapshot("p", "summary");
     expect(again.revision).toBe(first.revision);
     const updated = await api.updateProjectControl({ projectId: "p", expectedRevision: first.revision,
-      commands: [{ type: "cut.update", sceneId: "s", id: "k", fields: { promptEn: "카메라 프롬프트 수정" } }] });
+      commands: [{ type: "cut.update", sceneId: "s", id: "k", fields: { promptKo: "카메라 프롬프트 수정", promptEn: "Camera prompt edit" } }] });
     expect(current().scenes[0].cuts[0].composition).toBe(composition);
     const changes = await api.getProjectChanges({ projectId: "p", sinceRevision: first.revision });
-    expect(changes.changes).toContainEqual(expect.objectContaining({ path: "/scenes/s/cuts/k/promptEn", after: "카메라 프롬프트 수정", source: "controller" }));
+    expect(changes.changes).toContainEqual(expect.objectContaining({ path: "/scenes/s/cuts/k/promptKo", after: "카메라 프롬프트 수정", source: "controller" }));
+    expect(changes.changes).toContainEqual(expect.objectContaining({ path: "/scenes/s/cuts/k/promptEn", after: "Camera prompt edit", source: "controller" }));
     expect(await api.getProjectChanges({ projectId: "p", sinceRevision: updated.revision })).toMatchObject({ changes: [] });
     expect(keyReads).toBe(0);
     // 조종기 응답을 수정해도 앱 상태와 다음 리비전은 오염되지 않습니다.

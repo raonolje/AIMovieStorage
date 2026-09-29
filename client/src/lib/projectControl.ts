@@ -151,6 +151,14 @@ function checkCutReferences(draft: ProjectDraft, fields: z.infer<typeof cutField
   if (fields.characterIds?.some((value) => !draft.characters.some((item) => item.id === value))) throw new ProjectControlError("invalid_reference", "컷에서 참조할 인물을 찾지 못했습니다.");
   if (fields.backgroundId && !draft.backgrounds.some((item) => item.id === fields.backgroundId)) throw new ProjectControlError("invalid_reference", "컷에서 참조할 장소를 찾지 못했습니다.");
 }
+function checkCutPromptLanguages(current: ReturnType<typeof newCut>, fields: z.infer<typeof cutFields>) {
+  const next = { ...current, ...fields };
+  for (const [ko, en] of [["promptKo", "promptEn"], ["negativeKo", "negativeEn"], ["videoPromptKo", "videoPromptEn"]] as const) {
+    if (!(ko in fields) && !(en in fields)) continue;
+    if (Boolean(next[ko]?.trim()) !== Boolean(next[en]?.trim()))
+      throw new ProjectControlError("bilingual_prompt_required", `컷의 ${ko}와 ${en}을 함께 채우거나 함께 비워 주세요.`);
+  }
+}
 
 /** 새 ID는 호출 바깥에서 정합니다. React가 같은 갱신 함수를 다시 계산해도 다른 카드를 만들면 안 됩니다. */
 export function applyProjectCommands(current: ProjectDraft, commands: ProjectCommand[]): ProjectDraft {
@@ -169,10 +177,12 @@ export function applyProjectCommands(current: ProjectDraft, commands: ProjectCom
       case "scene.update": return { ...draft, scenes: replaceById(draft.scenes, command.id, (item) => ({ ...item, ...command.fields })) };
       case "cut.add":
         checkCutReferences(draft, command.fields);
+        checkCutPromptLanguages(newCut(1), command.fields);
         return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => ({ ...scene, cuts: [...scene.cuts, relinkCutCharacterPrompts({ ...newCut(scene.cuts.length + 1), ...command.fields, id: command.id! }, draft.characters, draft.backgrounds)] })) };
       case "cut.update":
         checkCutReferences(draft, command.fields);
         return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => ({ ...scene, cuts: replaceById(scene.cuts, command.id, (cut) => {
+          checkCutPromptLanguages(cut, command.fields);
           const next = { ...cut, ...command.fields };
           // 인물을 고른 요청에만 잇습니다. 길이·대사 수정만으로 옛 컷의 잘못된 캐스팅을 확정하지 않습니다.
           return command.fields.characterIds ? relinkCutCharacterPrompts(next, draft.characters, draft.backgrounds) : next;
