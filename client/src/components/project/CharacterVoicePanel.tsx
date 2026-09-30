@@ -4,8 +4,8 @@ import { assetSrc, deleteProjectMediaFile, fileStem } from "@/lib/mediaLibrary";
 import { useT } from "@/lib/i18n";
 import { extractVoiceFromPrimary, withPrimaryVoice } from "@/lib/characterVoice";
 import { installLocalEngine, useLocalEngines } from "@/lib/localEngines";
-import { generateCharacterVoice, VOICE_CATEGORY_LABEL, VOICE_LANGUAGES, VOICE_MODELS, VOICE_SPEAKERS,
-  type VoiceCategory, type VoiceLanguage, type VoiceModel } from "@/lib/voiceGeneration";
+import { generateCharacterVoice, voiceDescription, VOICE_AGE_LABEL, VOICE_AGE_RANGES, VOICE_CATEGORIES, VOICE_CATEGORY_LABEL, VOICE_GENDER_LABEL, VOICE_GENDERS, VOICE_LANGUAGES, VOICE_MODELS, VOICE_SPEAKERS,
+  type VoiceAgeRange, type VoiceCategory, type VoiceGender, type VoiceLanguage, type VoiceModel } from "@/lib/voiceGeneration";
 import type { Character, ProjectDraft } from "@/lib/projectTypes";
 
 /** 다중 화자 영상의 화자를 자동으로 추측하지 않습니다. 사람이 대표영상·대사 구간을 고릅니다. */
@@ -26,7 +26,10 @@ export default function CharacterVoicePanel({ character, draft, projectName, onP
   const [busy, setBusy] = useState(false);
   const [dialogue, setDialogue] = useState("");
   const [traits, setTraits] = useState("");
-  const [category, setCategory] = useState<VoiceCategory>("actor");
+  const primaryGenerated = character.voiceReferences?.find((item) => item.isPrimary && item.source === "generated");
+  const [category, setCategory] = useState<VoiceCategory>(() => VOICE_CATEGORIES.find((value) => value === primaryGenerated?.category) ?? "actor");
+  const [gender, setGender] = useState<VoiceGender>(() => VOICE_GENDERS.find((value) => value === primaryGenerated?.gender) ?? "unspecified");
+  const [ageRange, setAgeRange] = useState<VoiceAgeRange>(() => VOICE_AGE_RANGES.find((value) => value === primaryGenerated?.ageRange) ?? "unspecified");
   const [model, setModel] = useState<VoiceModel>("design");
   const [speaker, setSpeaker] = useState("Sohee");
   const [language, setLanguage] = useState<VoiceLanguage>("Korean");
@@ -60,11 +63,11 @@ export default function CharacterVoicePanel({ character, draft, projectName, onP
     try {
       const reference = await generateCharacterVoice({
         projectName, characterName: character.name, dialogue, traits: traits || character.voiceDescription || "자연스럽고 개성 있는 목소리",
-        category, model, speaker, language, onProgress: setProgress,
+        category, gender, ageRange, model, speaker, language, onProgress: setProgress,
       });
       (onVoicePatch || onPatch)((current) => ({
         ...withPrimaryVoice(current, reference),
-        voiceDescription: current.voiceDescription?.trim() || `${VOICE_CATEGORY_LABEL[category]} · ${traits || "자연스럽고 개성 있는 목소리"}`,
+        voiceDescription: current.voiceDescription?.trim() || voiceDescription(category, traits || "자연스럽고 개성 있는 목소리", gender, ageRange),
       }));
       toast.success(t("{name} 음성을 캐릭터 폴더에 저장했습니다.", { name: character.name }));
     } catch (error) { toast.error(String(error)); }
@@ -93,6 +96,18 @@ export default function CharacterVoicePanel({ character, draft, projectName, onP
             {Object.entries(VOICE_CATEGORY_LABEL).map(([key, label]) => <option key={key} value={key}>{t(label)}</option>)}
           </select>
         </label>
+        <label>{t("목소리 성별")}
+          <select className="mt-1 w-full rounded bg-black/30 p-2 text-white" value={gender}
+            onChange={(event) => setGender(event.target.value as VoiceGender)}>
+            {Object.entries(VOICE_GENDER_LABEL).map(([key, label]) => <option key={key} value={key}>{t(label)}</option>)}
+          </select>
+        </label>
+        <label>{t("목소리 나이대")}
+          <select className="mt-1 w-full rounded bg-black/30 p-2 text-white" value={ageRange}
+            onChange={(event) => setAgeRange(event.target.value as VoiceAgeRange)}>
+            {Object.entries(VOICE_AGE_LABEL).map(([key, label]) => <option key={key} value={key}>{t(label)}</option>)}
+          </select>
+        </label>
         <label>{t("로컬 목소리 모델")}
           <select className="mt-1 w-full rounded bg-black/30 p-2 text-white" value={model}
             onChange={(event) => setModel(event.target.value as VoiceModel)}>
@@ -112,6 +127,7 @@ export default function CharacterVoicePanel({ character, draft, projectName, onP
           {VOICE_SPEAKERS.map((value) => <option key={value} value={value}>{value}</option>)}
         </select>
       </label>}
+      <p className="text-white/50">{t("가수·아이돌은 말하는 목소리 연출입니다. 노래 생성은 지원하지 않습니다. 고정 화자 모델은 성별·나이대에 맞게 음색이 바뀌지 않을 수 있습니다.")}</p>
       <label className="block">{t("대사")}
         <textarea className="mt-1 w-full rounded bg-black/30 p-2 text-white" value={dialogue} maxLength={1000}
           onChange={(event) => setDialogue(event.target.value)} placeholder={t("예: 정말 여기서 다시 만날 줄은 몰랐어요.")} />

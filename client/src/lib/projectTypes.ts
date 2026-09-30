@@ -351,6 +351,8 @@ export interface CharacterVoiceReference {
   endSeconds?: number;
   dialogue?: string;
   category?: string;
+  gender?: string;
+  ageRange?: string;
   traits?: string;
   model?: string;
   speaker?: string;

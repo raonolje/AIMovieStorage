@@ -5,14 +5,14 @@ import { projectFolderName } from "./localProjectStore";
 import { getProjectSnapshot, ProjectControlError } from "./projectControl";
 import { readProject, writeProjectAndConfirm } from "./projectWrite";
 import { enqueueTaskOperation, isStopping, registerTaskRunner, setTaskResult } from "./taskQueue";
-import { generateCharacterVoice, VOICE_CATEGORIES, VOICE_LANGUAGES, VOICE_MODELS, VOICE_SPEAKERS } from "./voiceGeneration";
+import { generateCharacterVoice, voiceDescription, VOICE_AGE_RANGES, VOICE_CATEGORIES, VOICE_GENDERS, VOICE_LANGUAGES, VOICE_MODELS, VOICE_SPEAKERS } from "./voiceGeneration";
 import { installLocalEngine, listLocalEngines } from "./localEngines";
 
 export async function listControlVoiceModels() {
   const engine = (await listLocalEngines()).find((item) => item.id === "qwentts");
   return { engine: engine ?? null, models: VOICE_MODELS, categories: VOICE_CATEGORIES,
-    speakers: VOICE_SPEAKERS, languages: VOICE_LANGUAGES,
-    note: "VoiceDesign는 목소리 특징을 자유롭게 설계합니다. CustomVoice는 지정한 고정 화자의 연기 톤을 조절합니다. 한국어 고정 화자의 모국어는 Sohee입니다." };
+    genders: VOICE_GENDERS, ageRanges: VOICE_AGE_RANGES, speakers: VOICE_SPEAKERS, languages: VOICE_LANGUAGES,
+    note: "VoiceDesign는 목소리 특징·성별·나이대를 설명으로 설계합니다. CustomVoice는 지정한 고정 화자의 연기 톤을 조절하므로 성별·나이대가 음색에 반영되지 않을 수 있습니다. 한국어 고정 화자의 모국어는 Sohee입니다. 가수·아이돌은 말하는 대사 톤이며 노래 합성이 아닙니다." };
 }
 export const voiceEngineInstallSchema = z.object({ operationId: z.string().min(1).max(300) }).strict();
 export async function enqueueControlVoiceEngineInstall(raw: unknown) {
@@ -41,6 +41,8 @@ export const voiceGenerateSchema = z.object({
   dialogue: z.string().trim().min(1).max(1000),
   traits: z.string().trim().min(1).max(500),
   category: z.enum(VOICE_CATEGORIES), model: z.enum(VOICE_MODELS),
+  gender: z.enum(VOICE_GENDERS).default("unspecified"),
+  ageRange: z.enum(VOICE_AGE_RANGES).default("unspecified"),
   speaker: z.enum(VOICE_SPEAKERS).optional(),
   language: z.enum(VOICE_LANGUAGES).default("Korean"),
 }).strict();
@@ -77,7 +79,8 @@ registerTaskRunner("control.voice.generate", async (raw, report, task) => {
   const saved = task.result?.data?.reference as Awaited<ReturnType<typeof generateCharacterVoice>> | undefined;
   const reference = saved ?? await generateCharacterVoice({
     projectName, characterName: character.name, dialogue: input.dialogue, traits: input.traits,
-    category: input.category, model: input.model, speaker: input.speaker, language: input.language,
+    category: input.category, gender: input.gender, ageRange: input.ageRange,
+    model: input.model, speaker: input.speaker, language: input.language,
     operationId: input.operationId, onProgress: (step) => report({ step }),
   });
   setTaskResult(task.id, { paths: [reference.filePath], data: { reference, attached: false } });
@@ -91,7 +94,7 @@ registerTaskRunner("control.voice.generate", async (raw, report, task) => {
       ...(unchanged ? withPrimaryVoice(item, reference) : {
         ...item, voiceReferences: [...(item.voiceReferences || []), { ...reference, isPrimary: false }],
       }),
-      voiceDescription: item.voiceDescription?.trim() || `${input.traits} (${input.category})`,
+      voiceDescription: item.voiceDescription?.trim() || voiceDescription(input.category, input.traits, input.gender, input.ageRange),
     }));
   });
   if (!outcome.persisted) throw new Error(outcome.why || "생성 음성을 프로젝트에 저장하지 못했습니다.");
