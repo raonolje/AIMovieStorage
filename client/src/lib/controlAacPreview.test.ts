@@ -1,0 +1,18 @@
+import {beforeEach,expect,it,vi} from "vitest";
+const m=vi.hoisted(()=>({invoke:vi.fn(),enqueue:vi.fn(),revision:"r",previous:null as any,runner:null as any,stop:false,reserve:vi.fn(),release:vi.fn(),result:vi.fn(),assets:[{id:"v",path:"master.mp4",kind:"video",target:{kind:"cut",id:"c"}}]}));
+vi.mock("@tauri-apps/api/core",()=>({invoke:m.invoke}));
+vi.mock("./controlMedia",()=>({listControlAssets:()=>m.assets,controlMediaTarget:()=>({stem:"cut",ownerName:"scene"})}));
+vi.mock("./projectWrite",()=>({readProject:()=>({title:"QA"})}));
+vi.mock("./projectControl",()=>({getProjectSnapshot:async()=>({revision:m.revision}),ProjectControlError:class extends Error{constructor(public code:string,message:string){super(message);}}}));
+vi.mock("./localProjectStore",()=>({projectFolderName:()=>"QA"}));
+vi.mock("./mediaLibrary",()=>({saveProjectMediaAsset:m.reserve,releaseEmptyProjectAsset:m.release,safeFileName:(s:string)=>s}));
+vi.mock("./taskQueue",()=>({enqueueTaskOperation:m.enqueue,registerTaskRunner:(_:string,run:any)=>{m.runner=run;},isStopping:()=>m.stop,setTaskResult:m.result,getTaskByOperationId:()=>m.previous,whenTaskJournalReady:async()=>{}}));
+import {aacPreviewSchema,enqueueAacPreview} from "./controlAacPreview";
+const input={projectId:"p",expectedRevision:"r",operationId:"op",sourceVideoAssetId:"v",sourceCutId:"c",sourceSha256:"1".repeat(64)};
+beforeEach(()=>{m.invoke.mockReset().mockResolvedValue({ready:true,blockers:[]});m.enqueue.mockReset().mockResolvedValue({jobId:"j"});m.reserve.mockReset().mockResolvedValue({path:"preview.mp4"});m.release.mockReset().mockResolvedValue(undefined);m.result.mockReset();m.revision="r";m.previous=null;m.stop=false;});
+it("queues only CPU with exact source binding",async()=>{await enqueueAacPreview(input);expect(m.enqueue).toHaveBeenCalledWith(expect.objectContaining({lane:"cpu",payload:input}));});
+it("rejects stale revision and cross-cut master",async()=>{m.revision="changed";await expect(enqueueAacPreview(input)).rejects.toThrow("revision");m.revision="r";await expect(enqueueAacPreview({...input,sourceCutId:"other"})).rejects.toThrow("association");expect(m.enqueue).not.toHaveBeenCalled();});
+it("strict schema cannot request GPU, master replacement or primary",()=>{expect(aacPreviewSchema.safeParse({...input,makePrimary:true}).success).toBe(false);expect(aacPreviewSchema.safeParse({...input,sourceSha256:"bad"}).success).toBe(false);});
+it("reuses identical operation and rejects changed input",async()=>{m.previous={kind:"control.aac-preview",payload:input,projectId:"p",label:"preview"};await enqueueAacPreview(input);expect(m.invoke).not.toHaveBeenCalled();await expect(enqueueAacPreview({...input,sourceSha256:"2".repeat(64)})).rejects.toThrow("operation_conflict");});
+it("runner records lossiness, original identity and separate registration",async()=>{m.invoke.mockResolvedValue({output:"preview_001.mp4",meta:{aacPreview:{allVideoPacketsExact:true}}});const r=await m.runner(input,()=>{}, {id:"j"});expect(m.invoke).toHaveBeenCalledWith("aac_preview_run",{outputPath:"preview.mp4",request:{sourceVideo:"master.mp4",sourceSha256:input.sourceSha256}});expect(r.data).toMatchObject({masterAssetId:"v",masterSha256:input.sourceSha256,lossyAudio:true,registrationPreviewJobId:"j",registrationMakePrimary:false,qualityApproved:false,attached:false});expect(m.release).toHaveBeenCalled();});
+it("cancellation avoids starting export",async()=>{m.stop=true;await m.runner(input,()=>{}, {id:"j"});expect(m.invoke).not.toHaveBeenCalled();expect(m.reserve).not.toHaveBeenCalled();});

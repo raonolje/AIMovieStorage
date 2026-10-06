@@ -18,6 +18,7 @@ export const compositionExportVideoSchema = z.object({
   width: dimension.default(1920),
   height: dimension.default(1080),
   fps: z.number().int().min(1).max(60).default(24),
+  applyAsReference: z.boolean().default(true),
 }).strict();
 type Request = z.infer<typeof compositionExportVideoSchema>;
 const payloadSchema = z.object({ request: compositionExportVideoSchema,
@@ -67,6 +68,7 @@ function assertProject(payload: Payload, video?: SavedReferenceVideo) {
   if (!project || projectFolderName(payload.request.projectId, project.title) !== payload.projectName)
     throw new Error(t("렌더 도중 프로젝트가 바뀌었습니다. 만든 파일은 작업 결과 경로에서 확인해 주세요."));
   const cut = cutOf(project, payload.cutId);
+  if (!payload.request.applyAsReference) return;
   const sameOriginal = (cut.refVideoPath ?? null) === payload.previousPath && (cut.refVideoSeconds ?? null) === payload.previousSeconds;
   const alreadyAttached = video && cut.refVideoPath === video.path && cut.refVideoSeconds === video.seconds;
   if (!sameOriginal && !alreadyAttached) throw new Error(t("렌더 도중 컷의 레퍼런스 영상 선택이 바뀌어 덮어쓰지 않았습니다."));
@@ -92,6 +94,8 @@ registerTaskRunner(KIND, async (raw, report, task) => {
       checkCancel();
       if (controller.signal.aborted) throw new DOMException(t("영상 만들기를 취소했습니다."), "AbortError");
       assertProject(payload, video);
+      // 진단 파일은 보존하되 컷 선택·길이·구도 등 프로젝트 필드는 전혀 쓰지 않습니다.
+      if (!request.applyAsReference) return;
       report({ progress: 0.98, step: t("레퍼런스 영상 경로를 프로젝트에 저장하는 중") });
       const outcome = await writeProjectAndConfirm(request.projectId, current => {
         assertProject(payload, video);
@@ -105,7 +109,8 @@ registerTaskRunner(KIND, async (raw, report, task) => {
       });
       if (!outcome.persisted) throw new Error(t("영상 파일은 만들었지만 프로젝트 저장을 확인하지 못했습니다: {why}", { why: outcome.why ?? outcome.outcome }));
     });
-    return { paths: [result.path], assetIds: [`${payload.cutId}:refVideoPath`], data: result };
+    return { paths: [result.path], assetIds: request.applyAsReference ? [`${payload.cutId}:refVideoPath`] : [],
+      data: { ...result, referenceApplied: request.applyAsReference, projectUpdated: request.applyAsReference } };
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") stopTask(task.id);
     throw error;

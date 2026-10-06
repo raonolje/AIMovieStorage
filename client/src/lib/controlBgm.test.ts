@@ -220,3 +220,47 @@ describe("BGM 공용 작업 러너", () => {
     expect(state.run).not.toHaveBeenCalled();
   });
 });
+
+describe("ACE-Step 생성 설정", () => {
+  it("명시한 0값과 설정을 전달하고 작업자 실제값을 결과와 저널에 보존한다", async () => {
+    const { control, q } = await prepare();
+    const meta = { seed: 0, steps: 24, guidance: 0, seconds_audio: 30, precision: "bf16", precision_requested: "auto", output: "private", memory: {} };
+    state.run.mockResolvedValue({ path: "설정.wav", meta });
+    const request = { ...generation, seed: 0, steps: 24, guidance: 0 };
+    const accepted = await control.enqueueControlBgm(request);
+    const job = await finish(q, accepted.jobId);
+    expect(state.run.mock.calls[0][0].opts).toMatchObject({ seed: 0, steps: 24, guidance: 0 });
+    expect(job.result?.data?.generation).toEqual({ seed: 0, steps: 24, guidance: 0, seconds_audio: 30, precision: "bf16", precision_requested: "auto" });
+    expect((await q.getPersistedTask(accepted.jobId))?.result).toEqual(job.result);
+    expect(await control.enqueueControlBgm(request)).toMatchObject({ reused: true });
+    for (const change of [{ seed: 1 }, { steps: 25 }, { guidance: 1 }])
+      await expect(control.enqueueControlBgm({ ...request, ...change })).rejects.toThrow();
+    expect(state.run).toHaveBeenCalledTimes(1);
+  });
+  it("생략된 설정을 만들지 않으며 작업자의 무작위 실제 seed를 기록한다", async () => {
+    const { control, q } = await prepare();
+    state.run.mockResolvedValue({ path: "기본.wav", meta: { seed: 987, steps: 60, guidance: 15 } });
+    const accepted = await control.enqueueControlBgm(generation);
+    const job = await finish(q, accepted.jobId);
+    const opts = state.run.mock.calls[0][0].opts;
+    for (const key of ["seed", "steps", "guidance"]) expect(opts).not.toHaveProperty(key);
+    expect(job.result?.data?.generation).toEqual({ seed: 987, steps: 60, guidance: 15 });
+  });
+  it("범위 밖/잘못된 타입/다른 음악 모델의 옵션을 생성 전에 거절한다", async () => {
+    const { control } = await prepare();
+    for (const change of [{ seed: -2 }, { seed: 2147483648 }, { seed: 1.2 }, { seed: "1" }, { steps: 0 }, { steps: 201 }, { steps: 2.5 }, { steps: true }, { guidance: -1 }, { guidance: 31 }, { guidance: NaN }, { guidance: Infinity }, { guidance: null }])
+      await expect(control.enqueueControlBgm({ ...generation, ...change })).rejects.toThrow();
+    for (const change of [{ seed: -1 }, { steps: 60 }, { guidance: 15 }])
+      await expect(control.enqueueControlBgm({ ...generation, engine: "minimaxmusic", ...change })).rejects.toThrow("ACE-Step");
+    expect(state.run).not.toHaveBeenCalled();
+  });
+  it("곡 저장이 실패해도 만들어진 파일의 실제 설정은 남긴다", async () => {
+    const { control, q } = await prepare();
+    state.run.mockResolvedValue({ path: "실제.wav", meta: { seed: 77, steps: 60, guidance: 15 } });
+    state.save.mockRejectedValue(new Error("save failed"));
+    const accepted = await control.enqueueControlBgm({ ...generation, seed: -1 });
+    const job = await finish(q, accepted.jobId);
+    expect(job.status).toBe("failed");
+    expect(job.result?.data?.generation).toEqual({ seed: 77, steps: 60, guidance: 15 });
+  });
+});

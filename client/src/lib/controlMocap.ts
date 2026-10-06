@@ -41,10 +41,10 @@ function localVideoPath(path: string | null): string {
     throw new Error("현재 프로젝트에 등록된 로컬 원본 영상만 분석할 수 있습니다.");
   return path;
 }
-function sourceOf(folder: string, sourceId: string): MocapSource {
+function sourceOf(folder: string, sourceId: string, videoOnly = false): MocapSource {
   const source = mocapSourcesOf(folder).find(item => item.id === sourceId);
   if (!source) throw new Error("현재 프로젝트의 모캡 원본을 찾지 못했습니다.");
-  localVideoPath(source.path);
+  if (videoOnly) localVideoPath(source.path);
   return source;
 }
 function publicSource(source: MocapSource) {
@@ -82,7 +82,7 @@ function validateAnalyze(raw: unknown) {
   if (input.options.clipEnd !== undefined && input.options.clipEnd <= input.options.clipStart)
     throw new Error("분석 끝 시각은 시작 시각보다 뒤여야 합니다.");
   const { draft, folder } = projectOf(input.projectId);
-  if ("sourceId" in input) sourceOf(folder, input.sourceId);
+  if ("sourceId" in input) sourceOf(folder, input.sourceId, true);
   else {
     const asset = listControlAssets(input.projectId).find(item => item.id === input.assetId && item.kind === "video");
     if (!asset) throw new Error("현재 프로젝트에서 원본 영상 에셋을 찾지 못했습니다.");
@@ -93,7 +93,7 @@ function validateAnalyze(raw: unknown) {
 function validateHands(raw: unknown) {
   const input = mocapHandsSchema.parse(raw);
   const { draft, folder } = projectOf(input.projectId);
-  const source = sourceOf(folder, input.sourceId);
+  const source = sourceOf(folder, input.sourceId, true);
   if (!source.resultPath) throw new Error("먼저 몸의 관절 분석을 완료하고 결과를 저장해 주세요.");
   return { input, draft, folder, source };
 }
@@ -112,7 +112,7 @@ export async function enqueueControlMocapHands(raw: unknown) {
 }
 
 async function registeredAssetSource(input: z.infer<typeof mocapAnalyzeSchema>, folder: string): Promise<MocapSource> {
-  if ("sourceId" in input) return sourceOf(folder, input.sourceId);
+  if ("sourceId" in input) return sourceOf(folder, input.sourceId, true);
   const asset = listControlAssets(input.projectId).find(item => item.id === input.assetId && item.kind === "video");
   if (!asset) throw new Error("현재 프로젝트에서 원본 영상 에셋을 찾지 못했습니다.");
   const path = localVideoPath(asset.path);
@@ -146,7 +146,7 @@ for (const kind of ["body", "hands"] as const) registerTaskRunner(kind === "body
   if (isStopping(task.id)) return;
   const validated = kind === "body" ? validateAnalyze(raw) : validateHands(raw);
   const { input, folder } = validated;
-  const source = kind === "body" ? await registeredAssetSource(input as z.infer<typeof mocapAnalyzeSchema>, folder) : sourceOf(folder, (input as z.infer<typeof mocapHandsSchema>).sourceId);
+  const source = kind === "body" ? await registeredAssetSource(input as z.infer<typeof mocapAnalyzeSchema>, folder) : sourceOf(folder, (input as z.infer<typeof mocapHandsSchema>).sourceId, true);
   // 결과·목록은 저장됐지만 작업 완료 응답 전에 꺼졌던 경우, 이미 저장한 결과를 돌려줍니다.
   if (source.completedOperation?.id === input.operationId && source.completedOperation.kind === kind && source.resultPath) {
     const capture = await loadMocapResult(folder, source);

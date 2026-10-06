@@ -14,6 +14,7 @@
 """
 
 import time
+import math
 
 import common
 
@@ -85,11 +86,27 @@ def unload():
     common.free_vram()
 
 
+def validate(opts):
+    # 모델을 올리기 전에 타입과 공식 UI 범위를 검사해 잘못된 입력으로 GPU를 점유하지 않습니다.
+    for key, low, high, integer in (("seed", -1, 2147483647, True),
+                                   ("steps", 1, 200, True), ("guidance", 0, 30, False)):
+        if key not in opts:
+            continue
+        value = opts[key]
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or not low <= value <= high
+                or (integer and value != int(value))):
+            raise ValueError("ACE-Step {} 값을 확인해 주세요.".format(key))
+
+
 def generate(output, opts, report):
+    validate(opts)
     started = time.time()
     pipe = _state["pipe"]
     seconds = float(opts.get("seconds") or 60.0)
     seed = common.resolve_seed(opts)
+    steps = int(opts.get("steps", 60))
+    guidance = float(opts.get("guidance", 15.0))
     # 가사를 안 주면 연주곡입니다 — BGM 은 대개 이쪽입니다.
     lyrics = opts.get("lyrics")
     if lyrics is None or not str(lyrics).strip():
@@ -101,14 +118,16 @@ def generate(output, opts, report):
         prompt=opts.get("prompt") or "",
         lyrics=str(lyrics),
         audio_duration=seconds,
-        infer_step=int(opts.get("steps") or 60),
-        guidance_scale=float(opts.get("guidance") or 15.0),
+        infer_step=steps,
+        guidance_scale=guidance,
         manual_seeds=str(seed),
         save_path=output,
         format=output.rsplit(".", 1)[-1].lower(),
     )
     out = {
         "seed": seed,
+        "steps": steps,
+        "guidance": guidance,
         "seconds_audio": seconds,
         "generate_seconds": round(time.time() - started, 2),
     }

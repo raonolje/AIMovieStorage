@@ -1,3 +1,4 @@
+import { registerMaintenanceSave } from "./maintenanceGate";
 import { useEffect, useRef } from "react";
 
 /**
@@ -45,8 +46,8 @@ export function useAutoSave<T>(options: {
   /** 예약을 기다리지 않고 지금 씁니다. 아직 쓸 것이 없으면 아무 일도 안 합니다. */
   const flush = useRef(() => {
     if (!dirty.current || !enabled.current) return;
-    dirty.current = false;
     save.current(latest.current);
+    dirty.current = false;
   });
 
   // 첫 그림에는 저장하지 않습니다. 방금 읽어 온 것을 그대로 되쓸 뿐이고,
@@ -65,6 +66,7 @@ export function useAutoSave<T>(options: {
   }, [options.value, options.enabled, options.delay]);
 
   useEffect(() => {
+    const unregister = registerMaintenanceSave(() => flush.current());
     const onHide = () => {
       // visibilitychange 만 믿지 않습니다. 브라우저마다 닫힐 때 어느 것이
       // 오는지 다릅니다. 둘 다 걸어 두고 먼저 오는 쪽에서 씁니다.
@@ -75,6 +77,7 @@ export function useAutoSave<T>(options: {
     window.addEventListener("pagehide", onLeave);
     window.addEventListener("beforeunload", onLeave);
     return () => {
+      unregister();
       document.removeEventListener("visibilitychange", onHide);
       window.removeEventListener("pagehide", onLeave);
       window.removeEventListener("beforeunload", onLeave);

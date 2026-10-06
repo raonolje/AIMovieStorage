@@ -28,7 +28,7 @@ export const compositionApplyMocapSchema = compositionSessionRequestSchema.exten
 
 function reject(code: string, message: string): never { throw new CompositionControlError(code, message); }
 
-function targetGender(draft: ProjectDraft, state: CompositionState, characterId: string) {
+export function targetGender(draft: ProjectDraft, state: CompositionState, characterId: string) {
   if (!state.characters.some(item => item.characterId === characterId))
     reject("character_not_placed", "먼저 구도에 배치된 캐릭터나 마네킹을 골라 주세요.");
   const mannequin = state.mannequins.find(item => item.id === characterId);
@@ -43,7 +43,7 @@ function validPoints(points: CapturePoint[] | undefined, count: number) {
 }
 
 /** 결과 파일은 신뢰하지 않습니다. 잘못된 좌표나 끝없는 구간이 history로 들어가지 않게 먼저 검증합니다. */
-function selectedPerson(capture: CaptureResult, number: number, from: number, to: number): CapturedPerson {
+export function selectedPerson(capture: CaptureResult, number: number, from: number, to: number): CapturedPerson {
   if (![capture.width, capture.height].every(value => Number.isFinite(value) && value > 0) || !Array.isArray(capture.persons))
     reject("invalid_capture", "모캡 결과의 화면 크기나 사람 목록이 올바르지 않습니다.");
   const person = capture.persons.find(item => item.number === number);

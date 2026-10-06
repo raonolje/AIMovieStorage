@@ -1,9 +1,11 @@
+import { nativeGpuHandoffSchema, validateNativeGpuHandoff } from "./nativeGpuHandoff";
+import { nativeA2VSelection, nativeA2VStatus, validateNativeA2V } from "./nativeA2V";
 import { z } from "zod";
 import { continuityPromptLine, relinkContinuityTags, resolveCutContinuity } from "./cutContinuity";
 import { mediaTargetSchema } from "./controlMediaTargetSchema";
 export { mediaTargetSchema } from "./controlMediaTargetSchema";
 import { relinkCharacterBlueprintPrompts } from "./characterBlueprintPrompt";
-import { validateLocalControlOptions } from "./localControlCapabilities";
+import { localControlCapabilities, validateLocalControlOptions } from "./localControlCapabilities";
 import { structureSourceSchema } from "./localStructureControl";
 import { controlLoraSelectionSchema, resolveControlLoras } from "./controlLoras";
 import { withLoraTriggers } from "./localLoras";
@@ -38,6 +40,8 @@ import {
 } from "./projectTypes";
 import {
   enqueueTaskOperation,
+  getTaskByOperationId,
+  listPersistedTasks,
   isStopping,
   registerTaskRunner,
   setTaskResult,
@@ -52,6 +56,9 @@ const optionsSchema = z
     height: z.number().int().min(64).max(4096).optional(),
     seed: z.number().int().min(0).max(2147483647).optional(),
     steps: z.number().int().min(1).max(100).optional(),
+    local_files_only: z.literal(true).optional().describe("Local generation always prohibits model downloads. Missing local model files fail. This flag cannot be set false."),
+    ltx_a2v: nativeA2VSelection.optional(),
+    ltx_a2v_offload: z.enum(["cpu", "disk"]).optional().describe("Native A2V only. cpu keeps legacy all-block CPU pinning; disk uses installed official two-slot disk streaming for Gemma and transformer. Slower repeated local reads, no new weights or software. Does not change dialogue or frame timing. Actual RAM peak must be measured."),
     ltx_quality: z.enum(["single", "two-stage"]).optional().describe("LTX 2.5 only. Default single preserves the current 8-step path. two-stage generates at half the requested final width/height, spatially upsamples 2x, then refines 3 steps with LoRAs/references disabled. Final dimensions align to 128 pixels with Union, otherwise 64; actual sizes and 8+3 steps are returned in meta.two_stage. FPS/frame count are unchanged."),
     guidance: z.number().min(0).max(30).optional(),
     seconds: z.number().min(1).max(60).optional(),
@@ -72,8 +79,13 @@ export const generateMediaSchema = z
     target: mediaTargetSchema,
     engine: z.enum(GENERATION_ENGINE_IDS as [LocalEngineId, ...LocalEngineId[]]),
     operationId: id,
+    nativeGpuHandoff: nativeGpuHandoffSchema.optional(),
     options: optionsSchema,
+    audioAssetId: id.optional().describe("Same-project stereo PCM16 WAV for native A2V only; not a reference list or generated sound."),
+    audioStartSeconds: z.number().finite().nonnegative().optional().describe("Absolute offset in original WAV; nearest sample, default 0."),
+    audioDurationSeconds: z.number().finite().positive().max(40).optional().describe("Selected original audio length. Clamp at EOF; visible frames=ceil(actual sample duration * fps), generation frames=next 8n+1 at least visible frames. End image conditions visible frame ceil(duration*fps)-1 before silent temporal padding. Final lossless ALAC audio retains selected samples; last video packet shortened to original sample duration."),
     imageAssetId: id.optional(),
+    endImageAssetId: id.optional().describe("LTX 2.5 / Wan I2V A14B: same-project image used as a model last-frame condition (LTX latent index=-1; Wan last_image), not a pasted final frame. Requires an explicit first image or continue-cut first frame. Motion mask cannot be combined. Endpoint conditioning does not guarantee intermediate contact or motion."),
     motionMaskAssetId: id.optional(),
     referenceAssetIds: z.array(id).max(12).optional(),
     loras: controlLoraSelectionSchema.optional().describe("Select explicit IDs from loras_list for this engine. Omitted/empty means no LoRA; UI defaults are not implicitly enabled. Arbitrary paths are not accepted. Files are rechecked immediately before generation."),
@@ -132,6 +144,12 @@ export function listControlAssets(projectId: string): ControlAsset[] {
       return;
     }
     const entry = value as Record<string, unknown>;
+    // 타임라인 음악은 filePath 대신 path를 저장합니다. 새 가져오기 서비스를 만들지 않고
+    // 이미 저장된 프로젝트의 음원을 조종기가 고를 수 있어야 원음 조건 경로가 완성됩니다.
+    if (typeof entry.path === "string" && mediaKind(entry.path) === "audio") {
+      const assetId = `${key}:audio`;
+      assets.set(assetId, { id: assetId, path: entry.path, name: String(entry.name || assetId), kind: "audio", target });
+    }
     if (typeof entry.filePath === "string") {
       const assetId = typeof entry.id === "string" ? entry.id : key;
       assets.set(assetId, {
@@ -171,7 +189,7 @@ export function listControlAssets(projectId: string): ControlAsset[] {
     visit(item, { kind: "background", id: item.id }),
   );
   draft.scenes.forEach((scene) =>
-    scene.cuts.forEach((cut) => visit(cut, { kind: "cut", id: cut.id })),
+    scene.cuts.forEach((cut) => visit(cut, { kind: "cut", id: cut.id }, `cut/${cut.id}`)),
   );
   visit(draft.sharedAssets);
   return [...assets.values()];
@@ -289,19 +307,23 @@ export async function attachControlMediaResult(
 /** 대기열에서 되살린 입력도 새 요청과 같은 관문을 지납니다. */
 function validateGeneration(raw: unknown) {
   const input = generateMediaSchema.parse(raw);
+  validateNativeGpuHandoff(input);
   const draft = readProject(input.projectId);
   if (!draft) throw new Error("프로젝트를 찾지 못했습니다.");
+  const nativeA2V = validateNativeA2V(input);
+  if (nativeA2V) assetOf(input.projectId, input.audioAssetId!, "audio");
   controlMediaTarget(draft, input.target);
   const engine = LOCAL_ENGINE_CATALOG[input.engine];
   if (engine.kind !== "image" && engine.kind !== "video")
     throw new Error("이 명령은 이미지와 영상 엔진용입니다.");
   if (engine.kind === "video" && input.target.kind !== "cut")
     throw new Error("영상 결과는 컷에 붙입니다.");
-  const continuity = engine.kind === "video" && input.target.kind === "cut"
+  const continuity = !nativeA2V && engine.kind === "video" && input.target.kind === "cut"
     ? (() => { const scene = draft.scenes.find(item => item.cuts.some(cut => cut.id === input.target.id));
       const cut = scene?.cuts.find(item => item.id === input.target.id);
       return scene && cut ? resolveCutContinuity(scene, cut) : null; })()
     : null;
+  if (input.endImageAssetId) assetOf(input.projectId, input.endImageAssetId, "image");
   if (input.imageAssetId) assetOf(input.projectId, input.imageAssetId, "image");
   if (engine.kind === "image" && input.imageAssetId)
     throw new Error("이 로컬 그림 엔진은 기존 이미지 편집을 지원하지 않습니다. 인물 얼굴을 유지하려면 참조 편집 결과를 등록해 주세요.");
@@ -331,6 +353,9 @@ function validateGeneration(raw: unknown) {
   if (input.options.ltx_quality !== undefined && input.engine !== "ltx25")
     throw new Error("LTX 품질 선택은 LTX 2.5에서만 사용할 수 있습니다.");
   const controlCheck = validateLocalControlOptions(input.engine, {
+    image: (continuity?.mode === "continue" ? continuity.endFramePath : undefined) ?? (input.imageAssetId ? assetOf(input.projectId, input.imageAssetId, "image").path : undefined),
+    end_image: input.endImageAssetId ? assetOf(input.projectId, input.endImageAssetId, "image").path : undefined,
+    motion_mask: input.motionMaskAssetId,
     ...(input.poseSource ? { control: { kind: "pose", frames: ["형식 확인"], fps: input.options.fps ?? 24 } } : {}),
     ...(input.structureSource ? { structure_control: (() => {
       const { assetId, ...settings } = input.structureSource;
@@ -345,10 +370,15 @@ function validateGeneration(raw: unknown) {
     const source = mocapSourcesOf(projectFolderName(input.projectId, draft.title)).find(item => item.id === input.poseSource!.sourceId);
     if (!source?.resultPath) throw new Error("현재 프로젝트에 저장된 모캡 분석 결과가 없습니다.");
   }
-  return { input, draft, continuity, referenceAssets, referenceVideoRange };
+  return { input, draft, continuity, referenceAssets, referenceVideoRange, nativeA2V };
 }
 export async function enqueueControlGeneration(raw: unknown) {
-  const { input, draft } = validateGeneration(raw);
+  const { input, draft, nativeA2V } = validateGeneration(raw);
+  if (nativeA2V) { const status = await nativeA2VStatus(); const blockers=status.blockers.filter(b=>!(input.nativeGpuHandoff && b==="separate_gpu_handoff_required")); if (blockers.length) throw new Error("native_not_ready: " + blockers.join(", ")); }
+  if (input.nativeGpuHandoff && !getTaskByOperationId(input.operationId)) {
+    const active=(await listPersistedTasks()).filter(t=>t.status==="running"||t.status==="waiting");
+    if (active.length) throw new Error("gpu_handoff_app_not_idle");
+  }
   await resolveControlLoras(input.engine, input.loras);
   return enqueueTaskOperation({
     lane: "media",
@@ -381,6 +411,7 @@ export async function enqueueControlUpscale(raw: unknown) {
 registerTaskRunner("control.generate", async (raw, report, task) => {
   if (isStopping(task.id)) return;
   const { input, draft, continuity, referenceAssets, referenceVideoRange } = validateGeneration(raw);
+  if(input.nativeGpuHandoff && (await listPersistedTasks()).some(t=>t.id!==task.id && (t.status==="running"||t.status==="waiting"))) throw new Error("gpu_handoff_app_not_idle");
   const target = controlMediaTarget(draft, input.target);
   const kind = LOCAL_ENGINE_CATALOG[input.engine].kind;
   if (kind !== "image" && kind !== "video")
@@ -428,6 +459,7 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
   // 기다리는 동안 삭제/교체된 파일을 캐시된 경로로 실행하지 않습니다.
   const loras = await resolveControlLoras(input.engine, input.loras);
   if (isStopping(task.id)) return { data: { attached: false, cancelled: true } };
+  const comfyBaseUrl = input.nativeGpuHandoff ? (await import("./comfyGeneration")).getComfyGenerationSettings().baseUrl : undefined;
   const made = await runLocalToProject({
     engine: input.engine,
     kind,
@@ -437,6 +469,8 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
     assetType: kind === "video" ? "scene-video" : target.assetType,
     opts: {
       ...input.options,
+      ...(input.nativeGpuHandoff ? { native_gpu_handoff: { operationId:input.operationId, projectId:input.projectId, target:input.target, approval:input.nativeGpuHandoff, comfyBaseUrl } } : {}),
+      ...(input.options.ltx_a2v ? { audio_path: assetOf(input.projectId, input.audioAssetId!, "audio").path, audio_start_seconds: input.audioStartSeconds ?? 0, audio_duration_seconds: input.audioDurationSeconds } : {}),
       ...(referenceVideoRange ? { reference_video_range: referenceVideoRange } : {}),
       prompt: withLoraTriggers(generationPrompt, loras),
       negative: input.options.negative ?? character?.negativeEn,
@@ -447,6 +481,7 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
       image: (continuity?.mode === "continue" ? continuity.endFramePath : undefined) ?? (input.imageAssetId
         ? assetOf(input.projectId, input.imageAssetId, "image").path
         : undefined),
+      end_image: input.endImageAssetId ? assetOf(input.projectId, input.endImageAssetId, "image").path : undefined,
       motion_mask: input.motionMaskAssetId
         ? assetOf(input.projectId, input.motionMaskAssetId, "image").path
         : undefined,
@@ -506,5 +541,5 @@ export async function previewControlAsset(projectId: string, assetId: string) {
   return { assetId, image: canvas.toDataURL("image/jpeg", 0.85) };
 }
 export async function controlEngineCatalog() {
-  return { local: await listLocalEngines(), upscale: await listEngines() };
+  return { local: (await listLocalEngines()).map(engine => ({ ...engine, controls: localControlCapabilities(engine.id), generationNetworkPolicy: "local-only" as const, generationDownloadsAllowed: false })), upscale: await listEngines() };
 }

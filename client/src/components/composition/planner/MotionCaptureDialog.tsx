@@ -825,7 +825,11 @@ export function MotionCaptureDialog({
           <div data-tour="mocap-preview" className="min-w-0 space-y-2">
             {selected ? (
               <>
-                <div className="relative overflow-hidden rounded-lg" style={{ background: "#000" }}>
+                {selected.engine === "kimodo-soma-bvh" ? (
+                  <div className="flex aspect-video items-center justify-center rounded-lg p-4 text-center text-[11px]" style={{ background: "#000", color: textColor(0.7) }}>
+                    {t("KIMODO BVH는 영상이 아닌 3D 동작입니다. 음악 구간의 군무 또는 캐릭터 모션으로 적용할 수 있습니다.")}
+                  </div>
+                ) : <><div className="relative overflow-hidden rounded-lg" style={{ background: "#000" }}>
                   <video
                     key={selected.id}
                     ref={videoRef}
@@ -884,6 +888,7 @@ export function MotionCaptureDialog({
                     <span ref={timeLabelRef}>0.00</span> / {selected.duration.toFixed(1)}초
                   </span>
                 </div>
+                </>}
               </>
             ) : (
               <button
@@ -902,7 +907,7 @@ export function MotionCaptureDialog({
           <div className="space-y-3">
             {selected ? (
               <>
-                <section data-tour="mocap-analyze" className="space-y-1.5">
+                {selected.engine !== "kimodo-soma-bvh" && <section data-tour="mocap-analyze" className="space-y-1.5">
                   <p className="text-[11px] font-bold" style={{ color: textColor(0.5) }}>
                     1 · 분석
                   </p>
@@ -1005,7 +1010,7 @@ export function MotionCaptureDialog({
                   ) : (
                     <button
                       type="button"
-                      disabled={!selectedEngine?.ready}
+                      disabled={selected.engine === "kimodo-soma-bvh" || !selectedEngine?.ready}
                       onClick={() => analyze(selected)}
                       className="w-full rounded-md px-2 py-2 text-[10px] font-semibold disabled:opacity-40"
                       style={{ background: "oklch(0.18 0.012 265)", border: "1px solid oklch(0.70 0.18 160 / 50%)", color: "oklch(0.80 0.16 160)" }}
@@ -1020,7 +1025,7 @@ export function MotionCaptureDialog({
                   )}
                   {(selected.raw || selected.resultPath) && (
                     <>
-                      <button type="button" disabled={busy(selected) || !desktop || !selected.path}
+                      <button type="button" disabled={selected.engine === "kimodo-soma-bvh" || busy(selected) || !desktop || !selected.path}
                         onClick={() => enqueueMocap(projectName, selected.id, "hands")}
                         className="w-full rounded-md px-2 py-2 text-[10px] font-semibold disabled:opacity-40"
                         style={{ background: "oklch(1 0 0 / 6%)", color: textColor(0.85) }}>
@@ -1031,7 +1036,7 @@ export function MotionCaptureDialog({
                       </p>
                     </>
                   )}
-                </section>
+                </section>}
 
                 {selected.result && (
                   <section data-tour="mocap-cleanup" className="space-y-1.5">

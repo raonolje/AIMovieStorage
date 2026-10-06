@@ -107,3 +107,11 @@ describe("저장 완료 응답", () => {
     unregister();
   });
 });
+
+it("유지보수 장벽은 프로젝트 쓰기 실패가 해결될 때까지 종료를 거절한다", async () => {
+ const store=await import("./localProjectStore");await store.loadProjects();
+ mocked.write.mockRejectedValueOnce(Error("disk failed"));
+ await store.saveLocalProjectAndConfirm(edited as never,"p");
+ await expect(store.flushProjectPersistence()).rejects.toThrow("프로젝트 저장 실패");
+ mocked.write.mockResolvedValue({written:true});await store.saveLocalProjectAndConfirm(edited as never,"p");await expect(store.flushProjectPersistence()).resolves.toBeUndefined();
+});

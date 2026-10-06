@@ -127,13 +127,14 @@ class StructureControlTests(unittest.TestCase):
                         freeze_by_mask=lambda frames, _: frames, save_video=lambda *_: None, precision_fields=lambda _: {}):
                 result = ltx25.generate("unused.mp4", {"structure_control": dict(self.control(), durationSeconds=5, sourceStartSeconds=0, weight=0),
                     "seconds": 5, "fps": 24, "width": 128, "height": 64, "image": image}, lambda *_: None)
-            self.assertEqual(len(pipe.received[0].frames), 113)
+            self.assertEqual(len(pipe.received[0].frames), 121)
             self.assertEqual(pipe.received[0].strength, 0)
             self.assertEqual(pipe.kwargs["reference_downscale_factor"], 2)
             self.assertEqual(pipe.kwargs["conditions"][0].index, 0)
             self.assertEqual(pipe.kwargs["conditions"][0].frames.size, (128, 64))
             self.assertEqual(result["structure_control"]["conditioning_frames"], result["frames"])
-            self.assertAlmostEqual(result["structure_control"]["conditioning_seconds"], 113/24)
+            self.assertAlmostEqual(result["structure_control"]["conditioning_seconds"], 5)
+            self.assertEqual(result["structure_control"]["generation_padding_frames"], 1)
             self.assertEqual(pipe.active, [("pose", 1.0)])
         finally:
             ltx25._state.update(previous)

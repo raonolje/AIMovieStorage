@@ -486,7 +486,7 @@ export default function CompositionPlanner({
   const music = musicOf(state);
   const playback = usePlannerPlayback(
     timeline.duration,
-    music ? { src: assetSrc(music.path), offset: music.offset ?? 0 } : null,
+    music ? { src: assetSrc(music.path), offset: music.offset ?? 0, startTime: music.startTime ?? 0 } : null,
   );
   const {
     playing,
@@ -705,6 +705,11 @@ export default function CompositionPlanner({
     capture: () => captureRef.current,
     stopPlayback: () => { setPlaying(false); setPreviewing(false); },
     exportVideo: video.exportVideo,
+    measureContact: input => {
+      const measure = video.videoRendererRef.current?.measureContact;
+      if (!measure) throw new Error("measurement_unavailable: 구도 렌더러가 준비되지 않았습니다.");
+      return measure(input);
+    },
     commit: onControlCommit
       ? (saved, captures) => persist(saved, () => onControlCommit(saved, captures))
       : undefined,

@@ -93,8 +93,10 @@ export async function installUpdate(
   if (updatesUnavailable()) {
     throw new Error(t("자동 업데이트는 데스크톱 앱에서만 사용할 수 있습니다."));
   }
+  // 원격 설치기는 구버전 전달기를 안전하게 닫지 못하므로 검증 전에는 실행하지 않습니다.
   const headers = await updateHeaders();
   if (headers === null) throw new Error("GitLab 읽기 토큰을 먼저 등록해 주세요.");
+  if (!updateInstallationReady()) throw new Error(t("다중 인스턴스 종료와 설치 잠금 해제 검증이 완료될 때까지 자동 설치를 사용할 수 없습니다."));
   const { check } = await import("@tauri-apps/plugin-updater");
   const { relaunch } = await import("@tauri-apps/plugin-process");
   const update = await check({ headers });
@@ -119,3 +121,6 @@ export async function installUpdate(
   */
   await relaunch();
 }
+
+// 구버전 전달기의 정상 종료를 검증하지 못한 상태를 설치 가능으로 광고하지 않습니다.
+export function updateInstallationReady(): boolean { return false; }

@@ -67,9 +67,28 @@ async function run() {
 }
 
 describe("MCP 구도 영상 내보내기의 세션·큐·저장 계약", () => {
+  it("진단 내보내기는 파일만 저장하고 수동 참조 변경과 모든 프로젝트 필드를 보존한다", async () => {
+    const f = fixture();
+    mock.project!.scenes[0].cuts[0].refVideoPath = "existing.mp4";
+    mock.project!.scenes[0].cuts[0].refVideoSeconds = 6;
+    await enqueueCompositionVideoExport({ ...f.request, applyAsReference: false });
+    f.exportVideo.mockImplementation(async (_options, controls) => {
+      mock.project!.scenes[0].cuts[0].refVideoPath = "manual.mp4";
+      controls.assertCurrent?.(); controls.onFileSaved?.(video); return video;
+    });
+    const expected = JSON.parse(JSON.stringify(mock.project));
+    expected.scenes[0].cuts[0].refVideoPath = "manual.mp4";
+    const result = await run();
+    expect(result.paths).toEqual([video.path]);
+    expect(result.assetIds).toEqual([]);
+    expect(result.data).toMatchObject({ persisted: true, referenceApplied: false, projectUpdated: false, compositionSaved: false });
+    expect(mock.project).toEqual(expected);
+    expect(mock.write).not.toHaveBeenCalled();
+    await expect(enqueueCompositionVideoExport({ ...f.request, applyAsReference: true })).rejects.toThrow("다른 내용");
+  });
   it("15초 1080p 24fps가 기본이고 임의 경로·홀수 해상도·무한 길이를 거부한다", () => {
     const request = fixture().request;
-    expect(compositionExportVideoSchema.parse(request)).toMatchObject({ duration: 15, width: 1920, height: 1080, fps: 24 });
+    expect(compositionExportVideoSchema.parse(request)).toMatchObject({ duration: 15, width: 1920, height: 1080, fps: 24, applyAsReference: true });
     for (const fields of [{ path: "C:/outside.mp4" }, { width: 1919 }, { duration: Infinity }, { fps: 0 }])
       expect(compositionExportVideoSchema.safeParse({ ...request, ...fields }).success).toBe(false);
   });

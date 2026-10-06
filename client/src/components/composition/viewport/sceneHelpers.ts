@@ -1,6 +1,30 @@
 import * as THREE from "three";
 import { GroundedSkybox } from "three/examples/jsm/objects/GroundedSkybox.js";
-import type { CompositionCubeFace, CompositionState } from "@/lib/composition";
+import type { CompositionCubeFace, CompositionState, FloorplanWall } from "@/lib/composition";
+import { floorplanWallPieces } from "@/lib/floorplan";
+
+/** Actual metre-scale geometry shared by live viewport and reference capture. */
+export function buildFloorplanWalls(walls: FloorplanWall[]): THREE.Group {
+  const group = new THREE.Group();
+  const material = new THREE.MeshStandardMaterial({ color: 0x78808e, roughness: 0.88, side: THREE.DoubleSide });
+  for (const wall of walls) {
+    const length = Math.hypot(wall.end.x - wall.start.x, wall.end.z - wall.start.z);
+    if (length < 0.1) continue;
+    const cx = (wall.start.x + wall.end.x) / 2;
+    const cz = (wall.start.z + wall.end.z) / 2;
+    const angle = -Math.atan2(wall.end.z - wall.start.z, wall.end.x - wall.start.x);
+    for (const piece of floorplanWallPieces(wall)) {
+      if (piece.width <= 0.001 || piece.height <= 0.001) continue;
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(piece.width, piece.height, wall.thickness), material);
+      mesh.position.set(cx + Math.cos(-angle) * piece.offset, piece.bottom + piece.height / 2, cz + Math.sin(-angle) * piece.offset);
+      mesh.rotation.y = angle;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
+  }
+  return group;
+}
 import {
   roomsExtentOf,
 } from "@/lib/compositionEdit";

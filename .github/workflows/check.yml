@@ -65,6 +65,7 @@ jobs:
           python src-tauri/resources/local/test_image_guidance.py
           python src-tauri/resources/local/test_mocap_hands.py
           python src-tauri/resources/local/test_control_policy.py
+          python src-tauri/resources/local/test_kimodo.py
           python src-tauri/resources/local/test_structure_control.py
           python src-tauri/resources/local/test_ltx_two_stage.py
           python src-tauri/resources/local/test_krea_quantization.py

@@ -119,3 +119,12 @@ describe("앱 설정 거울 저장 확인", () => {
     await tick(); expect(state.invoke).not.toHaveBeenCalled();
   });
 });
+
+it("유지보수 저장 장벽은 설정 실패를 다른 칸의 성공으로 지우지 않는다", async () => {
+ const media=await import("./mediaLibrary");await media.whenAppSettingsReady();
+ state.invoke.mockImplementation(async(command,args)=>{if(command==="merge_app_settings"&&args.section==="failed-section")throw Error("disk failed");return response(args);});
+ await expect(media.queueMirrorWriteAndConfirm("failed-section",{a:1})).rejects.toThrow();
+ await media.queueMirrorWriteAndConfirm("other-section",{b:2});
+ await expect(media.flushSettingsPersistence()).rejects.toThrow("설정 저장 실패");
+ state.invoke.mockImplementation(async(_command,args)=>response(args));await media.queueMirrorWriteAndConfirm("failed-section",{a:3});await expect(media.flushSettingsPersistence()).resolves.toBeUndefined();
+});

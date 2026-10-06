@@ -24,7 +24,7 @@ def load_upsampler(dtype):
     from diffusers.pipelines.ltx2.latent_upsampler import LTX2LatentUpsamplerModel
     # 본체 캐시를 재사용하되 저장소가 바뀌어 다른 구조의 부품을 받지 않도록 고정합니다.
     # 인증은 워커의 기존 HF 환경을 그대로 사용하며 별도로 토큰을 읽지 않습니다.
-    return LTX2LatentUpsamplerModel.from_pretrained(UPSAMPLER_REPO, subfolder="latent_upsampler",
+    return LTX2LatentUpsamplerModel.from_pretrained(UPSAMPLER_REPO, local_files_only=True, subfolder="latent_upsampler",
         revision=UPSAMPLER_REVISION, dtype=dtype)
 
 

@@ -1,0 +1,20 @@
+import {beforeEach,describe,expect,it,vi}from "vitest";
+const state=vi.hoisted(()=>({invoke:vi.fn(),enqueue:vi.fn(),revision:"current",previous:null as null|Record<string,unknown>}));
+vi.mock("@tauri-apps/api/core",()=>({invoke:state.invoke}));
+vi.mock("./controlMedia",()=>({listControlAssets:()=>["source","selection","protection","plate"].map(id=>({id,path:"p/"+id+".png",kind:"image"})),controlMediaTarget:()=>({stem:"컷_1",ownerName:"장면",assetType:"scene-cut"})}));
+vi.mock("./projectWrite",()=>({readProject:()=>({title:"QA"})}));
+vi.mock("./projectControl",()=>({getProjectSnapshot:async()=>({revision:state.revision}),ProjectControlError:class extends Error{constructor(public code:string,message:string){super(message);}}}));
+vi.mock("./localProjectStore",()=>({projectFolderName:()=>"QA"}));
+vi.mock("./mediaLibrary",()=>({saveProjectMediaAsset:vi.fn(),releaseEmptyProjectAsset:vi.fn(),safeFileName:(s:string)=>s}));
+vi.mock("./taskQueue",()=>({enqueueTaskOperation:state.enqueue,registerTaskRunner:vi.fn(),isStopping:()=>false,setTaskResult:vi.fn(),getTaskByOperationId:()=>state.previous,whenTaskJournalReady:async()=>{}}));
+import {protectedEditSchema,validateProtectedEdit,enqueueProtectedEdit}from "./controlProtectedEdit";
+const base={projectId:"p",expectedRevision:"current",operationId:"edit-qa",target:{kind:"cut" as const,id:"cut"},mode:"compose" as const,sourceImageAssetId:"source",selectionMaskAssetId:"selection",protectionMaskAssetId:"protection",replacementImageAssetId:"plate",sourceSha256:"1".repeat(64),selectionSha256:"2".repeat(64),protectionSha256:"3".repeat(64),replacementSha256:"4".repeat(64),width:1024,height:576,maskCoordinates:{space:"native" as const}};
+beforeEach(()=>{state.invoke.mockReset().mockResolvedValue({ready:true,blockers:[]});state.enqueue.mockReset().mockResolvedValue({jobId:"cpu-job"});state.revision="current";state.previous=null;});
+describe("CPU 보호 편집 계약",()=>{
+  it("같은 프로젝트 자산으로 독립 CPU 대기열에 보낸다",async()=>{await expect(enqueueProtectedEdit(base)).resolves.toEqual({jobId:"cpu-job"});expect(state.enqueue).toHaveBeenCalledWith(expect.objectContaining({lane:"cpu",kind:"control.protected-edit",payload:base}));});
+  it("프로젝트 변경·외부 자산·환경 미준비를 거절한다",async()=>{state.revision="new";await expect(enqueueProtectedEdit(base)).rejects.toThrow("프로젝트가 바뀌었습니다");state.revision="current";await expect(enqueueProtectedEdit({...base,protectionMaskAssetId:"foreign"})).rejects.toThrow("invalid_asset");state.invoke.mockResolvedValue({ready:false,blockers:["missing_cpu_tool"]});await expect(enqueueProtectedEdit(base)).rejects.toThrow("protected_edit_not_ready");});
+  it("crop 좌표는 원본 안에만 존재하며 원본 크기 예산을 제한한다",()=>{expect(()=>validateProtectedEdit(protectedEditSchema.parse({...base,maskCoordinates:{space:"crop",x:1020,y:0,width:10,height:10}}))).toThrow("out_of_bounds");expect(()=>validateProtectedEdit(protectedEditSchema.parse({...base,width:8192,height:8192}))).toThrow("unsupported_budget");});
+  it("정확 문자 레이어 선언과 해시를 요구한다",()=>{expect(()=>validateProtectedEdit(protectedEditSchema.parse({...base,mode:"erase-text"}))).toThrow("exact_text_requires");expect(()=>validateProtectedEdit(protectedEditSchema.parse({...base,mode:"erase-text",requiredText:"내 시간"}))).not.toThrow();expect(()=>validateProtectedEdit(protectedEditSchema.parse({...base,replacementSha256:undefined}))).toThrow("replacement_hash");expect(protectedEditSchema.safeParse({...base,requiredText:"가짜"}).success).toBe(false);});
+  it("실행 경로·자동 분할·임의 텍스트 입력을 받지 않는다",()=>{for(const key of ["sourceImage","python","fontPath","prompt","segmentationModel"])expect(protectedEditSchema.safeParse({...base,[key]:"untrusted"}).success).toBe(false);});
+  it("재요청은 기존 작업을 사용하며 동일 ID의 다른 편집은 거절한다",async()=>{state.previous={kind:"control.protected-edit",payload:protectedEditSchema.parse(base),projectId:"p",projectTitle:"QA",label:"편집"};state.revision="later";await expect(enqueueProtectedEdit(base)).resolves.toEqual({jobId:"cpu-job"});expect(state.invoke).not.toHaveBeenCalled();await expect(enqueueProtectedEdit({...base,sourceSha256:"a".repeat(64)})).rejects.toThrow("operation_conflict");});
+});

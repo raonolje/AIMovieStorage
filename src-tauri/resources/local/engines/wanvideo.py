@@ -23,6 +23,7 @@ import os
 import time
 
 import common
+from local_only_policy import local_load_kwargs
 
 _state = {"pipe": None, "mode": None, "loras": [], "plan": None}
 
@@ -75,6 +76,9 @@ def prefetch(root, report):
 
 
 def load(root, opts):
+    if opts.get("end_image") is not None:
+        from control_policy import validate_control_options
+        validate_control_options("wanvideo", opts, check_files=True)
     mode = "i2v" if (opts.get("image") or "").strip() else "t2v"
     # 정밀도를 **먼저** 셈합니다 — 이미 올라가 있어도 사람이 정밀도를 바꿨으면 다시 올려야
     # 합니다(로라만 다시 걸고 정밀도는 안 보던 자리). 판단은 `common.plan_precision` 한 곳.
@@ -90,16 +94,25 @@ def load(root, opts):
     pipeline_class = getattr(
         diffusers, "WanImageToVideoPipeline" if mode == "i2v" else "WanPipeline"
     )
+    if opts.get("end_image"):
+        import inspect
+        if "last_image" not in inspect.signature(pipeline_class.__call__).parameters:
+            raise ValueError("model_unsupported: installed Wan pipeline has no last_image input.")
     repo = _repo(mode)
+    if os.environ.get("HF_HUB_OFFLINE", "").lower() in ("1", "true", "yes"):
+        # diffusers 0.36 quantized shard loading queries Hub metadata even offline.
+        # Resolve the same installed snapshot so the normal app path remains local.
+        from huggingface_hub import snapshot_download
+        repo = snapshot_download(repo, local_files_only=True)
     # 이 GPU 에 bf16 이 안 들어가면 **정말로 줄여서** 올립니다.
     common.log_precision(repo, plan)
     if plan["bits"]:
         # Wan 2.2 A14B 는 전문가가 **둘**입니다(`transformer` + `transformer_2`).
         # 하나만 줄이면 절반이 bf16 으로 남아 여전히 안 들어갑니다.
         parts = common.quantized_transformers(repo, dtype, plan["bits"], extra=("transformer_2",))
-        pipe = pipeline_class.from_pretrained(repo, torch_dtype=dtype, **parts)
+        pipe = pipeline_class.from_pretrained(repo, torch_dtype=dtype, **local_load_kwargs(), **parts)
     else:
-        pipe = pipeline_class.from_pretrained(repo, torch_dtype=dtype)
+        pipe = pipeline_class.from_pretrained(repo, torch_dtype=dtype, **local_load_kwargs())
     # 영상 DiT 는 그림보다 훨씬 큽니다. 오프로드 없이는 VRAM 이 넉넉해도 최고점에서 터집니다.
     pipe = common.place(pipe, device, bool(plan["bits"]))
     try:
@@ -156,20 +169,20 @@ def _apply_loras(opts):
 
 
 def generate(output, opts, report):
+    if opts.get("end_image") is not None:
+        from control_policy import validate_control_options
+        validate_control_options("wanvideo", opts, check_files=True)
     # 마스크는 **모델을 부르기 전에** 봅니다 — 까닭은 `common.check_motion_mask`.
     common.check_motion_mask(opts)
     started = time.time()
     pipe = _state["pipe"]
-    fps = int(opts.get("fps") or 16)
-    seconds = float(opts.get("seconds") or 5.0)
-    """
-    프레임 수는 **4의 배수 + 1** 이라야 합니다.
-
-    Wan 의 VAE 는 시간축을 4배로 줄입니다. 4n+1 이 아니면 마지막 토막이 잘려 끝이
-    뚝 끊긴 영상이 나옵니다. 길이를 사람이 초로 적게 두고 여기서 맞춥니다.
-    """
-    frames = int(round(seconds * fps))
-    frames = max(5, ((frames - 1) // 4) * 4 + 1)
+    from video_frame_contract import plan_video_frames, exact_video_prefix, plan_end_condition
+    duration_plan = plan_video_frames(opts.get("seconds", 5.0), opts.get("fps", 16), 4)
+    fps = duration_plan["fps"]
+    frames = duration_plan["generation_frames"]
+    endpoint_plan = plan_end_condition("wanvideo", duration_plan) if opts.get("end_image") else None
+    if endpoint_plan and not endpoint_plan["placement_exact"]:
+        common.log("현재 모델 API로 마지막 표시 프레임에 끝 조건을 정확히 지정할 수 없습니다: 조건 {} / 출력 끝 {}".format(endpoint_plan["condition_pixel_frame"], endpoint_plan["last_visible_frame"]))
     steps = int(opts.get("steps") or 30)
     seed = common.resolve_seed(opts)
 
@@ -199,20 +212,34 @@ def generate(output, opts, report):
             raise IOError("첫 장면 그림을 찾지 못했습니다: {}".format(image_path))
         first = Image.open(image_path).convert("RGB").resize((width, height))
         kwargs["image"] = first
+    end_image = opts.get("end_image")
+    if end_image:
+        # Expanded-timestep TI2V 5B ignores the last image in this installed pipeline.
+        if getattr(getattr(pipe, "config", None), "expand_timesteps", False):
+            raise ValueError("model_unsupported: expanded-timestep Wan models do not accept last-frame conditioning.")
+        with Image.open(end_image) as image:
+            kwargs["last_image"] = image.convert("RGB").resize((width, height))
     result = common.run_attention_safe(pipe, lambda: pipe(**kwargs))
     report(95, "mp4 로 내보내는 중")
     # 「여기만 움직인다」 흑백 마스크가 왔으면 검은 곳을 첫 장면에 묶습니다(`common.freeze_by_mask`).
-    frames_out = common.freeze_by_mask(result.frames[0], opts.get("motion_mask"))
+    frames_out = common.freeze_by_mask(exact_video_prefix(result.frames[0], duration_plan), opts.get("motion_mask"))
     common.save_video(frames_out, output, fps)
     out = {
         "width": width,
         "height": height,
-        "frames": frames,
+        "frames": len(frames_out),
+        "duration_contract": duration_plan,
+        "audio": {"source": "none", "supported": False, "reason": "installed_wan_pipeline_frames_only"},
         "fps": fps,
-        "seconds_video": round(frames / float(fps), 2),
+        "seconds_video": len(frames_out) / float(fps),
         "seed": seed,
         "generate_seconds": round(time.time() - started, 2),
     }
     # 요청한 정밀도와 실제로 올라간 정밀도 — 한 곳에서 만듭니다.
     out.update(common.precision_fields(_state["plan"]))
+    if end_image:
+        duration_plan["end_condition_in_trimmed_tail"] = endpoint_plan["condition_in_trimmed_tail"]
+        out["end_condition_contract"] = endpoint_plan
+        out["frame_conditions"] = {"method": "vae-first-last-conditioning", "first_image": image_path,
+            "end_image": end_image, "pipeline": type(pipe).__name__, "stages": 1}
     return out

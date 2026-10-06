@@ -9,8 +9,6 @@ import { queueMirrorWriteAndConfirm, registerMirrorSection, whenAppSettingsReady
 /**
  * 로컬 생성 엔진 — 프런트 쪽.
  *
- *
- *
  * 살림(설치·워커·취소·제거)은 업스케일 엔진과 **같은 Rust 코드**를 씁니다
  * (`src-tauri/src/upscale.rs` 의 `Family`). 이 파일은 `upscale.ts` 와 같은 모양의
  * 구독 저장소입니다 — 설치는 수십 분이 걸리고 화면을 떠나 있는 동안에도 진행 이벤트가
@@ -31,6 +29,7 @@ export type LocalEngineId =
   | "minimaxh3"
   | "minimaxmusic"
   | "qwentts"
+  | "kimodo"
   | "qwenimage"
   | "zimage"
   | "krea2"
@@ -42,7 +41,7 @@ export type LocalEngineId =
   | "nlf"
   | "gvhmr";
 
-export type LocalEngineKind = "image" | "video" | "music" | "voice" | "mocap";
+export type LocalEngineKind = "image" | "video" | "music" | "voice" | "mocap" | "motion";
 
 /**
  * 이 빌드에 실린 엔진 — 상태 캐시·설치 목록·모델 고르기·로라 서랍이 전부 이 목록을 돕니다.
@@ -55,6 +54,7 @@ export const LOCAL_ENGINE_IDS: LocalEngineId[] = (
     "minimaxh3",
     "minimaxmusic",
     "qwentts",
+    "kimodo",
     "qwenimage",
     "zimage",
     "krea2",
@@ -137,8 +137,6 @@ export interface LocalEngineInfo {
   priority: number;
   /**
    * **동작을 그대로 옮길 수 있는가**(컨트롤넷·포즈 조건).
-   *
-   *
    *
    * 아무 모델에나 뼈 그림을 준다고 따라 그리지 않습니다 — **그 조건을 학습한 가지**가
    * 따로 있어야 합니다. 없는 엔진에 주면 조용히 무시되고, 사람은 「왜 안 따라 하지」 를
@@ -356,6 +354,14 @@ export const LOCAL_ENGINE_CATALOG: Record<LocalEngineId, LocalEngineInfo> = {
     needs: vramNeeds({ bf16Gb: 4, ramGb: 12, diskGb: 10 }),
     precisionModes: ["bf16"],
   },
+  kimodo: {
+    id: "kimodo", kind: "motion", name: "동작 생성 — NVIDIA KIMODO",
+    purpose: "영문 동작 설명으로 SOMA BVH를 생성합니다. 구도잡기 음악 탭에서 RP·SEED v1.1을 선택하고 박자 구간에 적용하세요. Hugging Face Llama 3 접근 승인과 토큰이 필요합니다.",
+    license: "코드 Apache 2.0 · SOMA 가중치 NVIDIA Open Model License · 텍스트 인코더 별도 약관",
+    sizeHint: "독립 Python 환경 + 선택 모델·텍스트 인코더 (첫 생성 때 다운로드)",
+    extension: "bvh", priority: 0,
+    needs: vramNeeds({ vramGb: 17, ramGb: 24, diskGb: 30 }),
+  },
   qwenimage: {
     id: "qwenimage",
     kind: "image",
@@ -418,7 +424,7 @@ export const LOCAL_ENGINE_CATALOG: Record<LocalEngineId, LocalEngineInfo> = {
     kind: "video",
     name: "영상 — Wan 2.2 (A14B) · 멀티 로라",
     purpose:
-      "미니맥스 H3 가 무거운 기계를 위한 가벼운 대안. 대표 그림을 주면 그 그림에서 시작하고(I2V), 로라를 여러 개 겹칩니다.",
+      "설치된 Wan은 영상만 생성하며 음성·대사를 생성하지 않습니다. 미니맥스 H3 가 무거운 기계를 위한 가벼운 대안. 대표 그림을 주면 그 그림에서 시작하고(I2V), 로라를 여러 개 겹칩니다.",
     license: "Apache 2.0 — 상업 이용 제한 없음",
     // 65 → 120 GB (2026-09-22). 첫 장면 그림을 주는 컷에서 I2V 판 60 GB 를 «생성 중» 안에서 말없이
     // 받던 것을, 설치 때 T2V·I2V 두 판을 다 받아 두는 것으로 바꿨습니다. 둘을 합친 값입니다.
@@ -438,7 +444,7 @@ export const LOCAL_ENGINE_CATALOG: Record<LocalEngineId, LocalEngineInfo> = {
     kind: "video",
     name: "영상 — LTX 2.5 (22B)",
     purpose:
-      "해상도와 길이가 필요한 컷에. 4K·24fps 까지 가고, fp8 로 줄이면 24 GB 카드에서도 돕니다. 프레임은 8n+1.",
+      "생성 음원을 WAV와 MP4로 함께 보존합니다. 지정 대사 입력은 별도 native A2V 경로를 사용합니다. 해상도와 길이가 필요한 컷에. 4K·24fps 까지 가고, fp8 로 줄이면 24 GB 카드에서도 돕니다. 프레임은 8n+1.",
     license: "LTX-2.x Community — 연 매출 1,000만 달러 미만 상업 가능",
     sizeHint: "약 155 GB 를 받습니다(2026-09-18 실측 — 저장소 174 GB 에서 안 쓰는 프롬프트 다듬기 모델만 뺀 값) · 허깅페이스 토큰 + 약관 동의 필요(동의 전이면 403)",
     extension: "mp4",
@@ -524,6 +530,7 @@ export const LOCAL_KIND_LABEL: Record<LocalEngineKind, string> = {
   music: "음악",
   voice: "목소리",
   mocap: "모션 캡처",
+  motion: "동작 생성",
 };
 
 export interface LocalEngineStatus extends LocalEngineInfo {
@@ -546,6 +553,10 @@ export interface LocalEngineStatus extends LocalEngineInfo {
    * 아닌데 `canPrefetch` 면 카드에 «가중치 미리 받기» 단추가 뜹니다.
    */
   weightsReady: boolean;
+  prefetchCompleted?: boolean;
+  installationRecordVersion?: string;
+  /** 설치 기록과 별개인 현재 파일·배포판 메타데이터 증거입니다. */
+  readinessEvidence?: { files?: { status: string; missing?: string[]; scope?: string; loadVerified?: boolean }; runtime?: { source: string; diffusersVersions: string[]; importVerified: boolean } };
   /** 이 엔진이 «미리 받기» 를 아는가 — manifest 의 `prefetch`(한 곳). 카탈로그에 따로 적지 않습니다. */
   canPrefetch: boolean;
   lastError: string;
@@ -579,6 +590,7 @@ type RawEngineStatus = {
   models_ready?: boolean;
   disk_bytes?: number;
   weights_ready?: boolean;
+  readiness_evidence?: LocalEngineStatus["readinessEvidence"];
   prefetch?: boolean;
   last_error?: string | null;
 };
@@ -615,6 +627,9 @@ function mergeStatus(raw: RawEngineStatus[]): LocalEngineStatus[] {
       modelsReady: Boolean(item.models_ready),
       diskBytes: Number(item.disk_bytes ?? 0) || 0,
       weightsReady: Boolean(item.weights_ready),
+      prefetchCompleted: Boolean(item.weights_ready),
+      installationRecordVersion: item.version ?? "",
+      readinessEvidence: item.readiness_evidence,
       canPrefetch: Boolean(item.prefetch),
       lastError: item.last_error ?? "",
     };
@@ -887,7 +902,14 @@ export interface LocalLora {
 }
 
 export interface LocalRunOptions {
+  /** 명시적으로 선택했을 때만 원음 조건 워커로 보내 기존 LTX 기본값을 보존합니다. */
+  ltx_a2v?: "experimental";
+  audio_path?: string;
+  audio_start_seconds?: number;
+  audio_duration_seconds?: number;
   prompt: string;
+  motion_model?: "Kimodo-SOMA-RP-v1.1" | "Kimodo-SOMA-SEED-v1.1";
+  text_encoder_device?: "cuda" | "cpu";
   /** Qwen3-TTS 목소리 생성. prompt는 읽을 대사입니다. */
   voice_model?: "design" | "custom-1.7b" | "custom-0.6b";
   voice_speaker?: string;
@@ -912,6 +934,8 @@ export interface LocalRunOptions {
   fps?: number;
   /** 영상의 첫 프레임으로 쓸 그림 경로. 주면 I2V(H3 는 fl2va)로 돕니다. */
   image?: string;
+  /** LTX 2.5 / Wan I2V 끝 프레임 조건. 첫 이미지와 함께 사용합니다. */
+  end_image?: string;
   /**
    * 레퍼런스 — 구도잡기 영상·인물 시트·배경을 **순서대로** 물립니다(H3 의 `ref2va`).
    *
@@ -1225,7 +1249,7 @@ export async function runLocal(
       engine,
       outputPath,
       // 화면·MCP·BGM 모두 이 설정 한 곳을 따릅니다. 호출자가 별도 값으로 우회하지 않습니다.
-      opts: {
+      opts: options.ltx_a2v === "experimental" ? { ...options } : {
         ...options,
         // 개별 생성이 명시한 값은 유지하고, 생략한 화면·조종기 호출은 모델별 설정을 읽습니다.
         precision: options.precision ?? loadPrecision(engine),
@@ -1262,8 +1286,6 @@ export interface LoraEntry {
   engine: LocalEngineId;
   /**
    * 이 로라가 **무엇을 바꾸는가**.
-   *
-   *
    *
    * 맞습니다 — **화풍 로라는 한 번에 하나**입니다. 둘을 겹치면 어느 쪽도 아닌 그림이 나오고,
    * 그게 로라 탓인지 프롬프트 탓인지 가려낼 수가 없습니다. 반면 «동작»·«질감» 은 화풍과

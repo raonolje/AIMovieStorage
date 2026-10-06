@@ -6,6 +6,7 @@ import { BGM_ROOT } from "@/lib/bgmLibrary";
 import { enqueueTask, isStopping, registerTaskRunner, setTaskResult } from "@/lib/taskQueue";
 import { whenAppSettingsReady } from "@/lib/mediaLibrary";
 import { z } from "zod";
+import { bgmSamplingFields, validateBgmSamplingEngine, bgmGenerationMetadata } from "./bgmSampling";
 
 /**
  * **BGM 뽑기도 작업 줄에서.**
@@ -32,6 +33,9 @@ import { z } from "zod";
 export const BGM_TASK = "bgmTrack";
 
 export interface BgmPayload {
+  seed?: number;
+  steps?: number;
+  guidance?: number;
   projectId: string;
   projectName?: string;
   trackId: string;
@@ -43,6 +47,7 @@ export interface BgmPayload {
 }
 
 const payloadSchema = z.object({
+  ...bgmSamplingFields,
   projectId: z.string().min(1).max(200), trackId: z.string().min(1).max(200),
   projectName: z.string().max(300).optional(), trackName: z.string().max(300).optional(),
   engine: z.enum(["minimaxmusic", "acestep"]), prompt: z.string().trim().min(1).max(32000),
@@ -54,6 +59,7 @@ const payloadSchema = z.object({
 /** UI·외부 명령·재시작한 작업은 모두 같은 입력과 대상 검사를 지납니다. */
 export function validateBgmPayload(raw: unknown) {
   const input = payloadSchema.parse(raw);
+  validateBgmSamplingEngine(input);
   if (!LOCAL_ENGINE_IDS.includes(input.engine)) throw new Error("이 배포판에서 사용할 수 없는 음악 엔진입니다.");
   const project = loadBgmProjects().find((item) => item.id === input.projectId);
   const track = project?.tracks.find((item) => item.id === input.trackId);
@@ -110,13 +116,17 @@ registerTaskRunner(BGM_TASK, async (raw, report, task) => {
       // 연주곡이면 가사를 비웁니다 — 비면 엔진이 `[inst]` 로 받습니다.
       lyrics: payload.lyrics,
       precision: loadPrecision(payload.engine),
+      ...(payload.seed !== undefined ? { seed: payload.seed } : {}),
+      ...(payload.steps !== undefined ? { steps: payload.steps } : {}),
+      ...(payload.guidance !== undefined ? { guidance: payload.guidance } : {}),
     },
     timeoutSecs: 3600,
     onProgress: (message) => report({ step: message || "뽑는 중" }),
   });
 
-  setTaskResult(task.id, { paths: [made.path] });
-  if (isStopping(task.id)) return { paths: [made.path], data: { attached: false, cancelled: true } };
+  const generation = bgmGenerationMetadata(made.meta);
+  setTaskResult(task.id, { paths: [made.path], data: generation });
+  if (isStopping(task.id)) return { paths: [made.path], data: { ...generation, attached: false, cancelled: true } };
 
   report({ step: "곡에 붙이는 중" });
   /*
@@ -140,5 +150,5 @@ registerTaskRunner(BGM_TASK, async (raw, report, task) => {
           },
     );
   });
-  return { paths: [made.path], data: { attached: true, projectId: payload.projectId, trackId: payload.trackId } };
+  return { paths: [made.path], data: { ...generation, attached: true, projectId: payload.projectId, trackId: payload.trackId } };
 });

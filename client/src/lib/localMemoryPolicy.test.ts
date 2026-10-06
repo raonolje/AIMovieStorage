@@ -117,4 +117,15 @@ describe("로컬 생성의 메모리 정책", () => {
     native.invoke.mockRejectedValueOnce(new Error("설정 파일 저장 실패"));
     await expect(api.saveLocalMemoryPolicy(adaptive)).rejects.toThrow("설정 파일 저장 실패");
   });
+
+  it("native experimental sends only its strict options and request-bound handoff", async () => {
+    const api = await load();
+    await api.saveLocalMemoryPolicy({ mode: "retain", ramPercent: 85, vramPercent: 85 });
+    await api.savePrecision("int4");
+    const options={prompt:"native QA",ltx_a2v:"experimental",ltx_a2v_offload:"disk",native_gpu_handoff:{operationId:"approved-op"}} as LocalRunOptions;
+    await api.runLocal("ltx25","native.mp4",options);
+    const run=native.invoke.mock.calls.filter(([command])=>command==="local_run").at(-1)!;
+    expect(run[1].opts).toEqual(options);
+    for(const field of ["precision","memory_policy","memory_ram_percent","memory_vram_percent","keep_worker"])expect(run[1].opts).not.toHaveProperty(field);
+  });
 });

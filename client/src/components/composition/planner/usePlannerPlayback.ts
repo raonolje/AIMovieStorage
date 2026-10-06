@@ -15,7 +15,7 @@ export function usePlannerPlayback(
    * 소리는 브라우저가 제 시계로 돌립니다. 우리 시계(`playheadRef`)와 둘이 따로 가므로, 시작·멈춤·머리 옮기기 때
    * **한 번씩만 맞춰 줍니다.** 프레임마다 맞추면 소리가 끊깁니다(지직거림).
    */
-  music?: { src: string; offset: number } | null,
+  music?: { src: string; offset: number; startTime: number } | null,
 ) {
   const [playing, setPlaying] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -65,6 +65,7 @@ export function usePlannerPlayback(
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const musicSrc = music?.src || "";
   const musicOffset = music?.offset ?? 0;
+  const musicStartTime = music?.startTime ?? 0;
   useEffect(() => {
     if (!musicSrc) {
       audioRef.current?.pause();
@@ -83,14 +84,15 @@ export function usePlannerPlayback(
   /** 노래를 **우리 시계에 맞춥니다.** 타임라인 t 초에서 노래는 t+민 자리 초가 울려야 합니다. */
   const syncMusic = (time: number) => {
     const audio = audioRef.current;
-    if (!audio) return;
-    const at = time + musicOffset;
+    if (!audio) return false;
+    const at = time - musicStartTime + musicOffset;
     // 노래보다 뒤로 가면 울릴 것이 없습니다 — 소리만 멈추고 화면은 계속 갑니다.
     if (at < 0 || (audio.duration && at > audio.duration)) {
       audio.pause();
-      return;
+      return false;
     }
     if (Math.abs(audio.currentTime - at) > 0.12) audio.currentTime = at;
+    return true;
   };
 
   const seek = (time: number) => {
@@ -121,8 +123,7 @@ export function usePlannerPlayback(
       setPlayhead(0);
     }
     // 소리는 시작할 때 한 번 맞추고 그다음은 브라우저에 맡깁니다.
-    syncMusic(playheadRef.current);
-    void audioRef.current?.play().catch(() => {
+    if (syncMusic(playheadRef.current)) void audioRef.current?.play().catch(() => {
       /* 파일을 못 읽거나 브라우저가 막으면 소리만 없이 갑니다 — 재생 자체를 멈추면 구도 확인이 안 됩니다. */
     });
     let frame = 0;
@@ -142,6 +143,10 @@ export function usePlannerPlayback(
       }
       playheadRef.current = next;
       paintPlayhead(next);
+      // 음원 레이어가 0초 뒤에 시작하면 재생선이 그 시작점을 지날 때 소리를 켭니다.
+      if (audioRef.current?.paused && next >= musicStartTime && next < musicStartTime + (audioRef.current.duration || Infinity) - musicOffset) {
+        if (syncMusic(next)) void audioRef.current.play().catch(() => {});
+      }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -151,7 +156,7 @@ export function usePlannerPlayback(
       // 멈춘 자리에서 상태를 한 번 맞춰야 다른 UI 가 어긋나지 않습니다.
       setPlayhead(playheadRef.current);
     };
-  }, [playing, timelineDuration]);
+  }, [playing, timelineDuration, musicSrc, musicOffset, musicStartTime]);
 
   return {
     playing,

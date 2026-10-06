@@ -103,6 +103,18 @@ export const compositionCommandSchema = z.discriminatedUnion("op", [
     .strict(),
   z.object({ op: z.literal("room.select"), id }).strict(),
   z.object({ op: z.literal("room.remove"), id }).strict(),
+  z.object({
+    op: z.literal("floorplan.wall_upsert"), roomId: id, wallId: id,
+    start: z.object({ x: scalar, z: scalar }).strict(),
+    end: z.object({ x: scalar, z: scalar }).strict(),
+    thicknessMeters: z.number().min(0.03).max(1).default(0.12),
+    heightMeters: z.number().min(0.4).max(400),
+    opening: z.object({
+      kind: z.enum(["door", "window"]), widthMeters: z.number().min(0.2).max(20),
+      bottomMeters: z.number().min(0).max(400), heightMeters: z.number().min(0.2).max(400),
+    }).strict().nullable().optional(),
+  }).strict(),
+  z.object({ op: z.literal("floorplan.wall_remove"), roomId: id, wallId: id }).strict(),
   z.object({ op: z.literal("room.preset_apply"), id }).strict(),
   z.object({ op: z.literal("background.select"), id, kind: z.enum(["panorama", "hdri"]) }).strict(),
   z.object({ op: z.literal("room.background"), id, backgroundId: id.nullable() }).strict(),
@@ -235,6 +247,10 @@ export const compositionCommandSchema = z.discriminatedUnion("op", [
       wholeGroup: z.boolean().default(false),
     })
     .strict(),
+  z.object({
+    op: z.literal("object.material"), id,
+    material: z.object({ roughness: z.number().finite().min(0).max(1), metalness: z.number().finite().min(0).max(1) }).strict().nullable(),
+  }).strict(),
   z.object({ op: z.literal("object.remove"), id }).strict(),
   z.object({ op: z.literal("object.image"), id, path: z.string().max(4000) }).strict(),
   z.object({ op: z.literal("object.swap"), id, reference: z.object({
@@ -478,11 +494,14 @@ export const compositionCommandSchema = z.discriminatedUnion("op", [
     .object({
       op: z.literal("music.update"),
       offset: seconds.optional(),
+      startTime: seconds.optional(),
       bpm: z.number().min(1).max(1000).optional(),
       barsPerSection: z.number().int().min(1).max(1000).optional(),
+      downbeatIndex: z.number().int().min(0).max(3).optional(),
     })
     .strict(),
   z.object({ op: z.literal("music.split_bars") }).strict(),
+  z.object({ op: z.literal("music.split_detected_bars") }).strict(),
   z.object({ op: z.literal("music.cut"), timeSeconds: seconds }).strict(),
   z.object({ op: z.literal("music.remove") }).strict(),
   z
@@ -713,6 +732,24 @@ export function reduceCompositionCommands(
         room(command.id);
         state = edit.removeRoomIn(state, command.id);
         break;
+      case "floorplan.wall_upsert": {
+        room(command.roomId);
+        const target = edit.roomsOf(state).find((item) => item.id === command.roomId)!;
+        if (target.outdoor || target.horizon) throw new CompositionControlError("invalid_target", "실내 방의 평면도에만 벽을 추가할 수 있습니다.");
+        state = edit.upsertFloorplanWallIn(state, command.roomId, {
+          id: command.wallId, start: command.start, end: command.end,
+          thickness: command.thicknessMeters, height: command.heightMeters,
+          opening: command.opening ? {
+            kind: command.opening.kind, width: command.opening.widthMeters,
+            bottom: command.opening.bottomMeters, height: command.opening.heightMeters,
+          } : undefined,
+        });
+        break;
+      }
+      case "floorplan.wall_remove":
+        room(command.roomId);
+        state = edit.removeFloorplanWallIn(state, command.roomId, command.wallId);
+        break;
       case "background.select":
         requireId(state.customBackgrounds.some((item) => item.id === command.id && item.kind === command.kind), command.id);
         state = edit.selectCustomBackgroundIn(state, command.kind, command.id);
@@ -911,6 +948,15 @@ export function reduceCompositionCommands(
         state = command.wholeGroup
           ? edit.transformObjectGroupIn(state, command.id, patch)
           : edit.updateObjectIn(state, command.id, patch);
+        break;
+      }
+      case "object.material": {
+        const item = state.objects.find((entry) => entry.id === command.id);
+        object(command.id);
+        // 교체 모델과 조명은 별도 재질 경로라, 효과 없는 입력을 받아 성공으로 보고하지 않습니다.
+        const group = state.objectGroups?.find((entry) => entry.id === item!.groupId);
+        if (item!.kind === "light" || item!.swapRef || group?.swapRef) throw new CompositionControlError("unsupported_material_target", "기본 소품 형상에만 표면 재질을 적용할 수 있습니다.");
+        state = edit.updateObjectIn(state, command.id, { surfaceMaterial: command.material ?? undefined });
         break;
       }
       case "object.remove":
@@ -1189,12 +1235,11 @@ export function reduceCompositionCommands(
             "invalid_time",
             "동작 키의 시각이 타임라인 길이를 넘습니다.",
           );
-        state = edit.addMotionKeyIn(
-          state,
-          command.targetId,
-          command.channel,
-          command.timeSeconds,
-        );
+        // 공식 명령은 방금 편집한 상태를 요청 시각에 저장합니다. UI의 기존 트랙 표본을 다시 읽으면 새 값이 사라집니다.
+        state = command.channel === "pose"
+          ? edit.addPoseKeyIn(state, command.targetId, command.timeSeconds,
+              state.characters.find(item => item.characterId === command.targetId)?.bonePose ?? {})
+          : edit.addMotionKeyIn(state, command.targetId, command.channel, command.timeSeconds);
         break;
       case "motion_key.remove":
       case "motion_key.easing": {
@@ -1386,8 +1431,12 @@ export function reduceCompositionCommands(
         break;
       case "music.update": {
         requireId(edit.musicOf(state), "음악");
-        const { op: _op, ...patch } = command;
-        state = edit.patchMusicIn(state, patch);
+        const { op: _op, startTime, ...patch } = command;
+        state = edit.patchMusicIn(state, command.bpm === undefined ? patch : {
+          ...patch, beatTimes: undefined, beatConfidence: undefined,
+          downbeatIndex: command.downbeatIndex,
+        });
+        if (startTime !== undefined) state = edit.moveMusicStartIn(state, startTime);
         break;
       }
       case "music.split_bars": {
@@ -1398,6 +1447,13 @@ export function reduceCompositionCommands(
           music!.bpm ?? 120,
           music!.barsPerSection ?? 4,
         );
+        break;
+      }
+      case "music.split_detected_bars": {
+        const music = edit.musicOf(state);
+        requireId(music, "음악");
+        if (!music?.beatTimes?.length) throw new CompositionControlError("missing_beats", "먼저 음원의 박자를 분석하세요.");
+        state = edit.splitMusicByDetectedBarsIn(state, music.barsPerSection ?? 8);
         break;
       }
       case "music.cut":

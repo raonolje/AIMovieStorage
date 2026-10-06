@@ -1,3 +1,4 @@
+import { assertMaintenanceWritable } from "./maintenanceGate";
 import { t } from "./i18n";
 import { useSyncExternalStore } from "react";
 import { abandonLlmResumes } from "@/lib/llmActivity";
@@ -45,7 +46,7 @@ import { abandonLlmResumes } from "@/lib/llmActivity";
  * 도는지는 작업에 적어 둡니다.
  */
 
-export type TaskLane = "llm" | "media";
+export type TaskLane = "llm" | "media" | "download" | "cpu";
 export type TaskStatus = "waiting" | "running" | "done" | "failed" | "stopped";
 
 export interface TaskResult {
@@ -418,9 +419,11 @@ function requestFingerprint(next: NewTask): string {
 
 /** 같은 명령의 재전송은 끝난 작업도 찾아 돌려줍니다. 새로 뽑기는 새 열쇠로 요청합니다. */
 export async function enqueueTaskOperation(next: NewTask & { operationId: string }): Promise<{ jobId: string; reused: boolean }> {
+  assertMaintenanceWritable();
   await whenTaskJournalReady();
   if (!journalAdapter) throw new Error("외부 작업을 받기 전에 앱 작업 기록을 연결해야 합니다.");
   load();
+  assertMaintenanceWritable();
   const operationId = next.operationId.trim();
   if (!operationId) throw new Error("작업 요청 열쇠가 비었습니다.");
   const fingerprint = requestFingerprint(next);
@@ -469,7 +472,11 @@ export async function getPersistedTask(id: string): Promise<QueueTask | null> {
 
 export async function listPersistedTasks(filter: { projectId?: string; status?: TaskStatus } = {}): Promise<QueueTask[]> {
   const saved = await readTaskJournal();
-  return saved.tasks.filter(task => (!filter.projectId || task.projectId === filter.projectId) && (!filter.status || task.status === filter.status));
+  // 화면에서 완료 줄을 비우거나 60개 밖으로 밀려나도 개별 조회와 같은 보관 결과를 보여 줍니다.
+  // 같은 ID는 getPersistedTask처럼 화면 큐의 저장 상태가 우선입니다. 합친 뒤 필터해야 옛 상태가 끼지 않습니다.
+  const byId = new Map(saved.tasks.map(task => [task.id, task]));
+  for (const task of saved.operations) if (!byId.has(task.id)) byId.set(task.id, task);
+  return [...byId.values()].filter(task => (!filter.projectId || task.projectId === filter.projectId) && (!filter.status || task.status === filter.status));
 }
 
 /** 결과 등록도 같은 작업 기록에 넣어야 재접속한 조종기가 만든 파일을 다시 찾습니다. */
@@ -499,6 +506,7 @@ export async function saveTaskExternalCheckpoint(id: string, checkpoint: Record<
 }
 
 export function enqueueTask(next: NewTask): string | null {
+  assertMaintenanceWritable();
   load();
   if (next.dedupe) {
     const already = tasks.find(
@@ -524,6 +532,7 @@ export function enqueueTask(next: NewTask): string | null {
 
 /** 여럿을 한 번에 — 하나씩 넣으면 넣을 때마다 줄이 움직여 순서가 흔들립니다. */
 export function enqueueTasks(list: NewTask[]): number {
+  assertMaintenanceWritable();
   load();
   const seen = new Set(tasks.filter((task) => task.status === "waiting" || task.status === "running")
     .map((task) => (task.payload as { dedupe?: string })?.dedupe).filter(Boolean));
@@ -840,7 +849,7 @@ function pump() {
   load();
   const now = Date.now();
   let soonest = Infinity;
-  (["llm", "media"] as TaskLane[]).forEach((lane) => {
+  (["llm", "media", "download", "cpu"] as TaskLane[]).forEach((lane) => {
     for (;;) {
       const used = running.get(lane) ?? 0;
       if (used >= laneLimit(lane)) return;

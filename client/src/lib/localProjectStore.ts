@@ -229,6 +229,11 @@ function restoreBefore(id: string, previous: LocalProject | undefined) {
  * 쓰는 순간의 것입니다(`persistToFile` 의 까닭).
  */
 let persistQueue: Promise<void> = Promise.resolve();
+const maintenanceFailures = new Map<string, PersistOutcome>();
+export async function flushProjectPersistence() {
+  await persistQueue;
+  if (maintenanceFailures.size) throw new Error("프로젝트 저장 실패를 해결한 뒤 종료해 주세요.");
+}
 
 /**
  * 디스크에 다른 창의 판이 있어 못 썼을 때 — 그것을 이 창의 것으로 삼습니다.
@@ -337,7 +342,10 @@ function persistToFile(
   };
   // 내 차례의 결말은 나에게, 줄 자체는 결말과 상관없이 다음으로.
   const turn = persistQueue.then(run);
-  persistQueue = turn.then(() => undefined);
+  persistQueue = turn.then(outcome => {
+    if (outcome === "written" || outcome === "same") maintenanceFailures.delete(project.id);
+    else maintenanceFailures.set(project.id, outcome);
+  });
   return turn;
 }
 

@@ -170,6 +170,7 @@ function tauriExtraArgs() {
     // The private installer must never query the public GitHub feed. Keep this
     // overlay even for unsigned local builds so the compiled app stays isolated.
     const overlay = {
+      ...(action === "build" ? { build: { beforeBuildCommand: "node node_modules/vite/bin/vite.js build --configLoader runner" } } : {}),
       plugins: { updater: { endpoints: [
         "https://자체 호스팅 Gitea/api/v4/projects/사용자%2Faistorage/repository/files/aimoviestorage-private-latest.json/raw?ref=main",
       ] } },
@@ -416,9 +417,13 @@ console.log(`  링커 확인: ${found}`);
 stripEditionKeys(env);
 Object.assign(env, editionEnv, { CARGO_TARGET_DIR: layout.targetDir });
 
-const tauri = spawnSync("pnpm", ["exec", "tauri", action, ...extra.args], {
+// Use the already installed CLI. A global pnpm version can otherwise attempt to
+// replace node_modules while building (and fail without an interactive terminal).
+const tauriCli = path.join(repoRoot, "node_modules", "@tauri-apps", "cli", "tauri.js");
+if (!existsSync(tauriCli)) fail(["Tauri CLI가 없습니다. 프로젝트 의존성을 먼저 설치하세요."]);
+const tauri = spawnSync(process.execPath, [tauriCli, action, ...extra.args.map(arg => arg.replace(/^"(.*)"$/, "$1"))], {
   stdio: "inherit",
-  shell: true,
+  shell: false,
   env,
 });
 if (tauri.status === 0 && action === "build") {

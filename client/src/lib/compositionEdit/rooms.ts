@@ -8,6 +8,8 @@
 
 import { CAMERA_FOV_MAX, CAMERA_FOV_MIN, compositionRoomId, cropBottomOf, HORIZON_DEFAULT_COLOR, horizonColorOf, normalizeCompositionRoom, ROOM_FIT_MARGIN, ROOM_SIZE_MAX, ROOM_SIZE_MIN } from "@/lib/composition";
 import { CompositionCubeFace, CompositionRoom, CompositionState, Vector3Value } from "@/lib/composition";
+import { normalizeFloorplanWall } from "@/lib/floorplan";
+import type { FloorplanWall } from "@/lib/composition";
 import { foregroundPivotOf } from "./pivot";
 import { snapRoomMountsIn } from "./props";
 import { patchCameraIn } from "./timeline";
@@ -77,6 +79,23 @@ export function patchRoomIn(
     ...current,
     rooms: list.map((room) => (room.id === target ? patch(room) : room)),
   };
+}
+
+export function upsertFloorplanWallIn(current: CompositionState, roomId: string, wall: FloorplanWall): CompositionState {
+  return patchRoomIn(current, roomId, (room) => {
+    if (room.outdoor || room.horizon) return room;
+    const normalized = normalizeFloorplanWall(wall, room);
+    if (!normalized) return room;
+    const prior = room.floorplan?.walls ?? [];
+    if (!prior.some((item) => item.id === wall.id) && prior.length >= 300) return room;
+    return { ...room, floorplan: { walls: [...prior.filter((item) => item.id !== wall.id), normalized] } };
+  });
+}
+
+export function removeFloorplanWallIn(current: CompositionState, roomId: string, wallId: string): CompositionState {
+  return patchRoomIn(current, roomId, (room) => ({
+    ...room, floorplan: { walls: (room.floorplan?.walls ?? []).filter((wall) => wall.id !== wallId) },
+  }));
 }
 
 /** 활성 방의 세 변(m). */

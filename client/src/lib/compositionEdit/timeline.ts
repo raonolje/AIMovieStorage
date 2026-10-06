@@ -1051,6 +1051,17 @@ export function patchMusicIn(
   return music ? setMusicIn(current, { ...music, ...patch }) : current;
 }
 
+/** 음원 레이어와 구간을 함께 옮기되, 원본 음원의 재생 시작(offset)은 그대로 둡니다. */
+export function moveMusicStartIn(current: CompositionState, requested: number): CompositionState {
+  const music = musicOf(current);
+  if (!music || !Number.isFinite(requested)) return current;
+  const startTime = Math.round(Math.min(timelineOf(current).duration, Math.max(0, requested)) * 20) / 20;
+  const delta = startTime - (music.startTime ?? 0);
+  if (Math.abs(delta) < 0.001) return current;
+  return setMusicIn(current, { ...music, startTime,
+    sections: music.sections.map(section => ({ ...section, start: section.start + delta, end: section.end + delta })) });
+}
+
 /**
  * 빠르기(BPM)와 마디로 구간을 한 번에 나눕니다. 한 마디는 4박(4/4 박자)입니다.
  *
@@ -1067,12 +1078,13 @@ export function splitMusicByBarsIn(
   const step = (60 / bpm) * 4 * bars;
   const span = timelineOf(current).duration;
   const offset = music.offset ?? 0;
+  const startTime = music.startTime ?? 0;
   // 노래를 민 경우 첫 마디가 타임라인 0초보다 앞에서 시작합니다 — 그 나머지만큼 당겨 첫 경계를 잡습니다.
-  const first = offset > 0 ? ((step - (offset % step)) % step) : -offset % step;
+  const first = startTime + (offset > 0 ? ((step - (offset % step)) % step) : -offset % step);
   const sections: CompositionMusic["sections"] = [];
   let index = 1;
-  for (let start = first > 0.05 ? 0 : first; start < span - 0.05; start = sections[sections.length - 1].end) {
-    const end = Math.min(span, (sections.length === 0 && first > 0.05 ? first : start) + step);
+  for (let start = startTime; start < Math.min(span, startTime + music.seconds - offset) - 0.05; start = sections[sections.length - 1].end) {
+    const end = Math.min(span, startTime + music.seconds - offset, sections.length === 0 && first > startTime + 0.05 ? first : start + step);
     sections.push({
       id: musicSectionId(),
       label: `${index}`,
@@ -1083,6 +1095,26 @@ export function splitMusicByBarsIn(
     if (end >= span - 0.001) break;
   }
   return patchMusicIn(current, { bpm, barsPerSection: bars, sections });
+}
+
+/** 실측 박자에서 마디를 나눕니다. 분석된 첫 박이 1박인지 사용자가 확인해야 합니다. */
+export function splitMusicByDetectedBarsIn(current: CompositionState, bars: number): CompositionState {
+  const music = musicOf(current);
+  if (!music || !music.beatTimes?.length || !Number.isInteger(bars) || bars <= 0) return current;
+  const duration = timelineOf(current).duration;
+  const offset = music.offset ?? 0;
+  const startTime = music.startTime ?? 0;
+  const step = bars * 4;
+  const firstBeat = Math.max(0, Math.min(3, Math.floor(music.downbeatIndex ?? 0)));
+  const boundaries = music.beatTimes
+    .filter((beat, index) => index >= firstBeat && (index - firstBeat) % step === 0 && beat - offset + startTime > startTime + 0.05 && beat - offset + startTime < duration - 0.05)
+    .map(beat => Math.round((beat - offset + startTime) * 1000) / 1000);
+  const end = Math.min(duration, startTime + music.seconds - offset);
+  const unique = [...new Set([startTime, ...boundaries.filter(value => value < end), end])].sort((a, b) => a - b);
+  const sections = unique.slice(0, -1).map((start, index) => ({
+    id: musicSectionId(), label: String(index + 1), start, end: unique[index + 1],
+  }));
+  return patchMusicIn(current, { barsPerSection: bars, sections });
 }
 
 /** 지금 플레이헤드 자리에서 구간을 둘로. 구간이 없으면 «처음~여기 / 여기~끝». */

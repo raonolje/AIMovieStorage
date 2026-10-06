@@ -40,6 +40,39 @@ function gate() { let resolve!: () => void; const promise = new Promise<void>((d
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("프로젝트 대화 조종", () => {
+  it("가이드 영상 두 키만 해제하며 다른 필드와 저장된 영상 목록은 보존한다", async () => {
+    const api = await import("./projectControl");
+    current().scenes = [{ ...newScene(), id: "scene", cuts: [{ ...newCut(1), id: "cut", refVideoPath: "failed.mp4", refVideoSeconds: 6,
+      refVideoAudioPath: "preserved.wav", plannedSeconds: 6, videoPromptEn: "Keep this prompt.",
+      videos: [{ id: "video", name: "saved", filePath: "saved.mp4" }] }, { ...newCut(2), id: "other", refVideoPath: "other.mp4" }] }];
+    const first = await api.getProjectSnapshot("p");
+    const expected = JSON.parse(JSON.stringify(current())) as ProjectDraft;
+    delete expected.scenes[0].cuts[0].refVideoPath; delete expected.scenes[0].cuts[0].refVideoSeconds;
+    const saved = await api.clearCutGuideVideo({ projectId: "p", expectedRevision: first.revision, sceneId: "scene", cutId: "cut" });
+    expect(current()).toEqual(expected);
+    expect(Object.hasOwn(current().scenes[0].cuts[0], "refVideoPath")).toBe(false);
+    expect(saved.persisted).toBe(true);
+    await expect(api.clearCutGuideVideo({ projectId: "p", expectedRevision: first.revision, sceneId: "scene", cutId: "cut" }))
+      .rejects.toMatchObject({ code: "revision_conflict" });
+    expect((await api.clearCutGuideVideo({ projectId: "p", expectedRevision: saved.revision, sceneId: "scene", cutId: "cut" })).persisted).toBe(true);
+  });
+  it("가이드 해제 직전 수동 편집은 덮어쓰지 않고 저장 실패도 알린다", async () => {
+    const api = await import("./projectControl");
+    current().scenes = [{ ...newScene(), id: "scene", cuts: [{ ...newCut(1), id: "cut", refVideoPath: "failed.mp4", refVideoSeconds: 6 }] }];
+    const first = await api.getProjectSnapshot("p");
+    state.beforeWrite = () => {
+      const changed = JSON.parse(JSON.stringify(current())) as ProjectDraft;
+      changed.scenes[0].cuts[0].refVideoPath = "manual.mp4";
+      state.projects.get("p")!.draft = changed;
+    };
+    await expect(api.clearCutGuideVideo({ projectId: "p", expectedRevision: first.revision, sceneId: "scene", cutId: "cut" }))
+      .rejects.toMatchObject({ code: "revision_conflict" });
+    expect(current().scenes[0].cuts[0].refVideoPath).toBe("manual.mp4");
+    state.beforeWrite = null; state.fail = true;
+    const latest = await api.getProjectSnapshot("p");
+    await expect(api.clearCutGuideVideo({ projectId: "p", expectedRevision: latest.revision, sceneId: "scene", cutId: "cut" }))
+      .rejects.toMatchObject({ code: "save_failed" });
+  });
   it("조종기에서 영상 프롬프트를 직접 고쳐도 앞 컷 대표영상과 끝 프레임의 @태그를 저장한다", async () => {
     const api = await import("./projectControl");
     current().scenes = [{ ...newScene(), id: "scene", cuts: [

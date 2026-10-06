@@ -160,7 +160,7 @@ export default function CharacterVoicePanel({ character, draft, projectName, onP
       <button type="button" title={t("음성 대표 선택")} onClick={() => (onVoicePatch || onPatch)((current) => ({ voiceReferences: current.voiceReferences?.map((entry) => ({ ...entry, isPrimary: entry.id === item.id })) }))}>
         {item.isPrimary ? "★" : "☆"}
       </button>
-      <span className="min-w-0 flex-1 truncate" title={item.filePath}>{fileStem(item.filePath)} · {item.source === "generated" ? `${t("생성")} · ${item.model}` : `${item.startSeconds}–${item.endSeconds}s`}</span>
+      <span className="min-w-0 flex-1 truncate" title={item.filePath}>{fileStem(item.filePath)} · {item.source === "generated" ? `${t("생성")} · ${item.model}` : item.source === "imported" ? t("입력 음원") : `${item.startSeconds}–${item.endSeconds}s`}</span>
       <audio controls preload="none" src={assetSrc(item.filePath) || undefined} className="h-8 max-w-[180px]" />
       <button type="button" onClick={() => void remove(item.id)} className="text-red-300">{t("삭제")}</button>
     </div>)}

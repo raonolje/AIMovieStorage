@@ -4,8 +4,8 @@ import type { CompositionMusic } from "./composition";
 const SAMPLE_RATE = 48_000;
 
 /** 영상 조각의 시작 프레임을 노래 시각으로 옮깁니다. 프레임 경계만 써서 누적 오차를 피합니다. */
-export function audioReferenceWindow(firstFrame: number, frames: number, fps: number, offset = 0) {
-  return { start: firstFrame / fps + offset, duration: frames / fps };
+export function audioReferenceWindow(firstFrame: number, frames: number, fps: number, offset = 0, startTime = 0) {
+  return { start: firstFrame / fps + offset - startTime, duration: frames / fps };
 }
 
 /** 타임라인에 실제로 들리는 구간을 같은 길이의 PCM으로 렌더합니다. 빈 구간은 무음입니다. */
@@ -20,7 +20,7 @@ export async function renderReferenceAudio(music: CompositionMusic, firstFrame: 
   try { decoded = await context.decodeAudioData(await response.arrayBuffer()); }
   finally { await context.close(); }
   if (signal?.aborted) throw new DOMException("취소했습니다.", "AbortError");
-  const { start, duration } = audioReferenceWindow(firstFrame, frames, fps, music.offset ?? 0);
+  const { start, duration } = audioReferenceWindow(firstFrame, frames, fps, music.offset ?? 0, music.startTime ?? 0);
   const offline = new OfflineAudioContext(Math.min(2, Math.max(1, decoded.numberOfChannels)), Math.max(1, Math.round(duration * SAMPLE_RATE)), SAMPLE_RATE);
   const source = offline.createBufferSource();
   source.buffer = decoded;

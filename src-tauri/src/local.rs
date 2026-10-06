@@ -97,6 +97,10 @@ pub async fn local_run(
     }
     let engine = known_engine(&engine)?.to_string();
     let opts = opts.unwrap_or_else(|| json!({}));
+    if opts.get("ltx_a2v").is_some() {
+        if engine != "ltx25" { return Err("model_unsupported: native A2V는 LTX 2.5 전용입니다".into()); }
+        return tauri::async_runtime::spawn_blocking(move || crate::native_a2v::generate(app, output_path, opts)).await.map_err(|e| err("격리 A2V를 기다리지 못했습니다", e))?;
+    }
     let timeout = timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS);
     tauri::async_runtime::spawn_blocking(move || {
         generate_blocking(app, engine, output_path, opts, timeout)
@@ -166,10 +170,14 @@ pub fn choose_audio_files(app: AppHandle) -> Res<Vec<String>> {
 /// 결과는 프로젝트 자산이 아니라 **키로 옮기기 전의 중간물**이라 프로젝트 폴더에 두지 않습니다(두면 폴더를 다시 읽을 때
 /// 목록에 섞입니다). 읽고 나면 지웁니다(`read_motion_capture`).
 #[tauri::command]
-pub fn motion_capture_output(app: AppHandle, name: String) -> Res<String> {
+pub fn motion_capture_output(app: AppHandle, name: String, extension: Option<String>) -> Res<String> {
     let dir = mocap_results_dir(&app)?;
+    let ext = extension.as_deref().unwrap_or("json");
+    if !matches!(ext, "json" | "bvh") {
+        return Err("모션 결과는 json 또는 bvh 형식이어야 합니다.".into());
+    }
     Ok(dir
-        .join(format!("{}.json", crate::safe_name(&name)))
+        .join(format!("{}.{}", crate::safe_name(&name), ext))
         .to_string_lossy()
         .to_string())
 }

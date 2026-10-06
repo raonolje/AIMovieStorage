@@ -42,6 +42,7 @@ function LocalEngineGenerateButton({
   aspect = "16:9",
   seconds,
   firstFrame,
+  endFrameChoices,
   references,
   motionMask,
   projectName,
@@ -59,6 +60,7 @@ function LocalEngineGenerateButton({
   seconds?: number;
   /** 영상의 첫 프레임으로 쓸 그림 경로. 주면 I2V(H3 는 fl2va)로 돕니다. */
   firstFrame?: string;
+  endFrameChoices?: { id: string; name: string; path: string }[];
   /**
    * 레퍼런스 — 구도잡기 영상·인물 시트·배경을 **순서대로**(H3 의 `ref2va`).
    *
@@ -106,6 +108,8 @@ function LocalEngineGenerateButton({
    */
   const [pose, setPose] = useState<PoseFrameSet | null>(null);
   const [structure, setStructure] = useState<LocalStructureControl | null>(null);
+  const [endFrameId, setEndFrameId] = useState("");
+  const endFrame = endFrameChoices?.find(item => item.id === endFrameId)?.path;
   const [ltxQuality, setLtxQuality] = useState<"single" | "two-stage">("single");
   const videoReferences = (references ?? []).filter(item => item.kind === "video").map(item => item.path);
   const referenceKey = JSON.stringify(videoReferences);
@@ -133,7 +137,11 @@ function LocalEngineGenerateButton({
     }, engine.id);
     try {
       if (structure && !videoReferences.includes(structure.path)) throw new Error(t("선택한 윤곽 기준 영상이 현재 레퍼런스 목록에 없습니다. 다시 선택하세요."));
+      if (endFrameId && !endFrame) throw new Error(t("선택한 끝 그림이 없어졌습니다. 다시 선택하세요."));
       const checked = validateLocalControlOptions(engine.id, {
+        image: firstFrame,
+        end_image: endFrame,
+        motion_mask: motionMask,
         control: kind === "video" && pose ? { kind: "pose", frames: pose.frames, fps: pose.fps } : undefined,
         references: engine.id === "minimaxh3" ? references : undefined,
         reference_video_range: needsReferenceRange ? referenceRange : undefined,
@@ -229,6 +237,7 @@ function LocalEngineGenerateButton({
                 seconds: structure?.durationSeconds ?? seconds ?? 5,
                 fps: 16,
                 image: firstFrame,
+                end_image: endFrame,
                 references: engine.id === "minimaxh3" ? references : undefined,
                 reference_video_range: needsReferenceRange && referenceRange ? referenceRange : undefined,
                 // 그림 한 장에는 얼릴 구역이 없습니다 — 마스크는 영상에만 실립니다.
@@ -350,6 +359,15 @@ function LocalEngineGenerateButton({
       </button>
       </div>
 
+      {kind === "video" && endFrameChoices?.length && (["ltx25", "wanvideo"].includes(engine.id) || endFrameId) ? <label className="flex items-center gap-1 text-[10px]">
+        <span>{t("끝 그림 (LTX/Wan)")}</span>
+        <select value={endFrameId} onChange={event => setEndFrameId(event.target.value)} disabled={busy}
+          aria-label={t("끝 그림 (LTX/Wan)")} title={t("시작·끝 그림을 모델 조건으로 사용합니다. LTX는 마지막 잠재 구간에 조건을 넣어 최종 프레임이 끝 그림과 어긋날 수 있습니다. 중간 접촉과 동작도 별도 검수가 필요합니다.")}
+          className="rounded-md border border-white/10 bg-black/20 px-1.5 py-1">
+          <option value="">{t("사용 안 함")}</option>
+          {endFrameChoices.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+      </label> : null}
       {needsReferenceRange && <H3ReferenceRangePicker paths={videoReferences} value={referenceRange}
         onChange={range => setReferenceSelection({ key: referenceKey, range })} disabled={busy} />}
       {kind === "video" && (engine.id === "ltx25" || structure) && <StructureControlPicker

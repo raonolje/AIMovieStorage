@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { importMusicToBgm, BGM_ROOT } from "./bgmLibrary";
 import { measureAudioSeconds } from "./audioDuration";
-import { addGlbTrackIn, createGlbTrack, setMusicIn } from "./compositionEdit";
+import { addGlbTrackIn, createGlbTrack, setMusicIn, setTimelineIn } from "./compositionEdit";
 import { applyCompositionMutation, compositionSessionRequestSchema, CompositionControlError } from "./compositionControl";
 import { assetSrc, deleteProjectMediaFile, importProjectMediaAsset } from "./mediaLibrary";
 
 const input = compositionSessionRequestSchema.extend({ sourcePath: z.string().min(1).max(4000) }).strict();
-export const compositionMusicImportSchema = input;
+export const compositionMusicImportSchema = input.extend({ fitTimeline: z.boolean().optional() }).strict();
 export const compositionGlbImportSchema = input;
 
 // 화면 확인만 실패한 경우 편집은 이미 들어가 있습니다. 여기서 복사본을 지우면 트랙이 깨집니다.
@@ -28,8 +28,9 @@ export async function importCompositionMusic(raw: unknown) {
       if (!copied) throw new CompositionControlError("import_unavailable", "앱의 BGM 저장 폴더를 확인하세요.");
       copiedPath = copied.path;
       const seconds = await measureAudioSeconds(copied.path);
-      return { state: setMusicIn(state, { path: copied.path, name: copied.name, seconds, sections: [] }),
-        result: { path: copied.path, name: copied.name, seconds } };
+      const withMusic = setMusicIn(state, { path: copied.path, name: copied.name, seconds, startTime: 0, sections: [] });
+      return { state: request.fitTimeline ? setTimelineIn(withMusic, { duration: Math.round(seconds * 10) / 10 }) : withMusic,
+        result: { path: copied.path, name: copied.name, seconds, fitTimeline: request.fitTimeline === true } };
     });
   } catch (error) {
     if (copiedPath && !appliedBeforeError(error)) await deleteProjectMediaFile(BGM_ROOT, copiedPath).catch(() => undefined);

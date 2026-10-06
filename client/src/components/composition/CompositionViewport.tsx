@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { assetSrc } from "@/lib/mediaLibrary";
 import * as THREE from "three";
+import { objectSurfaceParameters } from "@/lib/compositionSurfaceMaterial";
+import { measureRenderedContact } from "@/lib/compositionContact";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -74,6 +76,7 @@ import {
   type RoomVideoCache,
   type RoomVideoTexture,
   buildRoomShell,
+  buildFloorplanWalls,
   buildDomeGuide,
   buildPanoramaDome,
   setBackgroundOcclusion,
@@ -137,6 +140,7 @@ import {
  * 미리보기 루프는 「지금 시각」을 계속 따라가지만, 영상은 「지정한 시각」을 한 장씩 그려야 합니다.
  */
 export interface VideoFrameRenderer {
+  measureContact?: (input: import("@/lib/compositionContact").CompositionContactInput) => ReturnType<typeof import("@/lib/compositionContact").measureRenderedContact>;
   canvas: HTMLCanvasElement;
   /** 출력 해상도로 바꾸고 헬퍼 표시를 숨깁니다. */
   begin: (width: number, height: number) => void;
@@ -337,6 +341,7 @@ interface ViewportScene {
       outer: THREE.Mesh | null;
       /** 파노라마 돔(`buildPanoramaDome`). 걸린 방만 — 틀(rig) 밖에 따로 섭니다. */
       dome?: THREE.Group | null;
+      floorplan?: THREE.Group | null;
       width: number;
       depth: number;
       height: number;
@@ -533,6 +538,10 @@ function placeBackgroundRig(
     );
     entry.rig.rotation.set(0, (entry.rotationY * Math.PI) / 180, 0);
     entry.rig.scale.set(width / unit, height / unit, depth / unit);
+    if (entry.floorplan) {
+      entry.floorplan.position.set(entry.position.x, entry.position.y, entry.position.z);
+      entry.floorplan.rotation.set(0, (entry.rotationY * Math.PI) / 180, 0);
+    }
     // 돔은 틀 밖에 따로 섭니다(반지름·눈높이가 미터 그대로라 틀의 배율을 타면 찌그러집니다). 자리·회전만 따라갑니다.
     if (entry.dome) {
       entry.dome.position.set(entry.position.x, entry.position.y, entry.position.z);
@@ -749,6 +758,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
         room.position.y,
         room.position.z,
         room.rotationY,
+        JSON.stringify(room.floorplan?.walls ?? []),
         room.sideCropBottom ?? 0,
         // 돔↔상자를 바꾸면 세우는 것 자체가 달라집니다 — 키에 없으면 화면이 안 바뀝니다.
         room.outdoor ? (room.outdoorShape === "box" ? "box" : "dome") : "in",
@@ -1964,6 +1974,19 @@ export default function CompositionViewport(props: CompositionViewportProps) {
     // 미리보기 루프와 달리 「시각을 지정해서 한 장 그리기」가 필요합니다.
     // 헬퍼(격자·이름표·경로·앵커·기즈모)는 영상에 나오면 안 되므로 잠시 숨깁니다.
     handlersRef.current.onVideoRenderReady?.({
+      measureContact: (input) => {
+        const restoreTime = playheadRef.current;
+        const rig = ctx.characterRigs.get(input.characterId);
+        if (!rig) throw new Error("assets_not_ready: 인물 렌더 모델을 읽는 중입니다.");
+        try {
+          applyMotionThenCameraAt(input.timeSeconds, applyMotionTime, showMovesAt);
+          applyGlbTime(input.timeSeconds);
+          return measureRenderedContact(ctx.foreground, rig, ctx.objectRoots, input);
+        } finally {
+          applyMotionThenCameraAt(restoreTime, applyMotionTime, showMovesAt);
+          applyGlbTime(restoreTime);
+        }
+      },
       canvas: renderer.domElement,
       begin: (width, height) => {
         // 방금 끝낸 드래그의 화질 복원 타이머도 캔버스 크기를 바꾸므로 내보내기 전에 거둡니다.
@@ -2422,12 +2445,15 @@ export default function CompositionViewport(props: CompositionViewportProps) {
           : null;
         if (outer) rig.add(outer);
         ctx.background.root?.add(rig);
+        const floorplan = room.floorplan?.walls.length ? buildFloorplanWalls(room.floorplan.walls) : null;
+        if (floorplan) ctx.background.root?.add(floorplan);
         built.push({
           id: room.id,
           rig,
           inner,
           outer,
           dome,
+          floorplan,
           width: room.width,
           depth: room.depth,
           height: room.height,
@@ -2464,6 +2490,17 @@ export default function CompositionViewport(props: CompositionViewportProps) {
       if (ctx.background.rooms === built) ctx.background.rooms = [];
       built.forEach((entry) => {
         entry.rig.removeFromParent();
+        if (entry.floorplan) {
+          entry.floorplan.removeFromParent();
+          const materials = new Set<THREE.Material>();
+          entry.floorplan.traverse((node) => {
+            const mesh = node as THREE.Mesh;
+            if (!mesh.isMesh) return;
+            mesh.geometry.dispose();
+            for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) materials.add(material);
+          });
+          materials.forEach((material) => material.dispose());
+        }
         if (entry.dome) {
           entry.dome.removeFromParent();
           entry.dome.traverse((node: THREE.Object3D) => {
@@ -2920,8 +2957,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
           const geometry = new THREE.PlaneGeometry(1, 1);
           const material = new THREE.MeshStandardMaterial({
             color: item.image ? "#ffffff" : item.color || "#6b7183",
-            roughness: 0.95,
-            metalness: 0,
+            ...objectSurfaceParameters(item, { roughness: 0.95, metalness: 0 }),
             // 뒤에서 봐도 보이게 — 벽을 돌려 세우다 «사라졌다» 고 놀라지 않게 합니다.
             side: THREE.DoubleSide,
           });
@@ -2965,8 +3001,7 @@ export default function CompositionViewport(props: CompositionViewportProps) {
             geometry,
             new THREE.MeshStandardMaterial({
               color: item.color || "#8a8fa3",
-              roughness: 0.7,
-              metalness: 0.05,
+              ...objectSurfaceParameters(item, { roughness: 0.7, metalness: 0.05 }),
             }),
           );
           mesh.castShadow = true;

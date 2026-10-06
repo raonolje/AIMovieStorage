@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { bgmSamplingFields } from "./bgmSampling";
 import { createBgmProject, createBgmTrack, loadBgmProjects, patchBgmTrack, saveBgmProjectsAndConfirm, updateBgmProjectsAndConfirm, type BgmProject, type BgmTrack } from "./bgmProjects";
 import { appendPromptHistory } from "./promptHistory";
 import { bgmRequestData } from "./bgmPromptRequest";
@@ -33,6 +34,7 @@ export const bgmUpdateSchema = bgmReadSchema.extend({ expectedRevision: id, comm
   z.object({ type: z.literal("track.update"), id, fields: trackFields }).strict(),
 ])).min(1).max(100) });
 export const bgmGenerateSchema = bgmReadSchema.extend({
+  ...bgmSamplingFields,
   trackId: id, operationId: id, engine: z.enum(["minimaxmusic", "acestep"]),
   prompt: z.string().trim().min(1).max(32000), lyrics: z.string().max(16000), seconds: z.number().finite().min(1).max(300),
 });

@@ -41,6 +41,29 @@ def validate(opts):
     return text.strip(), variant, speaker, language, instruct.strip()
 
 
+def _model_source(root, variant):
+    # Qwen 프로세서가 오프라인에서도 저장소 정보를 조회하므로 완결된 캐시는 로컬 경로로 줍니다.
+    # 일부 파일만 받은 캐시까지 선택하면 첫 다운로드 경로가 막히므로 실행 파일을 모두 확인합니다.
+    from pathlib import Path
+    source = MODELS[variant]
+    repo_cache = Path(root) / "models" / "hub" / ("models--" + source.replace("/", "--"))
+    try:
+        revision = (repo_cache / "refs" / "main").read_text(encoding="utf-8").strip()
+        if len(revision) != 40 or any(c not in "0123456789abcdef" for c in revision):
+            return source
+        snapshot = repo_cache / "snapshots" / revision
+        required = ("config.json", "generation_config.json", "model.safetensors",
+                    "tokenizer_config.json", "merges.txt", "vocab.json",
+                    "preprocessor_config.json", "speech_tokenizer/config.json",
+                    "speech_tokenizer/configuration.json", "speech_tokenizer/model.safetensors",
+                    "speech_tokenizer/preprocessor_config.json")
+        if all((snapshot / name).is_file() and (snapshot / name).stat().st_size > 0 for name in required):
+            return str(snapshot.resolve())
+    except OSError:
+        pass
+    return source
+
+
 def load(root, opts):
     _, variant, _, _, _ = validate(opts)
     plan = common.plan_precision(BF16_GB, opts, supported=SUPPORTED)
@@ -54,7 +77,7 @@ def load(root, opts):
     # FlashAttention 2 is optional and not uniformly available on Windows.
     kwargs = {"device_map": "cuda:0" if torch.cuda.is_available() else "cpu",
               "dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32}
-    _state["model"] = Qwen3TTSModel.from_pretrained(MODELS[variant], **kwargs)
+    _state["model"] = Qwen3TTSModel.from_pretrained(_model_source(root, variant), **kwargs)
     _state["variant"] = variant
 
 

@@ -19,6 +19,7 @@ vi.mock("@/lib/mediaLibrary", async (importOriginal) => ({
   assetSrc: (path: string) => `asset:${path}`, loadImageForCanvas: vi.fn(), safeFileName: (value: string) => value,
 }));
 vi.mock("@/lib/llmActivity", () => ({ abandonLlmResumes: vi.fn() }));
+vi.mock("@/lib/nativeA2V", async original => ({ ...await original<typeof import("@/lib/nativeA2V")>(), nativeA2VStatus: async () => ({ready:true,blockers:[],experimental:true,gpuQaCompleted:false,lipSyncVerified:false}) }));
 const tick = () => new Promise<void>((done) => setTimeout(done, 0));
 function gate() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
 function memory() { const data = new Map<string, string>(); return { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => data.set(key, value) }; }
@@ -360,4 +361,48 @@ describe("외부 생성의 저장·취소·재전송", () => {
     expect(failed.status).toBe("failed");
     expect(failed.result?.paths).toEqual(["p/완성.png"]);
   });
+});
+
+describe("끝 이미지 자산 연결", () => {
+  it("같은 프로젝트의 별도 두 이미지를 스키마부터 실행 옵션까지 보존한다", async () => {
+    const { q, media } = await prepare();
+    const cut = draft().scenes[0].cuts[0];
+    cut.images.push({ ...cut.images[0], id: "end", name: "끝", filePath: "p/end.png" });
+    const accepted = await media.enqueueControlGeneration({ ...request, engine: "ltx25",
+      imageAssetId: "img", endImageAssetId: "end" });
+    expect((await finish(q, accepted.jobId)).status).toBe("done");
+    expect(state.run.mock.calls[0][0].opts).toMatchObject({ image: "p/원본.png", end_image: "p/end.png" });
+  });
+  it("없는 자산·다른 모델·시작 그림 누락을 큐에 넣기 전에 거절한다", async () => {
+    const { media } = await prepare();
+    await expect(media.enqueueControlGeneration({ ...request, engine: "ltx25", imageAssetId: "img", endImageAssetId: "missing" }))
+      .rejects.toThrow();
+    await expect(media.enqueueControlGeneration({ ...request, engine: "minimaxh3", imageAssetId: "img", endImageAssetId: "img" }))
+      .rejects.toThrow("model_unsupported");
+    await expect(media.enqueueControlGeneration({ ...request, engine: "ltx25", endImageAssetId: "img" })).rejects.toThrow();
+    expect(state.run).not.toHaveBeenCalled();
+  });
+});
+
+it("native A2V 원음 경로와 offset/길이 및 시작끝 그림을 실제 작업 입력에 전달한다", async () => {
+  const { q, media } = await prepare();
+  draft().sharedAssets = [{id:"audio",name:"원음",filePath:"p/원음.wav"},{id:"end",name:"끝",filePath:"p/끝.png"}] as ProjectDraft["sharedAssets"];
+  const accepted=await media.enqueueControlGeneration({...request,engine:"ltx25",operationId:"native-qa",audioAssetId:"audio",audioStartSeconds:.25,audioDurationSeconds:1,imageAssetId:"img",endImageAssetId:"end",options:{prompt:"sphere",ltx_a2v:"experimental",width:384,height:256,fps:24,seed:0}});
+  expect((await finish(q,accepted.jobId)).status).toBe("done");
+  expect(state.run.mock.calls[0][0]).toMatchObject({engine:"ltx25",opts:{ltx_a2v:"experimental",audio_path:"p/원음.wav",audio_start_seconds:.25,audio_duration_seconds:1,image:"p/원본.png",end_image:"p/끝.png"}});
+});
+
+it("기존 타임라인 음원을 중복 서비스 없이 프로젝트별 에셋 ID로 공개한다",async()=>{
+  const {media}=await prepare();
+  Object.assign(draft().scenes[0].cuts[0],{composition:{music:{path:"p/original.wav",name:"원음"}}});
+  expect(media.listControlAssets("p")).toContainEqual(expect.objectContaining({id:"cut/k/composition/music:audio",path:"p/original.wav",kind:"audio"}));
+});
+
+
+it("로컬 전용 옵션은 true만 허용하고 기본 요청을 보존한다", async () => {
+  const { generateMediaSchema } = await import("@/lib/controlMedia");
+  const options = generateMediaSchema.shape.options;
+  expect(options.safeParse({prompt: "qa", local_files_only: true}).success).toBe(true);
+  expect(options.safeParse({prompt: "qa"}).success).toBe(true);
+  expect(options.safeParse({prompt: "qa", local_files_only: false}).success).toBe(false);
 });

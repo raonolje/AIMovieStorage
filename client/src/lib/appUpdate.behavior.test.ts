@@ -51,24 +51,25 @@ describe("자동 업데이트 실행 경계", () => {
     expect(calls.relaunch).not.toHaveBeenCalled();
   });
 
-  it("공개 데스크톱은 기존 조회·설치·재시작 경로를 유지한다", async () => {
+  it("공개판도 조회는 유지하고 미검증 다중 인스턴스 설치는 거절한다", async () => {
     context.edition = "public";
     expect(updatesUnavailable()).toBe(false);
     expect(await checkForUpdate()).toEqual({ version: "0.3.0", current: "0.2.3", notes: "변경 사항" });
-    await installUpdate();
-    expect(calls.check).toHaveBeenCalledTimes(2);
-    expect(calls.install).toHaveBeenCalledTimes(1);
-    expect(calls.relaunch).toHaveBeenCalledTimes(1);
+    await expect(installUpdate()).rejects.toThrow("다중 인스턴스");
+    expect(calls.check).toHaveBeenCalledTimes(1);
+    expect(calls.install).not.toHaveBeenCalled();
+    expect(calls.relaunch).not.toHaveBeenCalled();
     expect(calls.check).toHaveBeenCalledWith({ headers: {} });
     expect(calls.invoke).not.toHaveBeenCalled();
   });
 
-  it("비공개판은 GitLab 토큰을 조회와 설치 다운로드 모두에 사용한다", async () => {
+  it("비공개판 조회 인증은 유지하고 미검증 설치는 다운로드 전에 거절한다", async () => {
     expect(updatesUnavailable()).toBe(false);
     await checkForUpdate();
-    await installUpdate();
+    await expect(installUpdate()).rejects.toThrow("다중 인스턴스");
     expect(calls.check).toHaveBeenCalledWith({ headers: { "PRIVATE-TOKEN": "read-token" } });
-    expect(calls.install).toHaveBeenCalledWith(expect.any(Function), { headers: { "PRIVATE-TOKEN": "read-token" } });
+    expect(calls.install).not.toHaveBeenCalled();
+    expect(calls.relaunch).not.toHaveBeenCalled();
   });
 
   it("비공개판에 토큰이 없으면 GitLab에 요청하지 않는다", async () => {

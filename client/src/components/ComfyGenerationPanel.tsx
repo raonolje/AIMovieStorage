@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { useT } from "@/lib/i18n";
 import { checkComfy, chooseComfyWorkflowFile } from "@/lib/upscale";
 import { getComfyGenerationSettings, inspectComfyGenerationWorkflow, saveComfyGenerationSettings, subscribeComfyGeneration,
-  type ComfyInputMapping, type ComfyKind, type ComfyWorkflowInfo } from "@/lib/comfyGeneration";
+  validateComfyWorkflowConfig, type ComfyInputMapping, type ComfyKind, type ComfyWorkflowInfo } from "@/lib/comfyGeneration";
 
 const fieldClass = "rounded-md border border-white/10 bg-black/20 px-2 py-1.5 text-xs min-w-0";
 
@@ -42,6 +42,8 @@ export default function ComfyGenerationPanel() {
   const save = () => {
     if (!info) { toast.error(t("워크플로를 먼저 검사하세요.")); return; }
     if (!config.mappings.some(mapping => mapping.source === "prompt")) { toast.error(t("ComfyUI 워크플로에 프롬프트 입력을 연결하세요.")); return; }
+    try { validateComfyWorkflowConfig(config, info); }
+    catch (error) { toast.error(String(error)); return; }
     saveComfyGenerationSettings(current => ({...current, baseUrl:draft.baseUrl, [kind]:config}));
     toast.success(t("ComfyUI 생성 설정을 저장했습니다."));
   };

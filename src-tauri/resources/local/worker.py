@@ -65,6 +65,8 @@ sys.stdout = _LineOut()
 
 import common  # noqa: E402  (stdout 바꿔치기 뒤에 불러야 합니다)
 from control_policy import validate_control_options
+from local_only_policy import generation_scope
+from contextlib import nullcontext
 
 
 def send(payload):
@@ -202,60 +204,66 @@ def main():
             return 0
 
         try:
-            if op == "ping":
-                send({"id": job_id, "event": "done"})
-            elif op == "load":
-                validate_control_options(args.engine, opts, check_files=True)
-                engine.load(root, opts)
-                send({"id": job_id, "event": "done"})
-            elif op == "unload":
-                engine.unload()
-                common.free_vram()
-                send({"id": job_id, "event": "done"})
-            elif op == "prefetch":
-                # 가중치를 미리. 없는 엔진은 첫 생성 때 받는 쪽이라 할 일이 없습니다 — 바로 done.
-                # `prefetched` 로 «정말 받았는지» 를 같이 알립니다 — Rust 가 done 만 보고 weights_ready 를 적으면
-                # 모듈에 prefetch 가 빠진 엔진이 «다 받았다» 로 남아 첫 생성이 다시 수십 GB 를 받습니다(2026-09-22 점검).
-                prefetched = hasattr(engine, "prefetch")
-                if prefetched:
-                    engine.prefetch(root, _reporter(job_id, stage="models"))
-                send({"id": job_id, "event": "done", "prefetched": prefetched})
-            elif op == "generate":
-                validate_control_options(args.engine, opts, check_files=True)
-                started = time.time()
-                report = _reporter(job_id)
-
-                output_path = request.get("output") or ""
-                folder = os.path.dirname(output_path)
-                if not folder or not os.path.isdir(folder):
-                    raise IOError("결과를 놓을 폴더가 없습니다: {}".format(folder))
-
-                report(1, "모델 준비 (가중치가 없으면 여기서 내려받습니다)")
-                try:
+            with generation_scope(request) if op in {"load", "generate"} else nullcontext():
+                if op == "ping":
+                    send({"id": job_id, "event": "done"})
+                elif op == "load":
+                    validate_control_options(args.engine, opts, check_files=True)
                     engine.load(root, opts)
-                    report(8, "생성 시작")
-                    extra = engine.generate(output_path, opts, report) or {}
-                finally:
-                    # 살아 있는 모델은 임의로 지우지 않습니다. 작업 사이의 임시 객체와 캐시를
-                    # 먼저 정리하고, Rust가 사용률/설정에 따라 이 자식 프로세스의 수명을 정합니다.
+                    send({"id": job_id, "event": "done"})
+                elif op == "unload":
+                    engine.unload()
                     common.free_vram()
-                if not os.path.isfile(output_path):
-                    raise IOError("엔진이 결과 파일을 만들지 않았습니다.")
+                    send({"id": job_id, "event": "done"})
+                elif op == "prefetch":
+                    # 가중치를 미리. 없는 엔진은 첫 생성 때 받는 쪽이라 할 일이 없습니다 — 바로 done.
+                    # `prefetched` 로 «정말 받았는지» 를 같이 알립니다 — Rust 가 done 만 보고 weights_ready 를 적으면
+                    # 모듈에 prefetch 가 빠진 엔진이 «다 받았다» 로 남아 첫 생성이 다시 수십 GB 를 받습니다(2026-09-22 점검).
+                    prefetched = hasattr(engine, "prefetch")
+                    if prefetched:
+                        engine.prefetch(root, _reporter(job_id, stage="models"))
+                    send({"id": job_id, "event": "done", "prefetched": prefetched})
+                elif op == "generate":
+                    validate_control_options(args.engine, opts, check_files=True)
+                    started = time.time()
+                    report = _reporter(job_id)
 
-                done = {
-                    "id": job_id,
-                    "event": "done",
-                    "output": output_path,
-                    "seconds": round(time.time() - started, 2),
-                }
-                done.update(extra)
-                done["memory"] = common.memory_usage()
-                send(done)
-            else:
-                raise ValueError("모르는 명령입니다: {}".format(op))
+                    output_path = request.get("output") or ""
+                    folder = os.path.dirname(output_path)
+                    if not folder or not os.path.isdir(folder):
+                        raise IOError("결과를 놓을 폴더가 없습니다: {}".format(folder))
+
+                    report(1, "로컬 모델 준비 (파일 누락 시 다운로드 없이 실패)")
+                    try:
+                        engine.load(root, opts)
+                        report(8, "생성 시작")
+                        extra = engine.generate(output_path, opts, report) or {}
+                    finally:
+                        # 살아 있는 모델은 임의로 지우지 않습니다. 작업 사이의 임시 객체와 캐시를
+                        # 먼저 정리하고, Rust가 사용률/설정에 따라 이 자식 프로세스의 수명을 정합니다.
+                        common.free_vram()
+                    if not os.path.isfile(output_path):
+                        raise IOError("엔진이 결과 파일을 만들지 않았습니다.")
+
+                    done = {
+                        "id": job_id,
+                        "event": "done",
+                        "output": output_path,
+                        "seconds": round(time.time() - started, 2),
+                    }
+                    done.update(extra)
+                    done["memory"] = common.memory_usage()
+                    done["network_policy"] = "local-only"
+                    send(done)
+                else:
+                    raise ValueError("모르는 명령입니다: {}".format(op))
         except Exception as error:
             common.log("작업 실패 ({}): {}\n{}".format(op, error, traceback.format_exc()))
-            send({"id": job_id, "event": "error", "message": str(error)})
+            failure = {"id": job_id, "event": "error", "message": str(error)}
+            if args.engine == "ltx25" and op == "generate":
+                failure["audio"] = {"expected": True, "output_verified": False,
+                    "error_code": str(error).split(":", 1)[0], "quality_approved": False}
+            send(failure)
 
     return 0
 

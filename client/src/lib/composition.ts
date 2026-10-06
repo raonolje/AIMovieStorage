@@ -1,4 +1,5 @@
 import { DEFAULT_SHADOWS, normalizeShadows, type CompositionShadows } from "@/lib/compositionShadows";
+import { normalizeFloorplanWall } from "./floorplan";
 import {
   cameraMoveId,
   cameraMovesEnd,
@@ -370,10 +371,17 @@ export interface CompositionSwapRef {
   name: string;
 }
 
+export interface CompositionSurfaceMaterial {
+  roughness: number;
+  metalness: number;
+}
+
 export interface ObjectComposition {
   id: string;
   label: string;
   kind: CompositionObjectKind;
+  /** 형상·카메라를 바꾸지 않는 소품 표면 재질. */
+  surfaceMaterial?: CompositionSurfaceMaterial;
   position: Vector3Value;
   rotation: Vector3Value;
   scale: Vector3Value;
@@ -543,6 +551,8 @@ export interface CompositionRoom {
   position: Vector3Value;
   /** y 축 회전(도). 복도가 꺾이는 모양을 만들 때만 씁니다. */
   rotationY: number;
+  /** 방 중심을 원점으로 하는 실측 평면도. x=가로, z=깊이(m). */
+  floorplan?: { walls: FloorplanWall[] };
   /**
    * **실외 방**인가. 실외는 여섯 면 상자가 아니라 파노라마 한 장을 두른 돔입니다.
    *
@@ -685,6 +695,15 @@ export interface CompositionRoom {
    * 흐름과 **함께** 켤 수 있습니다(흐르는 영상) — 서로를 끄지 않습니다.
    */
   video?: { face: RoomVideoFace; source: string };
+}
+
+export interface FloorplanWall {
+  id: string;
+  start: { x: number; z: number };
+  end: { x: number; z: number };
+  thickness: number;
+  height: number;
+  opening?: { kind: "door" | "window"; width: number; bottom: number; height: number };
 }
 
 /** 배경 영상을 걸 자리 — 여섯 면 중 하나이거나 파노라마 돔 전체. */
@@ -961,12 +980,19 @@ export interface CompositionMusic {
   name: string;
   /** 노래 전체 길이(초). 타임라인 길이와 다를 수 있습니다. */
   seconds: number;
+  /** 타임라인에서 음원 레이어가 시작하는 시각(초). 옛 작품은 0초로 읽습니다. */
+  startTime?: number;
   /**
    * 타임라인 0초에서 **노래의 몇 초**가 울리는가. 후렴부터 쓰려면 여기를 밀어 둡니다.
    */
   offset?: number;
   bpm?: number;
   barsPerSection?: number;
+  /** 분석 결과는 음원 시각입니다. offset과 섞어 저장하면 재배치할 때 박자가 밀립니다. */
+  beatTimes?: number[];
+  beatConfidence?: number;
+  /** 감지한 박자 중 마디의 첫 박으로 삼을 번호(0~3). */
+  downbeatIndex?: number;
   /** 구간 — 나눠 뽑기가 이 경계에서 자릅니다. */
   sections: { id: string; label: string; start: number; end: number }[];
 }
@@ -1246,6 +1272,11 @@ export function normalizeCompositionRoom(
     rotationY: Number.isFinite(saved?.rotationY ?? NaN)
       ? (saved?.rotationY as number)
       : 0,
+    floorplan: saved?.floorplan
+      ? { walls: (Array.isArray(saved.floorplan.walls) ? saved.floorplan.walls : []).slice(0, 300).map((wall) =>
+          normalizeFloorplanWall(wall, { width, depth: clampRoomSide(saved?.depth, width), height: clampRoomSide(saved?.height, width) }),
+        ).filter((wall): wall is FloorplanWall => wall !== null) }
+      : undefined,
     // 방을 세울 때 정한 갈래. 정규화가 떨어뜨리면 실외 방이 실내처럼 굴어 «이미지 생성» 이 전개도를 뽑습니다.
     // 호리존이 있으면 실외 표는 버립니다 — 둘이 같이 있으면 돔 안내선은 뜨는데 껍질은 숨어 «색을 골랐는데 돔이 보인다» 가
     // 됩니다. 갈래는 하나여야 하고, 색을 일부러 적은 쪽(호리존)이 이깁니다.

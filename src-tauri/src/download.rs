@@ -82,11 +82,16 @@ pub fn human(bytes: u64) -> String {
     }
 }
 
-fn sha256_of(path: &Path) -> Res<String> {
+pub(crate) fn sha256_of(path: &Path) -> Res<String> {
+    sha256_cancellable(path, &|| false)
+}
+
+pub(crate) fn sha256_cancellable(path: &Path, stop: &impl Fn() -> bool) -> Res<String> {
     let mut file = fs::File::open(path).map_err(|e| err("파일을 열지 못했습니다", e))?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 1024 * 1024];
     loop {
+        if stop() { return Err("멈췄습니다.".into()); }
         let read = file.read(&mut buffer).map_err(|e| err("파일을 읽지 못했습니다", e))?;
         if read == 0 {
             break;
@@ -107,7 +112,7 @@ fn partial_path(dest: &Path) -> std::path::PathBuf {
 ///
 /// 받는 자리와 따로 떼어 둔 이유: «크기는 이미 맞는데 확인 전에 끊긴» 임시 파일이 있을 때
 /// 이어받기를 건너뛰고 바로 이 단계로 오기 위해서입니다(아래 416 설명).
-fn finish(spec: &Download, temp: &Path, beat: &impl Fn(Beat)) -> Res<()> {
+fn finish(spec: &Download, temp: &Path, beat: &impl Fn(Beat), preserve: bool, stop: &impl Fn() -> bool) -> Res<()> {
     let label = spec.label;
     if let Some(size) = spec.expected_size {
         let got = fs::metadata(temp).map(|m| m.len()).unwrap_or(0);
@@ -118,11 +123,19 @@ fn finish(spec: &Download, temp: &Path, beat: &impl Fn(Beat)) -> Res<()> {
     }
     if let Some(expected) = spec.expected_sha {
         beat(Beat { percent: None, written: 0, total: None, verifying: true });
-        let actual = sha256_of(temp)?;
+        let actual = sha256_cancellable(temp, stop)?;
         if !actual.eq_ignore_ascii_case(expected) {
             let _ = fs::remove_file(temp);
             return Err(format!("{label} 의 sha256 이 다릅니다. 받다 망가졌거나 원본이 바뀌었습니다."));
         }
+    }
+    if stop() { return Err("멈췄습니다.".into()); }
+    if preserve {
+        verify_safetensors(temp)?;
+        // 다른 실행이 먼저 완성한 원본을 지우지 않도록 제자리 생성은 원자적으로 합니다.
+        fs::hard_link(temp, spec.dest).map_err(|_| "같은 이름의 파일이 생겼거나 완료 파일을 놓지 못했습니다. 원본은 보존했습니다.".to_string())?;
+        fs::remove_file(temp).map_err(|e| err("완료한 임시 파일을 정리하지 못했습니다", e))?;
+        return Ok(());
     }
     // 덮어쓸 것이 있으면 먼저 치웁니다(윈도우는 존재하는 자리로 rename 이 실패합니다).
     // 여기서는 선삭제가 안전합니다 — dest 는 앱이 받아 둔 파일이지 사용자의 그림이 아닙니다.
@@ -139,8 +152,17 @@ pub async fn fetch(
     beat: impl Fn(Beat),
     stop: impl Fn() -> bool,
 ) -> Res<()> {
-    use futures_util::StreamExt;
+    fetch_inner(spec, beat, stop, false).await
+}
 
+/// 조종기에서는 기존 파일을 검증하고 덮어쓰지 않습니다. 전송 몸통은 UI와 같습니다.
+pub async fn fetch_checked(spec: Download<'_>, beat: impl Fn(Beat), stop: impl Fn() -> bool) -> Res<()> {
+    fetch_inner(spec, beat, stop, true).await
+}
+
+async fn fetch_inner(spec: Download<'_>, beat: impl Fn(Beat), stop: impl Fn() -> bool, preserve: bool) -> Res<()> {
+    use futures_util::StreamExt;
+    if stop() { return Err("멈췄습니다.".into()); }
     let label = spec.label;
     if let Some(parent) = spec.dest.parent() {
         fs::create_dir_all(parent).map_err(|e| err("받을 폴더를 만들지 못했습니다", e))?;
@@ -149,8 +171,15 @@ pub async fn fetch(
     // 이미 제자리에 있고 크기가 맞으면 건너뜁니다(다시 설치해도 16GB 를 또 받지 않게).
     if let Ok(meta) = fs::metadata(spec.dest) {
         if spec.expected_size.map(|size| meta.len() == size).unwrap_or(meta.len() > 0) {
+            if preserve {
+                verify_safetensors(spec.dest)?;
+                if let Some(expected) = spec.expected_sha {
+                    if !sha256_cancellable(spec.dest, &stop)?.eq_ignore_ascii_case(expected) { return Err("기존 파일의 sha256이 다릅니다. 원본을 보존했습니다.".into()); }
+                }
+            }
             return Ok(());
         }
+        if preserve { return Err("기존 파일의 크기가 다릅니다. 원본을 보존했습니다.".into()); }
     }
 
     let temp = partial_path(spec.dest);
@@ -170,7 +199,7 @@ pub async fn fetch(
           크기가 이미 맞으면 요청을 아예 보내지 말고 확인·이름 바꾸기로 넘어갑니다.
         */
         if have == size && have > 0 {
-            return finish(&spec, &temp, &beat);
+            return finish(&spec, &temp, &beat, preserve, &stop);
         }
     }
 
@@ -191,10 +220,16 @@ pub async fn fetch(
         if let Some(token) = spec.bearer.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
             request = request.header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"));
         }
-        let response = request
-            .send()
-            .await
-            .map_err(|e| err(&format!("{label} 을(를) 받지 못했습니다"), e))?;
+        let pending = request.send();
+        tokio::pin!(pending);
+        let response = loop {
+            tokio::select! {
+                result = &mut pending => break result.map_err(|_| format!("{label} 요청이 실패했습니다."))?,
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                    if stop() { return Err("멈췄습니다. 받다 만 파일은 다음에 이어받습니다.".into()); }
+                }
+            }
+        };
         let status = response.status();
         if status.as_u16() == 416 && have > 0 && !restarted {
             let _ = fs::remove_file(&temp);
@@ -205,7 +240,7 @@ pub async fn fetch(
         if !status.is_success() {
             let code = status.as_u16();
             return Err(match (code, spec.login_hint) {
-                (401 | 403, Some(hint)) => hint.to_string(),
+                (401 | 403, Some(hint)) => format!("HTTP {code}: {hint}"),
                 _ => format!("{label} 을(를) 받지 못했습니다 ({status})."),
             });
         }
@@ -234,7 +269,15 @@ pub async fn fetch(
     let mut written = have;
     let mut last_report = Instant::now();
     let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let chunk = tokio::select! {
+            chunk = stream.next() => chunk,
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                if stop() { let _ = file.flush(); return Err("멈췄습니다. 받다 만 파일은 다음에 이어받습니다.".into()); }
+                continue;
+            }
+        };
+        let Some(chunk) = chunk else { break };
         if stop() {
             let _ = file.flush();
             return Err("멈췄습니다. 받다 만 파일은 다음에 이어받습니다.".into());
@@ -255,5 +298,160 @@ pub async fn fetch(
     file.flush().map_err(|e| err("받은 것을 쓰지 못했습니다", e))?;
     drop(file);
 
-    finish(&spec, &temp, &beat)
+    if stop() { return Err("멈췄습니다. 받다 만 파일은 다음에 이어받습니다.".into()); }
+    finish(&spec, &temp, &beat, preserve, &stop)
+}
+
+/// 이름만 safetensors인 오류 페이지가 완료 목록에 올라가는 것을 막습니다.
+pub(crate) fn verify_safetensors(path: &Path) -> Res<()> {
+    let mut file = fs::File::open(path).map_err(|_| "검증할 파일을 열지 못했습니다.".to_string())?;
+    let size = file.metadata().map_err(|_| "파일 크기를 읽지 못했습니다.".to_string())?.len();
+    let mut prefix = [0u8; 8];
+    file.read_exact(&mut prefix).map_err(|_| "safetensors 헤더가 없습니다.".to_string())?;
+    let header_size = u64::from_le_bytes(prefix);
+    if header_size == 0 || header_size > 16 * 1024 * 1024 || header_size + 8 >= size {
+        return Err("safetensors 헤더 크기가 올바르지 않습니다.".into());
+    }
+    let mut bytes = vec![0; header_size as usize];
+    file.read_exact(&mut bytes).map_err(|_| "safetensors 헤더가 끊겼습니다.".to_string())?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| "safetensors 헤더가 올바르지 않습니다.".to_string())?;
+    let entries = value.as_object().ok_or("safetensors 헤더가 객체가 아닙니다.")?;
+    let mut ranges = Vec::new();
+    for (key, item) in entries {
+        if key == "__metadata__" { continue; }
+        let offsets = item["data_offsets"].as_array().filter(|a| a.len() == 2).ok_or("텐서 범위가 올바르지 않습니다.")?;
+        let start = offsets[0].as_u64().ok_or("텐서 시작점이 올바르지 않습니다.")?;
+        let end = offsets[1].as_u64().ok_or("텐서 끝점이 올바르지 않습니다.")?;
+        if start > end || end > size - 8 - header_size || item["dtype"].as_str().is_none() || item["shape"].as_array().is_none() {
+            return Err("텐서 헤더와 파일 크기가 맞지 않습니다.".into());
+        }
+        ranges.push((start, end));
+    }
+    ranges.sort_unstable();
+    let mut cursor = 0;
+    if ranges.is_empty() { return Err("텐서가 없습니다.".into()); }
+    for (start, end) in ranges { if start != cursor { return Err("텐서 범위가 겹치거나 끊겼습니다.".into()); } cursor = end; }
+    if cursor != size - 8 - header_size { return Err("텐서 데이터의 크기가 맞지 않습니다.".into()); }
+    Ok(())
+}
+
+#[cfg(test)]
+mod checked_download_tests {
+    use super::*;
+    fn tensor_file(path: &Path) -> u64 {
+        let header = br#"{"x":{"dtype":"U8","shape":[4],"data_offsets":[0,4]}}"#;
+        let mut bytes = (header.len() as u64).to_le_bytes().to_vec(); bytes.extend(header); bytes.extend([1,2,3,4]);
+        fs::write(path, &bytes).unwrap(); bytes.len() as u64
+    }
+    #[tokio::test]
+    async fn existing_checked_file_is_verified_without_network() {
+        let dir = tempfile::tempdir().unwrap(); let dest = dir.path().join("x.safetensors"); let size = tensor_file(&dest);
+        let hash = sha256_of(&dest).unwrap();
+        let spec = Download {url:"http://127.0.0.1:1/not-used",dest:&dest,label:"시험",expected_sha:Some(&hash),expected_size:Some(size),login_hint:None,bearer:None};
+        assert!(fetch_checked(spec, |_| {}, || false).await.is_ok()); assert_eq!(sha256_of(&dest).unwrap(),hash);
+    }
+    #[tokio::test]
+    async fn wrong_existing_size_preserves_original() {
+        let dir = tempfile::tempdir().unwrap(); let dest = dir.path().join("x.safetensors"); let size = tensor_file(&dest); let before = fs::read(&dest).unwrap();
+        let spec = Download {url:"http://127.0.0.1:1",dest:&dest,label:"시험",expected_sha:None,expected_size:Some(size+1),login_hint:None,bearer:None};
+        assert!(fetch_checked(spec, |_| {}, || false).await.is_err()); assert_eq!(fs::read(dest).unwrap(),before);
+    }
+    #[tokio::test]
+    async fn wrong_existing_hash_preserves_original() {
+        let dir = tempfile::tempdir().unwrap(); let dest = dir.path().join("x.safetensors"); let size = tensor_file(&dest); let before = fs::read(&dest).unwrap(); let wrong="0".repeat(64);
+        let spec = Download {url:"http://127.0.0.1:1",dest:&dest,label:"시험",expected_sha:Some(&wrong),expected_size:Some(size),login_hint:None,bearer:None};
+        assert!(fetch_checked(spec, |_| {}, || false).await.is_err()); assert_eq!(fs::read(dest).unwrap(),before);
+    }
+    #[tokio::test]
+    async fn complete_partial_promotes_without_network() {
+        let dir=tempfile::tempdir().unwrap(); let dest=dir.path().join("x.safetensors"); let temp=partial_path(&dest); let size=tensor_file(&temp);
+        let spec=Download {url:"http://127.0.0.1:1",dest:&dest,label:"시험",expected_sha:None,expected_size:Some(size),login_hint:None,bearer:None};
+        assert!(fetch_checked(spec, |_| {}, || false).await.is_ok()); assert!(dest.exists()); assert!(!temp.exists());
+    }
+    #[test]
+    fn finish_never_overwrites_a_racing_original() {
+        let dir=tempfile::tempdir().unwrap(); let dest=dir.path().join("x.safetensors"); let temp=partial_path(&dest); let size=tensor_file(&temp); fs::write(&dest,b"keep").unwrap();
+        let spec=Download {url:"unused",dest:&dest,label:"시험",expected_sha:None,expected_size:Some(size),login_hint:None,bearer:None};
+        assert!(finish(&spec,&temp,&|_| {},true,&||false).is_err()); assert_eq!(fs::read(dest).unwrap(),b"keep"); assert!(temp.exists());
+    }
+    #[test]
+    fn corrupt_or_missing_tensor_data_never_promotes() {
+        let dir=tempfile::tempdir().unwrap(); let dest=dir.path().join("x.safetensors"); let temp=partial_path(&dest); fs::write(&temp,b"<html>error</html>").unwrap(); let size=fs::metadata(&temp).unwrap().len();
+        let spec=Download {url:"unused",dest:&dest,label:"시험",expected_sha:None,expected_size:Some(size),login_hint:None,bearer:None};
+        assert!(finish(&spec,&temp,&|_| {},true,&||false).is_err()); assert!(!dest.exists());
+        tensor_file(&temp); let bytes=fs::read(&temp).unwrap(); fs::write(&temp,&bytes[..bytes.len()-1]).unwrap(); assert!(verify_safetensors(&temp).is_err());
+    }
+    #[tokio::test]
+    async fn cancel_preserves_complete_partial() {
+        let dir=tempfile::tempdir().unwrap(); let dest=dir.path().join("x.safetensors"); let temp=partial_path(&dest); let size=tensor_file(&temp);
+        let spec=Download {url:"http://127.0.0.1:1",dest:&dest,label:"시험",expected_sha:None,expected_size:Some(size),login_hint:None,bearer:None};
+        assert!(fetch_checked(spec, |_| {}, || true).await.is_err()); assert!(temp.exists()); assert!(!dest.exists());
+        assert!(sha256_cancellable(&temp,&||true).is_err());
+    }
+    #[tokio::test]
+    async fn forbidden_status_is_reported_once_without_retry() {
+        use std::io::{Read,Write};
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let addr=listener.local_addr().unwrap();
+        let server=std::thread::spawn(move|| {let (mut socket,_)=listener.accept().unwrap();let mut request=[0;2048];socket.read(&mut request).unwrap();socket.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();});
+        let dir=tempfile::tempdir().unwrap();let dest=dir.path().join("x.safetensors");let url=format!("http://{addr}/x");
+        let spec=Download {url:&url,dest:&dest,label:"시험",expected_sha:None,expected_size:Some(4),login_hint:Some("접근 거부"),bearer:None};
+        assert_eq!(fetch_checked(spec, |_| {}, ||false).await.unwrap_err(),"HTTP 403: 접근 거부");server.join().unwrap();assert!(!dest.exists());
+    }
+}
+
+#[cfg(test)]
+mod cancellation_download_tests {
+    use super::*;
+    use std::sync::{Arc,atomic::{AtomicBool,Ordering}};
+    use std::io::{Read,Write};
+    #[tokio::test]
+    async fn stalled_response_is_cancellable_without_progress_event() {
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();let addr=listener.local_addr().unwrap();
+        let flag=Arc::new(AtomicBool::new(false));let trigger=flag.clone();
+        let server=std::thread::spawn(move||{let(mut socket,_)=listener.accept().unwrap();let mut b=[0;2048];socket.read(&mut b).unwrap();trigger.store(true,Ordering::Relaxed);std::thread::sleep(Duration::from_millis(300));});
+        let dir=tempfile::tempdir().unwrap();let dest=dir.path().join("x.safetensors");let url=format!("http://{addr}/file");
+        let spec=Download {url:&url,dest:&dest,label:"시험",expected_sha:None,expected_size:Some(100),login_hint:None,bearer:None};
+        let started=Instant::now();assert!(fetch_checked(spec, |_|{}, ||flag.load(Ordering::Relaxed)).await.unwrap_err().contains("멈췄습니다"));assert!(started.elapsed()<Duration::from_millis(250));server.join().unwrap();assert!(!dest.exists());
+    }
+    #[tokio::test]
+    async fn stalled_stream_keeps_partial_for_resume_on_cancel() {
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();let addr=listener.local_addr().unwrap();
+        let flag=Arc::new(AtomicBool::new(false));let trigger=flag.clone();
+        let server=std::thread::spawn(move||{let(mut socket,_)=listener.accept().unwrap();let mut b=[0;2048];socket.read(&mut b).unwrap();socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n0123456789").unwrap();std::thread::sleep(Duration::from_millis(50));trigger.store(true,Ordering::Relaxed);std::thread::sleep(Duration::from_millis(300));});
+        let dir=tempfile::tempdir().unwrap();let dest=dir.path().join("x.safetensors");let url=format!("http://{addr}/file");
+        let spec=Download {url:&url,dest:&dest,label:"시험",expected_sha:None,expected_size:Some(100),login_hint:None,bearer:None};
+        assert!(fetch_checked(spec, |_|{}, ||flag.load(Ordering::Relaxed)).await.unwrap_err().contains("멈췄습니다"));server.join().unwrap();assert!(!dest.exists());assert_eq!(fs::read(partial_path(&dest)).unwrap(),b"0123456789");
+    }
+}
+
+pub(crate) async fn official_descriptor(url: &str, expected_size: u64, stop: &impl Fn() -> bool) -> Res<String> {
+    let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(20)).timeout(Duration::from_secs(60)).build()
+        .map_err(|_| "Could not initialize official model request".to_string())?;
+    let mut request = client.head(url);
+    if let Ok(token) = crate::llm::read_api_key("huggingface") { request = request.bearer_auth(token); }
+    let pending = request.send(); tokio::pin!(pending);
+    let response = loop { tokio::select! {
+        result = &mut pending => break result.map_err(|_| "Official model metadata request failed".to_string())?,
+        _ = tokio::time::sleep(Duration::from_millis(100)) => if stop() { return Err("Download cancelled".into()); }
+    }};
+    if !response.status().is_success() && !response.status().is_redirection() {
+        return Err(format!("HTTP {}: official model access rejected", response.status().as_u16()));
+    }
+    let size = response.headers().get("x-linked-size").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
+    if size != Some(expected_size) { return Err("Official model size differs from approved descriptor".into()); }
+    response.headers().get("x-linked-etag").or_else(|| response.headers().get("etag"))
+        .and_then(|v| v.to_str().ok()).map(|v| v.trim_matches('"').to_ascii_lowercase())
+        .filter(|v| v.len()==64 && v.bytes().all(|b| b.is_ascii_hexdigit()))
+        .ok_or_else(|| "Official model SHA256 was not supplied; weights were not downloaded".into())
+}
+
+pub(crate) fn lock_model_file(dest: &Path) -> Res<fs::File> {
+    use fs2::FileExt;
+    let name = dest.file_name().and_then(|n|n.to_str()).ok_or("Invalid model filename")?;
+    let lock = dest.with_file_name(format!("{name}.lock.{PARTIAL_SUFFIX}"));
+    let file = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(lock)
+        .map_err(|_| "Could not open model download lock".to_string())?;
+    file.try_lock_exclusive().map_err(|_| "This model component is already being downloaded".to_string())?;
+    Ok(file)
 }

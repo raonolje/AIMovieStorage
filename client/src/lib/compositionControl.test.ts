@@ -24,12 +24,26 @@ import {
   registerCompositionSession,
   undoComposition,
   withCompositionChangeSource,
+  measureCompositionContact,
   type CompositionSessionPort,
 } from "./compositionControl";
 
 const context = { characterIds: ["person"], imageIds: ["image"] };
 const identity = { projectName: "시험 프로젝트", cutId: "cut" };
 const cleanups: (() => void)[] = [];
+it("접촉 조회는 최신 판·시각을 검사하고 history와 파일 캡처를 바꾸지 않는다", async () => {
+  const f = fixture();
+  const before = f.state();
+  const measure = vi.fn(async () => ({ skinContactVerified: false }));
+  f.port.measureContact = measure;
+  const request = { sessionId: f.sessionId, expectedRevision: 0, timeSeconds: 0, characterId: "person", side: "Right", finger: "Index", objectIds: ["box"] };
+  const result = await measureCompositionContact(request);
+  expect(result.revision).toBe(0); expect(result.data).toEqual({ skinContactVerified: false });
+  expect(f.state()).toBe(before); expect(f.capture).not.toHaveBeenCalled(); expect(f.commit).not.toHaveBeenCalled();
+  await expect(measureCompositionContact({ ...request, expectedRevision: 1 })).rejects.toMatchObject({ code: "revision_conflict" });
+  await expect(measureCompositionContact({ ...request, timeSeconds: 600 })).rejects.toMatchObject({ code: "invalid_time" });
+  expect(measure).toHaveBeenCalledOnce();
+});
 afterEach(() => {
   cleanups.splice(0).forEach((cleanup) => cleanup());
   vi.restoreAllMocks();

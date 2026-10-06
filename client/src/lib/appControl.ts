@@ -33,6 +33,8 @@ export function initializeAppControl(
   start = (async () => {
     if (!("__TAURI_INTERNALS__" in window))
       throw new Error("외부 조종기는 데스크톱 앱에서 사용할 수 있습니다.");
+    const { installMaintenanceWindowGuard } = await import("./maintenance");
+    await installMaintenanceWindowGuard();
     await whenAppSettingsReady();
     registerProjectNavigation((projectId) =>
       navigate(`/project/${encodeURIComponent(projectId)}`),

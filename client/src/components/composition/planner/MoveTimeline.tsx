@@ -15,7 +15,7 @@ import { NumberInput } from "@/components/composition/fields";
 import { ShotPreviewIcon } from "@/components/ShotPreviewIcon";
 import { type CompositionState } from "@/lib/composition";
 import { sortByTime } from "@/lib/keyframes";
-import { addAmountKeyIn, addCameraKeyIn, addCameraMoveIn, addMotionKeyAtIn, movePoseJointKeyIn, movePoseKeyGroupIn, poseJointRowsOf, removePoseJointKeyIn, removePoseKeyGroupIn, layerSpanOf, layersOf, moveOccludeKeyIn, occludeTracksOf, removeOccludeKeyIn, musicOf, setLayerHiddenIn, setLayerSpanIn, cameraShotsOf, moveAmountKeyIn, removeAmountKeyIn, lockAnchorsOf, setLockAnchorsIn, setTimelineIn, timelineOf, motionTracksOf, moveCameraKeyIn, moveMotionKeyIn, shiftMotionKeysIn, removeMotionKeyIn, cameraMovesOf, moveCameraMoveOrderIn, patchCameraKeyIn, patchCameraMoveIn, swapCameraMovePresetIn, removeCameraKeyIn, removeCameraMoveIn, type UpdateComposition } from "@/lib/compositionEdit";
+import { addAmountKeyIn, addCameraKeyIn, addCameraMoveIn, addMotionKeyAtIn, movePoseJointKeyIn, movePoseKeyGroupIn, poseJointRowsOf, removePoseJointKeyIn, removePoseKeyGroupIn, layerSpanOf, layersOf, moveOccludeKeyIn, occludeTracksOf, removeOccludeKeyIn, musicOf, moveMusicStartIn, setLayerHiddenIn, setLayerSpanIn, cameraShotsOf, moveAmountKeyIn, removeAmountKeyIn, lockAnchorsOf, setLockAnchorsIn, setTimelineIn, timelineOf, motionTracksOf, moveCameraKeyIn, moveMotionKeyIn, shiftMotionKeysIn, removeMotionKeyIn, cameraMovesOf, moveCameraMoveOrderIn, patchCameraKeyIn, patchCameraMoveIn, swapCameraMovePresetIn, removeCameraKeyIn, removeCameraMoveIn, type UpdateComposition } from "@/lib/compositionEdit";
 import { promptNumber } from "@/components/PromptDialog";
 import { resolveAnchorSource } from "@/lib/cameraMoves";
 
@@ -732,6 +732,21 @@ export function PlannerMoveTimeline({
       window.addEventListener("pointermove", step);
       window.addEventListener("pointerup", up);
     };
+
+  const dragMusic = (event: React.PointerEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const grabbed = timeAt(event.clientX);
+    const original = music?.startTime ?? 0;
+    const move = (pointer: PointerEvent) =>
+      setState(current => moveMusicStartIn(current, original + timeAt(pointer.clientX) - grabbed));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 
   /*
     레이어 키 줄을 사람이 여닫은 기록. 기본(키가 있거나 고른 대상이면 폄)을 **덮어쓸 때만**
@@ -2486,6 +2501,7 @@ export function PlannerMoveTimeline({
           gutterStyle={gutterStyle}
           ratioOf={ratioOf}
           onSeek={onSeek}
+          onDragStart={dragMusic}
         />
 
         {/*

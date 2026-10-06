@@ -7,7 +7,20 @@ import {
   retargetTasks,
   withResumableLlm,
   type NewTask,
+  registerTaskRunner, enqueueTask, getTask,
 } from "@/lib/taskQueue";
+
+it("CPU 합성은 미디어 작업 중에도 독립적으로 하나씩 실행한다",async()=>{
+  let finishMedia!:()=>void,finishCpu!:()=>void;const started:string[]=[];
+  registerTaskRunner("qa-held-media",async()=>{started.push("media");await new Promise<void>(r=>{finishMedia=r;});});
+  registerTaskRunner("qa-held-cpu",async()=>{started.push("cpu");await new Promise<void>(r=>{finishCpu=r;});});
+  const media=enqueueTask({lane:"media",kind:"qa-held-media",projectId:"cpu-qa",projectTitle:"QA",label:"media",payload:{}})!;
+  const cpu=enqueueTask({lane:"cpu",kind:"qa-held-cpu",projectId:"cpu-qa",projectTitle:"QA",label:"cpu",payload:{}})!;
+  const next=enqueueTask({lane:"cpu",kind:"qa-held-cpu",projectId:"cpu-qa",projectTitle:"QA",label:"next",payload:{}})!;
+  expect(started).toEqual(["media","cpu"]);expect(getTask(next)?.status).toBe("waiting");
+  finishCpu();await new Promise(r=>setTimeout(r,0));expect(started).toEqual(["media","cpu","cpu"]);expect(getTask(media)?.status).toBe("running");
+  finishCpu();finishMedia();await new Promise(r=>setTimeout(r,0));expect(getTask(cpu)?.status).toBe("done");expect(getTask(next)?.status).toBe("done");
+});
 
 /*
   저장 전 프로젝트(«새 프로젝트»)가 첫 자동 저장으로 열쇠를 얻으면 줄에 선 일도 따라가야 합니다 — 2026-09-22 검토에서

@@ -1442,7 +1442,7 @@ function EngineCard({
       </p>
       <p className="text-[10px]" style={{ color: "oklch(0.42 0.01 265)" }}>
         라이선스 {engine.license} · 용량 {engine.installed && engine.diskBytes ? formatBytes(engine.diskBytes) : engine.sizeHint}
-        {engine.version ? ` · 버전 ${engine.version}` : ""}
+        {engine.version ? ` · 설치 기록 ${engine.version}` : ""}
       </p>
 
       {progress && (

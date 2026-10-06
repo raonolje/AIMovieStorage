@@ -17,6 +17,7 @@ import os
 import time
 
 import common
+from local_only_policy import local_load_kwargs
 from ._ltx_two_stage import quality_of, resolution_plan, load_upsampler, upscale_latents, run_two_stage
 
 _state = {"pipe": None, "mode": None, "loras": [], "plan": None, "pose": False, "repo": None,
@@ -66,11 +67,16 @@ def _mode_of(opts):
     """어느 파이프라인이 필요한가 — 동작 기준이 있으면 InContext, 첫 장면이 있으면 I2V."""
     if (opts.get("control") or {}).get("frames") or opts.get("structure_control") is not None:
         return "pose"
+    if opts.get("end_image"):
+        return "conditions"
     return "i2v" if (opts.get("image") or "").strip() else "t2v"
 
 
 def load(root, opts):
     quality = quality_of(opts)
+    if opts.get("end_image") is not None:
+        from control_policy import validate_control_options
+        validate_control_options("ltx25", opts, check_files=True)
     if opts.get("structure_control") is not None:
         from control_policy import validate_control_options
         from structure_control import probe_structure_video
@@ -123,7 +129,7 @@ def load(root, opts):
     """
     pipeline_class = getattr(
         diffusers,
-        "LTX2InContextPipeline" if quality == "two-stage" else {"pose": "LTX2InContextPipeline", "i2v": "LTX2ImageToVideoPipeline"}.get(
+        "LTX2InContextPipeline" if quality == "two-stage" else {"pose": "LTX2InContextPipeline", "conditions": "LTX2ConditionPipeline", "i2v": "LTX2ImageToVideoPipeline"}.get(
             mode, "LTX2Pipeline"
         ),
     )
@@ -147,7 +153,7 @@ def load(root, opts):
     try:
         if plan["bits"]:
             parts["transformer"] = common.quantized_component(repo, dtype, plan["bits"])
-        pipe = pipeline_class.from_pretrained(repo, **parts)
+        pipe = pipeline_class.from_pretrained(repo, **local_load_kwargs(), **parts)
     except Exception as error:
         """
         게이트 저장소의 403 은 «토큰이 틀렸다» 가 아니라 «약관에 동의하지 않았다» 입니다.
@@ -320,16 +326,21 @@ def _output_size(opts):
 
 def generate(output, opts, report):
     quality = quality_of(opts)
+    if opts.get("end_image") is not None:
+        from control_policy import validate_control_options
+        validate_control_options("ltx25", opts, check_files=True)
     _require_image_codec(opts)
     # 마스크는 **모델을 부르기 전에** 봅니다 — 까닭은 `common.check_motion_mask`.
     common.check_motion_mask(opts)
     started = time.time()
     pipe = _state["pipe"]
-    fps = int(opts.get("fps") or 24)
-    seconds = float(opts.get("seconds") or 5.0)
-    frames = int(round(seconds * fps))
-    # 8n+1 로 올림이 아니라 내림 — 올리면 요청한 길이를 넘습니다.
-    frames = max(9, ((frames - 1) // 8) * 8 + 1)
+    from video_frame_contract import plan_video_frames, exact_video_prefix, plan_end_condition
+    duration_plan = plan_video_frames(opts.get("seconds", 5.0), opts.get("fps", 24), 8)
+    fps = duration_plan["fps"]
+    frames = duration_plan["generation_frames"]
+    endpoint_plan = plan_end_condition("ltx25", duration_plan) if opts.get("end_image") else None
+    if endpoint_plan and not endpoint_plan["placement_exact"]:
+        common.log("현재 모델 API로 마지막 표시 프레임에 끝 조건을 정확히 지정할 수 없습니다: 조건 {} / 출력 끝 {}".format(endpoint_plan["condition_pixel_frame"], endpoint_plan["last_visible_frame"]))
     sampling = _sampling_options(opts)
     steps = len(sampling["sigmas"]) if "sigmas" in sampling else sampling["num_inference_steps"]
     if "sigmas" in sampling:
@@ -384,7 +395,10 @@ def generate(output, opts, report):
         from structure_control import canny_reference_frames
         validate_control_options("ltx25", opts, check_files=True)
         control, structure_meta = canny_reference_frames(opts["structure_control"], opts,
-            stage_width, stage_height, frames, fps, POSE_REFERENCE_DOWNSCALE, report)
+            stage_width, stage_height, duration_plan["target_frames"], fps, POSE_REFERENCE_DOWNSCALE, report)
+        # 원본 참조는 목표 시간까지만 읽고, 버릴 생성 꼬리의 제어만 마지막 참조로 채웁니다.
+        control = control + [control[-1]] * duration_plan["trimmed_tail_frames"]
+        structure_meta["generation_padding_frames"] = duration_plan["trimmed_tail_frames"]
     else:
         control = _pose_frames(opts, stage_width, stage_height, frames, fps)
     if control:
@@ -425,9 +439,23 @@ def generate(output, opts, report):
         else:
             kwargs["image"] = first_frame
 
+    full_end_frame = None
+    if opts.get("end_image"):
+        from PIL import Image
+        from diffusers.pipelines.ltx2 import LTX2VideoCondition
+        with Image.open(opts["end_image"]) as image:
+            full_end_frame = image.convert("RGB").resize((width, height))
+        stage_end_frame = full_end_frame.resize((stage_width, stage_height)) if two_stage else full_end_frame
+        # 공개 API의 latent 시간 격자에 출력 끝이 맞을 때만 그 인덱스를 지정합니다.
+        kwargs.pop("image", None)
+        kwargs["conditions"] = [LTX2VideoCondition(frames=first_frame, index=0),
+                                LTX2VideoCondition(frames=stage_end_frame, index=endpoint_plan["api_index"])]
+
     if two_stage:
         from diffusers.pipelines.ltx2 import LTX2VideoCondition
         final_conditions = [LTX2VideoCondition(frames=full_first_frame, index=0)] if full_first_frame is not None else None
+        if full_end_frame is not None:
+            final_conditions.append(LTX2VideoCondition(frames=full_end_frame, index=endpoint_plan["api_index"]))
         pipe.vae.enable_tiling()
         result = run_two_stage(pipe, kwargs, two_stage,
             lambda latents: upscale_latents(_state["upsampler"], latents),
@@ -437,14 +465,19 @@ def generate(output, opts, report):
         result = common.run_attention_safe(pipe, lambda: pipe(**kwargs))
     report(95, "mp4 로 내보내는 중")
     # 「여기만 움직인다」 흑백 마스크가 왔으면 검은 곳을 첫 장면에 묶습니다(`common.freeze_by_mask`).
-    frames_out = common.freeze_by_mask(result.frames[0], opts.get("motion_mask"))
-    common.save_video(frames_out, output, fps)
+    frames_out = common.freeze_by_mask(exact_video_prefix(result.frames[0], duration_plan), opts.get("motion_mask"))
+    from generated_audio import save_generated_video
+    audio_meta = save_generated_video(frames_out, getattr(result, "audio", None),
+        getattr(getattr(getattr(pipe, "vocoder", None), "config", None), "output_sampling_rate", None),
+        output, fps, common.save_video)
     out = {
         "width": width,
         "height": height,
-        "frames": frames,
+        "frames": len(frames_out),
+        "duration_contract": duration_plan,
+        "audio": audio_meta,
         "fps": fps,
-        "seconds_video": round(frames / float(fps), 2),
+        "seconds_video": len(frames_out) / float(fps),
         "seed": seed,
         "generate_seconds": round(time.time() - started, 2),
         "inference_steps": steps,
@@ -453,6 +486,12 @@ def generate(output, opts, report):
     }
     # 요청한 정밀도와 실제로 올라간 정밀도 — 한 곳에서 만듭니다.
     out.update(common.precision_fields(_state["plan"]))
+    if full_end_frame is not None:
+        duration_plan["end_condition_in_trimmed_tail"] = endpoint_plan["condition_in_trimmed_tail"]
+        out["end_condition_contract"] = endpoint_plan
+        out["frame_conditions"] = {"method": "latent-conditioning", "first_index": 0, "end_index": endpoint_plan["api_index"],
+            "first_image": image_path, "end_image": opts["end_image"], "pipeline": type(pipe).__name__,
+            "stages": 2 if two_stage else 1}
     if structure_meta is not None:
         out["structure_control"] = structure_meta
     if two_stage:

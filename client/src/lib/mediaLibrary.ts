@@ -126,6 +126,11 @@ function writeMirrorStamp(section: string, savedAt: number) {
 
 /** 파일 쓰기를 한 줄로 세웁니다. 두 칸이 같은 순간에 저장하면 뒤엣것이 앞엣것을 지웁니다. */
 let mirrorWrites: Promise<void> = Promise.resolve();
+const maintenanceMirrorFailures = new Set<string>();
+export async function flushSettingsPersistence() {
+  await appSettingsReady; await mirrorWrites;
+  if (maintenanceMirrorFailures.size) throw new Error("앱 설정 저장 실패를 해결한 뒤 종료해 주세요.");
+}
 const mirrorValueKey = (value: unknown) => JSON.stringify(value, (_key, item) =>
   item && typeof item === "object" && !Array.isArray(item)
     ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]])) : item);
@@ -175,7 +180,7 @@ export function queueMirrorWriteAndConfirm(section: string, value: unknown, save
     })
     .then(() => undefined);
   // 한 쓰기가 실패해도 다음 저장은 재시도할 수 있어야 합니다. 실패는 해당 호출자에게 전달합니다.
-  mirrorWrites = write.catch(() => undefined);
+  mirrorWrites = write.then(() => { maintenanceMirrorFailures.delete(section); }, () => { maintenanceMirrorFailures.add(section); });
   return write;
 }
 

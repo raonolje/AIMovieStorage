@@ -344,7 +344,8 @@ export interface CharacterVoiceReference {
   id: string;
   operationId?: string;
   filePath: string;
-  source?: "extracted" | "generated";
+  source?: "extracted" | "generated" | "imported";
+  importSourcePath?: string;
   sourceVideoId?: string;
   sourceCutId?: string;
   startSeconds?: number;
@@ -425,6 +426,7 @@ export interface Background extends PromptWorkflowState<
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface SceneVideoAsset {
+  previewMetadata?: {masterAssetId:string;masterSha256:string;previewJobId:string;lossyAudio:true;verification:Record<string,unknown>};
   id: string;
   name: string;
   importOperationId?: string;

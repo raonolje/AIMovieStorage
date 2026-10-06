@@ -171,6 +171,7 @@ export default function CutVideoSection({
             label="로컬 영상"
             seconds={videoSeconds}
             firstFrame={continuity?.mode === "continue" ? continuity.endFramePath : heroImage?.filePath}
+            endFrameChoices={(cut.images ?? []).filter(image => image.filePath).map(image => ({ id: image.id, name: image.name || image.id, path: image.filePath! }))}
             references={localVideoRefs}
             motionMask={motionMask?.filePath || undefined}
             prompt={{

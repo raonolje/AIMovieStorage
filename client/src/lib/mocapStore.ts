@@ -5,6 +5,7 @@ import {
   assetSrc,
   importProjectMediaAsset,
   saveProjectMediaAsset,
+  deleteProjectMediaFile,
   queueMirrorWrite,
   queueMirrorWriteAndConfirm,
   registerMirrorSection,
@@ -44,6 +45,10 @@ export const MOCAP_BUILTIN_ENGINE = "mediapipe";
 export type MocapStatus = "idle" | "queued" | "running" | "done" | "error";
 
 export interface MocapSource {
+  kimodoGeneration?: {
+    operationId: string; prompt: string; model: string; seconds: number; steps: number;
+    seed: number; textEncoderDevice: "cpu" | "cuda"; createdAt: string;
+  };
   id: string;
   name: string;
   /** 프로젝트 폴더에 저장한 영상 경로. 데스크톱이 아니면 없습니다. */
@@ -240,6 +245,37 @@ export function addMocapSource(project: string, source: MocapSource) {
   store.byProject[project] = [...(store.byProject[project] ?? []), source];
   emit(project);
   persist();
+}
+
+/** Import an official Kimodo SOMA BVH as a saved motion source, without requiring a video detector. */
+export async function importKimodoMotion(project: string, file: File, generation?: MocapSource["kimodoGeneration"]): Promise<MocapSource> {
+  if (!project.trim() || !/\.bvh$/i.test(file.name)) throw new Error("KIMODO SOMA BVH 파일을 선택하세요.");
+  const { kimodoBvhToCapture } = await import("./kimodoBvh");
+  const capture = kimodoBvhToCapture(await file.text());
+  const owner = mediaOwnerName(file.name);
+  const original = await saveProjectMediaAsset(file, {
+    projectName: project, assetType: "mocap-video", ownerName: owner, stem: owner,
+  });
+  if (!original?.path) throw new Error("프로젝트 저장 폴더에 BVH 원본을 보관하지 못했습니다.");
+  const source: MocapSource = {
+    id: `kimodo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    kimodoGeneration: generation,
+    name: owner, path: original.path, previewUrl: "", blobUrl: null,
+    duration: capture.duration, nativeFps: capture.fps, engine: "kimodo-soma-bvh", fps: capture.fps,
+    mirror: false, hands: false, clipStart: 0, clipEnd: capture.duration,
+    status: "done", percent: 100, message: "KIMODO BVH 가져오기 완료",
+    raw: capture, repair: "off", smoothing: "light", footPlant: false,
+    result: capture, resultPath: null, start: 0, assign: { 1: "skip" }, formation: false,
+    analyzedAt: new Date().toISOString(),
+  };
+  try { source.resultPath = await saveMocapResult(project, source, capture); }
+  catch (error) { await deleteProjectMediaFile(project, original.path).catch(() => undefined); throw error; }
+  if (!source.resultPath) {
+    await deleteProjectMediaFile(project, original.path).catch(() => undefined);
+    throw new Error("모캡 결과 JSON을 저장하지 못했습니다.");
+  }
+  addMocapSource(project, source);
+  return source;
 }
 
 export function removeMocapSource(project: string, id: string) {

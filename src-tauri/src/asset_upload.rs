@@ -153,3 +153,5 @@ mod tests {
         assert!(!temporary.exists());
     }
 }
+
+pub(crate) fn maintenance_pending(state: &AssetUploads) -> usize { state.0.lock_safe().len() }

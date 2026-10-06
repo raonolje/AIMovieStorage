@@ -35,8 +35,6 @@ import {
 /**
  * 로컬 모델 설치 칸 — 설정 화면과 BGM 화면이 같이 씁니다.
  *
- *
- *
  * `kinds` 를 주면 그 갈래만 보여 줍니다 — BGM 화면에서는 음악 엔진만 보여야 합니다.
  * 설치·제거·진행은 모듈 저장소(`lib/localEngines.ts`)가 들어서, 화면을 떠났다 돌아와도
  * 진행 줄이 이어집니다.
@@ -249,7 +247,6 @@ const FIT_LABEL: Record<EngineFit["level"], string> = {
 /**
  * 이 컴퓨터가 무엇인지 한 줄로.
  *
- *
  * 아래 카드들의 판정이 **무엇을 근거로 한 것인지** 여기서 먼저 보여 줍니다 — 근거가
  * 안 보이면 「안 됩니다」 를 믿을 수가 없습니다.
  */
@@ -348,7 +345,7 @@ function EngineSettingsCard({ engine, progress, fit, probe }: {
   const precision = precisionFor(info, probe, setting === "inherit" ? common : setting);
   return <div className="space-y-1">
     <LocalEngineCard engine={engine} progress={progress} fit={fit} precision={precision} />
-    {engine.kind !== "mocap" && <div className="mb-3 flex flex-wrap items-center gap-2 px-3 text-[11px]">
+    {engine.kind !== "mocap" && engine.kind !== "motion" && <div className="mb-3 flex flex-wrap items-center gap-2 px-3 text-[11px]">
       <label className="flex items-center gap-2">
         {t("모델별 정밀도")}
         <select aria-label={t("{model} 정밀도", { model: engine.name })} value={setting}
@@ -381,6 +378,7 @@ function LocalEngineCard({
   /** 이 엔진을 켜면 실제로 올라갈 정밀도. */
   precision: LocalPrecision;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const installing = Boolean(progress) || engine.installing;
 
@@ -391,7 +389,7 @@ function LocalEngineCard({
       toast.success(`${engine.name} 을 설치했습니다.`, {
         description: engine.canPrefetch
           ? "가중치까지 받아 두었습니다 — 바로 생성할 수 있습니다."
-          : "가중치는 첫 생성 때 받습니다 — 그때 한 번 오래 걸립니다.",
+          : "생성은 로컬 파일만 사용합니다. 가중치를 별도로 준비하지 않으면 오류로 끝납니다.",
       });
     } catch (error) {
       toast.error(String(error));
@@ -472,16 +470,19 @@ function LocalEngineCard({
         </span>
         {engine.installed && (
           <span
-            className="shrink-0 text-[10px] tabular-nums"
+            className="max-w-[42%] break-words text-[10px] tabular-nums"
             style={{ color: "oklch(0.50 0.01 265)" }}
             title={
               engine.weightsReady
-                ? "가중치까지 받아 둔 폴더 크기입니다"
+                ? "사전 받기 완료 기록이 있는 폴더 크기입니다"
                 : "폴더 크기 — 생성 뒤와 하루에 한 번 뒤에서 다시 잽니다"
             }
           >
             {human(engine.diskBytes)}
-            {engine.weightsReady && " · 가중치 있음"}
+            {engine.prefetchCompleted ? t(" · 사전 받기 완료 기록") : t(" · 사전 받기 완료 기록 없음")}
+            {engine.readinessEvidence?.files && <span className="block">{t("현재 파일 검사")}: {engine.readinessEvidence.files.status === "present" ? t("파일 존재 확인 · 로드 미검증") : engine.readinessEvidence.files.status === "missing" ? t("누락 파일 있음") : t("미검사")}</span>}
+            {engine.readinessEvidence?.runtime && <span className="block">{t("배포판 메타데이터")}: diffusers {engine.readinessEvidence.runtime.diffusersVersions.join(", ") || t("미확인")}</span>}
+            {engine.installationRecordVersion && <span className="block">{t("설치 기록")}: {engine.installationRecordVersion}</span>}
           </span>
         )}
         {installing ? (
@@ -574,7 +575,7 @@ function LocalEngineCard({
         <span style={{ color: FIT_COLOR[fit.level] }}>{FIT_LABEL[fit.level]}</span>
         <span style={{ color: "oklch(0.46 0.01 265)" }}>— {fit.note}</span>
         {/* 판정뿐 아니라 **실제로 무엇으로 올라가는지** 적습니다 — 결이 달라지는 까닭이 여기 있습니다. */}
-        {engine.kind !== "mocap" && precision !== "auto" && (
+        {engine.kind !== "mocap" && engine.kind !== "motion" && precision !== "auto" && (
           <span style={{ color: "oklch(0.46 0.01 265)" }}>
             · {precision === "bf16" ? "원본 그대로 올립니다" : `${precision} 로 줄여서 올립니다`}
           </span>

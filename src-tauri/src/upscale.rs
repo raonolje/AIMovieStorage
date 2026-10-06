@@ -98,6 +98,7 @@ pub static LOCAL: Family = Family {
         "minimaxh3",
         "minimaxmusic",
         "qwentts",
+        "kimodo",
         "wanvideo",
         "acestep",
         "qwenimage",
@@ -285,6 +286,7 @@ pub struct EngineStatus {
     disk_bytes: u64,
     /// 가중치를 통째로 받아 두었는가(설치 기록의 `weights_ready`).
     weights_ready: bool,
+    readiness_evidence: Value,
     /// 이 엔진이 «미리 받기» 를 아는가(manifest 의 `prefetch`). 아니면 단추를 보이지 않습니다.
     prefetch: bool,
     last_error: String,
@@ -516,49 +518,8 @@ fn cancelled(flag: &Option<Arc<AtomicBool>>) -> bool {
 /// 파일 하나를 받습니다 — 이어받기·크기·해시 확인은 `download.rs` 한 벌이 합니다.
 /// 여기서는 «진행을 설치 화면으로 흘리는 일» 과 «취소 깃발» 만 얹습니다.
 #[allow(clippy::too_many_arguments)]
-async fn download_file(
-    app: &AppHandle,
-    engine: &str,
-    stage: &str,
-    label: &str,
-    url: &str,
-    dest: &Path,
-    expected_sha: Option<&str>,
-    expected_size: Option<u64>,
-    cancel: &Option<Arc<AtomicBool>>,
-) -> Res<()> {
-    crate::download::fetch(
-        crate::download::Download {
-            url,
-            dest,
-            label,
-            expected_sha,
-            expected_size,
-            login_hint: None,
-            // 승인받은 사람만 받는 저장소(허깅페이스 게이트)는 토큰이 있어야 합니다 — 로라와 같은 한 벌.
-            bearer: crate::llm::read_api_key("huggingface").ok(),
-        },
-        |beat| {
-            if beat.verifying {
-                progress(app, engine, stage, None, &format!("{label} 해시 확인"));
-                return;
-            }
-            progress(
-                app,
-                engine,
-                stage,
-                beat.percent,
-                &format!(
-                    "{label} {} / {}",
-                    human(beat.written),
-                    beat.total.map(human).unwrap_or_else(|| "?".into())
-                ),
-            );
-        },
-        || cancelled(cancel),
-    )
-    .await
-    // 설치 화면의 말로 바꿔 줍니다 — 「멈췄습니다」 만으로는 무엇이 멈췄는지 모릅니다.
+async fn download_file(app: &AppHandle, engine: &str, stage: &str, label: &str, url: &str, dest: &Path, expected_sha: Option<&str>, expected_size: Option<u64>, cancel: &Option<Arc<AtomicBool>>) -> Res<()> {
+    download_model_file(app, engine, stage, label, url, dest, expected_sha, expected_size, cancel, None).await
     .map_err(|message| {
         if message.starts_with("멈췄습니다") {
             "설치를 멈췄습니다. 받다 만 파일은 다음에 이어받습니다.".to_string()
@@ -566,6 +527,39 @@ async fn download_file(
             message
         }
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn download_model_file(
+    app: &AppHandle, engine: &str, stage: &str, label: &str, url: &str, dest: &Path,
+    expected_sha: Option<&str>, expected_size: Option<u64>, cancel: &Option<Arc<AtomicBool>>,
+    control: Option<(&str, &str)>,
+) -> Res<()> {
+    let emit = |percent: Option<f64>, message: &str| {
+        if let Some((transfer_id, component)) = control {
+            use tauri::Emitter;
+            let _ = app.emit("model-download-progress", serde_json::json!({"transferId":transfer_id,"component":component,"percent":percent,"message":message}));
+        } else { progress(app, engine, stage, percent, message); }
+    };
+    let spec = crate::download::Download { url, dest, label, expected_sha, expected_size,
+        login_hint: None, bearer: crate::llm::read_api_key("huggingface").ok() };
+    let beat = |beat: crate::download::Beat| {
+            if beat.verifying {
+                emit( None, &format!("{label} 해시 확인"));
+                return;
+            }
+            emit(
+                beat.percent,
+                &format!(
+                    "{label} {} / {}",
+                    human(beat.written),
+                    beat.total.map(human).unwrap_or_else(|| "?".into())
+                ),
+            );
+        };
+    let stop = || cancelled(cancel);
+    if control.is_some() { crate::download::fetch_checked(spec, beat, stop).await }
+    else { crate::download::fetch(spec, beat, stop).await }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -813,8 +807,12 @@ fn remove_tree_forced(dir: &Path) -> std::io::Result<()> {
 }
 
 /// `uv pip install` — 깃 캐시가 깨졌으면 **한 번 스스로 고치고 다시** 합니다.
-fn run_uv_install(uv: &Path, args: &[String], log: &Path, cancel: &Arc<AtomicBool>) -> Res<()> {
-    let first = run_tool(uv, args, None, log, "uv pip install", Some(cancel), None);
+fn run_uv_install(uv: &Path, args: &[String], log: &Path, cancel: &Arc<AtomicBool>, skip_motion_correction: bool) -> Res<()> {
+    let install = || run_tool_with_env(
+        uv, args, None, log, "uv pip install", Some(cancel), None,
+        skip_motion_correction.then_some(("SKIP_MOTION_CORRECTION_IN_SETUP", "1")),
+    );
+    let first = install();
     let Err(message) = first else {
         return Ok(());
     };
@@ -827,7 +825,7 @@ fn run_uv_install(uv: &Path, args: &[String], log: &Path, cancel: &Arc<AtomicBoo
 ", dir.display()));
         remove_tree_forced(dir).map_err(|e| err("깨진 깃 캐시를 지우지 못했습니다", e))?;
     }
-    run_tool(uv, args, None, log, "uv pip install", Some(cancel), None)
+    install()
 }
 
 fn run_tool(
@@ -839,8 +837,24 @@ fn run_tool(
     cancel: Option<&Arc<AtomicBool>>,
     timeout: Option<Duration>,
 ) -> Res<()> {
+    run_tool_with_env(program, args, cwd, log, what, cancel, timeout, None)
+}
+
+fn run_tool_with_env(
+    program: &Path,
+    args: &[String],
+    cwd: Option<&Path>,
+    log: &Path,
+    what: &str,
+    cancel: Option<&Arc<AtomicBool>>,
+    timeout: Option<Duration>,
+    extra_env: Option<(&str, &str)>,
+) -> Res<()> {
     let mut command = hidden_command(program);
     command.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+    if let Some((key, value)) = extra_env {
+        command.env(key, value);
+    }
     if let Some(dir) = cwd {
         command.current_dir(dir);
     }
@@ -1171,7 +1185,11 @@ async fn install_engine(
                 if cancel2.load(Ordering::SeqCst) {
                     return Err("설치를 멈췄습니다. 받다 만 파일은 다음에 이어받습니다.".to_string());
                 }
-                run_uv_install(&uv2, &args, &log2, &cancel2)
+                // KIMODO's upstream setup.py builds its optional C++ motion-correction
+                // extension by default. Ordinary app users have no CMake/MSVC toolchain.
+                // Upstream explicitly supports installing only the Python model code;
+                // the worker then runs without that optional correction pass.
+                run_uv_install(&uv2, &args, &log2, &cancel2, engine == "kimodo")
             })
             .await
             .map_err(|e| err("패키지 설치를 기다리지 못했습니다", e))??;
@@ -1217,7 +1235,7 @@ async fn install_engine(
                     chosen2.to_string_lossy().to_string(),
                 ];
                 let _turn = UV_INSTALL_LOCK.lock_safe();
-                run_uv_install(&uv2, &args, &log2, &cancel2).map(|_| true)
+                run_uv_install(&uv2, &args, &log2, &cancel2, false).map(|_| true)
             })
             .await;
             match outcome {
@@ -2072,6 +2090,7 @@ pub(crate) fn engines_status(app: AppHandle, family: &'static Family) -> Res<Vec
             models_ready: models_ready(&root, &manifest),
             disk_bytes: if installed { record.disk_bytes } else { 0 },
             weights_ready: installed && record.weights_ready,
+            readiness_evidence: crate::engine_evidence::inspect(&root, id),
             prefetch: manifest.prefetch,
             last_error: record.last_error,
             experimental: manifest.experimental,
@@ -2096,6 +2115,7 @@ pub(crate) fn engines_status(app: AppHandle, family: &'static Family) -> Res<Vec
         models_ready: false,
         disk_bytes: 0,
         weights_ready: false,
+        readiness_evidence: json!({"files":{"status":"not-checked"}}),
         prefetch: false,
         last_error: String::new(),
         experimental: false,
@@ -2695,6 +2715,7 @@ pub(crate) fn generate_blocking(
     opts: Value,
     timeout: u64,
 ) -> Res<GenerateResult> {
+    let _gpu_access = crate::gpu_handoff::GPU_ACCESS.try_read().map_err(|_| "gpu_handoff_native_exclusive")?;
     let started = Instant::now();
     let engine = known_engine(&engine)?.to_string();
     let out = PathBuf::from(&output_path);
@@ -2750,6 +2771,7 @@ pub(crate) fn generate_blocking(
     let worker = ensure_worker(&app, &state, &engine)?;
     let request = json!({
         "op": "generate",
+        "network_policy": "local-only",
         "output": temp.to_string_lossy(),
         "opts": &opts,
     });
@@ -2773,11 +2795,16 @@ pub(crate) fn generate_blocking(
             log::warn!("{engine}: GPU 문맥이 깨져 워커를 내립니다 — {message}");
             stop_worker(&app, &state, &engine);
         }
-        return Err(message);
+        return Err(if engine == "ltx25" {
+            format!("{message}; audio_validation={}", reply.get("audio").cloned().unwrap_or(json!({"expected":true,"output_verified":false})))
+        } else { message });
     }
     if !temp.is_file() {
         return Err("결과 파일이 만들어지지 않았습니다.".into());
     }
+    let generated_wav = if engine == "ltx25" {
+        Some(publish_generated_audio(&temp, &final_path, &reply)?)
+    } else { None };
     if let Err(e) = fs::rename(&temp, &final_path) {
         return Err(format!(
             "결과 파일로 바꾸지 못했습니다: {e}. 만든 것은 여기 남겨 두었습니다 — {}",
@@ -2790,6 +2817,13 @@ pub(crate) fn generate_blocking(
     remeasure_disk_in_background(&app, &engine, DISK_REMEASURE_AFTER_RUN_SECS);
 
     let mut meta = reply.clone();
+    if let Some(wav) = generated_wav {
+        if let Some(audio) = meta.get_mut("audio").and_then(Value::as_object_mut) {
+            audio.insert("wav_path".into(), json!(wav.to_string_lossy()));
+        }
+        // 최종 MP4와 WAV를 모두 공개한 뒤 이 작업의 임시 WAV만 정리한다.
+        let _ = fs::remove_file(temp.with_extension("generated-audio.wav"));
+    }
     if let Some(object) = meta.as_object_mut() {
         object.remove("id");
         object.remove("event");
@@ -2802,6 +2836,21 @@ pub(crate) fn generate_blocking(
         seconds: started.elapsed().as_secs_f64(),
         meta,
     })
+}
+
+fn publish_generated_audio(temp: &std::path::Path, final_path: &std::path::Path, reply: &Value) -> Res<PathBuf> {
+    let source = temp.with_extension("generated-audio.wav");
+    let target = final_path.with_extension("generated-audio.wav");
+    let audio = reply.get("audio").ok_or("LTX 생성 음원 메타데이터가 없습니다.")?;
+    if audio.get("wav_path").and_then(Value::as_str) != source.to_str()
+        || audio.get("wav_float32_exact").and_then(Value::as_bool) != Some(true)
+        || audio.get("output_audio_tracks").and_then(Value::as_u64) != Some(1)
+        || !source.is_file() {
+        return Err("LTX 생성 음원의 보존·검증 결과가 없습니다.".into());
+    }
+    // 같은 폴더의 링크 생성은 기존 대상이 있으면 실패하여 원본을 덮어쓰지 않는다.
+    fs::hard_link(&source, &target).map_err(|e| format!("생성 WAV를 보존하지 못했습니다: {e}; 임시 음원: {}", source.display()))?;
+    Ok(target)
 }
 
 fn retain_generation_worker(opts: &Value, reply: &Value) -> bool {
@@ -2819,6 +2868,35 @@ fn retain_generation_worker(opts: &Value, reply: &Value) -> bool {
         }
         Some(_) => false,
         None => false,
+    }
+}
+
+#[cfg(test)]
+mod generated_audio_tests {
+    use super::publish_generated_audio;
+    use serde_json::json;
+    use std::fs;
+    #[test]
+    fn generated_audio_preserved_without_overwriting_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let temp = dir.path().join("temporary.mp4");
+        let final_path = dir.path().join("final.mp4");
+        let wav = temp.with_extension("generated-audio.wav");
+        fs::write(&wav, b"validated-float-wav-fixture").unwrap();
+        let reply = json!({"audio":{"wav_path":wav.to_str().unwrap(),"wav_float32_exact":true,"output_audio_tracks":1}});
+        let target = publish_generated_audio(&temp,&final_path,&reply).unwrap();
+        assert_eq!(fs::read(&target).unwrap(),fs::read(&wav).unwrap());
+        assert!(publish_generated_audio(&temp,&final_path,&reply).is_err());
+        assert_eq!(fs::read(&target).unwrap(),b"validated-float-wav-fixture");
+    }
+    #[test]
+    fn generated_audio_missing_or_foreign_path_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let temp=dir.path().join("temporary.mp4");
+        let final_path=dir.path().join("final.mp4");
+        assert!(publish_generated_audio(&temp,&final_path,&json!({})).is_err());
+        assert!(publish_generated_audio(&temp,&final_path,&json!({"audio":{"wav_path":"another.wav","wav_float32_exact":true,"output_audio_tracks":1}})).is_err());
+        assert!(!final_path.with_extension("generated-audio.wav").exists());
     }
 }
 
@@ -2992,4 +3070,15 @@ mod git_cache_tests {
                 .join(format!("uvcache-test-{}", std::process::id())),
         );
     }
+}
+
+// 유지보수 종료는 기존 강제 정리 fallback에 들어갈 자식이 하나라도 있으면 거절합니다.
+pub(crate) fn maintenance_blockers(app: &AppHandle) -> Vec<String> {
+    let state = app.state::<UpscaleState>();
+    let mut blockers = Vec::new();
+    if !state.cancels.lock_safe().is_empty() || !state.prefetching.lock_safe().is_empty() { blockers.push("엔진 설치 또는 가중치 다운로드가 남아 있습니다.".into()); }
+    if !state.workers.lock_safe().is_empty() { blockers.push("상주 워커가 남아 있어 강제 종료 없는 앱 종료를 확인할 수 없습니다.".into()); }
+    if state.queues.lock_safe().values().any(|queue| queue.try_lock().is_err()) { blockers.push("엔진 작업이 진행 중입니다.".into()); }
+    if !side_children().lock_safe().is_empty() { blockers.push("앱이 시작한 설치 또는 처리 자식이 남아 있습니다.".into()); }
+    blockers
 }

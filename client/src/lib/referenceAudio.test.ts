@@ -6,6 +6,7 @@ describe("구도 영상과 음원 조각의 공유 시계", () => {
     expect(audioReferenceWindow(0, 360, 24, 7.5)).toEqual({ start: 7.5, duration: 15 });
     expect(audioReferenceWindow(360, 360, 24, 7.5)).toEqual({ start: 22.5, duration: 15 });
     expect(audioReferenceWindow(720, 117, 24, 7.5)).toEqual({ start: 37.5, duration: 117 / 24 });
+    expect(audioReferenceWindow(0, 360, 24, 0, 5)).toEqual({ start: -5, duration: 15 });
   });
 
   it("별도 레퍼런스 WAV가 길이·채널·표본을 보존한다", async () => {

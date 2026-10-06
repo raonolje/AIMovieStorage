@@ -47,6 +47,7 @@ import { ObjectFields } from "./ObjectFields";
 import { GroupCards } from "./ObjectGroupPanel";
 import FaceSetCard from "@/components/FaceSetCard";
 import RoomList from "./RoomList";
+import FloorplanEditor from "./FloorplanEditor";
 import type { FaceSet } from "@/lib/faceSets";
 import type { RoomPreset } from "@/lib/roomPreset";
 import type { PlannerBackground, PlannerVideo } from "./usePlannerMedia";
@@ -685,6 +686,7 @@ function RoomProperties({
         {t("밑면은 바닥(y=0)입니다. 방 크기를 줄이면 배경에 비해 인물이 더 커 보입니다.")}
         {domeLike && <> {t("파노라마의 지평선은 눈높이 1.6m에 옵니다.")}</>}
       </p>
+      {!outdoor && !horizon && <FloorplanEditor room={room} setState={setState} />}
 
       {/*
         ── 배경 흐름 ─────────────────────────────────────────────────────

@@ -149,6 +149,7 @@ export function TimelinePanel({
         setState={setState}
         playhead={playhead}
         projectName={projectName}
+        plannerCharacters={plannerCharacters}
         sceneTitle={sceneTitle}
         cutOrder={cutOrder}
         open={openSections.music ?? false}

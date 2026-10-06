@@ -1,12 +1,12 @@
 //! MCP는 켜진 앱의 편집기만 조종합니다. stdio 프로세스는 저장본을 직접 고치지 않습니다.
 use crate::{LockSafe, Res};
+use crate::control_lifecycle::{Discovery, ForwarderLifecycle, session_id};
 use fs2::FileExt;
 use rmcp::{
     model::*,
     service::{RequestContext, RoleServer},
     ErrorData as McpError, ServerHandler, ServiceExt,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -95,11 +95,6 @@ fn atomic_json(path: &std::path::Path, value: &Value) -> Res<()> {
     Ok(())
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-struct Discovery {
-    port: u16,
-    token: String,
-}
 
 struct Host {
     task: tauri::async_runtime::JoinHandle<()>,
@@ -116,7 +111,7 @@ pub struct ControlState {
 #[tauri::command]
 pub fn control_status(state: tauri::State<ControlState>) -> Res<Value> {
     Ok(
-        json!({"enabled":state.host.lock_safe().is_some(), "command":std::env::current_exe().map_err(|e|e.to_string())?, "args":["--mcp"], "edition":crate::edition::EDITION}),
+        json!({"enabled":state.host.lock_safe().is_some(), "command":std::env::current_exe().map_err(|e|e.to_string())?, "args":["--mcp"], "edition":crate::edition::EDITION, "mcpLifecycle":"bound-session-normal-close-v1"}),
     )
 }
 
@@ -129,18 +124,13 @@ pub async fn control_enable(
     // 켜기/끄기를 직렬화합니다. 실제 소켓 처리는 별도 비동기 작업입니다.
     let mut host = state.host.lock_safe();
     if !enabled {
+        if let Some(old) = host.as_ref() {
+            publish_closed_discovery(&directory()?.join("host.json"), &old.token, "control_disabled")?;
+        }
         if let Some(old) = host.take() {
             old.task.abort();
             state.pending.lock_safe().clear();
-            let path = directory()?.join("host.json");
-            // 발견 파일을 지울 때까지 다른 앱이 이 판의 소유권을 가져가지 못하게 합니다.
-            if let Ok(bytes) = fs::read(&path) {
-                if serde_json::from_slice::<Discovery>(&bytes)
-                    .is_ok_and(|entry| entry.token == old.token)
-                {
-                    let _ = fs::remove_file(path);
-                }
-            }
+            // 완료 기록은 새 GUI에도 넘겨 같은 세션의 전달기만 정상 종료하게 합니다.
             drop(old);
         }
         return Ok(json!({"enabled":false}));
@@ -161,10 +151,11 @@ pub async fn control_enable(
     let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
         .map_err(|e| e.to_string())?;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let discovery = Discovery {
-        port: listener.local_addr().map_err(|e| e.to_string())?.port(),
-        token: uuid::Uuid::new_v4().to_string(),
-    };
+    let previous = read_discovery(&folder.join("host.json")).ok();
+    let discovery = Discovery::active(
+        listener.local_addr().map_err(|e| e.to_string())?.port(),
+        uuid::Uuid::new_v4().to_string(), previous.as_ref(),
+    );
     atomic_json(
         &folder.join("host.json"),
         &serde_json::to_value(&discovery).map_err(|e| e.to_string())?,
@@ -203,6 +194,8 @@ async fn serve_connection(
     token: &str,
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
 ) -> Res<()> {
+    MAINTENANCE_CONNECTIONS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let _maintenance_connection = MaintenanceConnection;
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader.take(REQUEST_LIMIT));
     let mut line = String::new();
@@ -304,13 +297,20 @@ fn claim_journal(owner: &mut Option<File>) -> Res<()> {
     Ok(())
 }
 
-struct AppMcp;
-async fn forward(method: &str, params: Value) -> Res<Value> {
+#[derive(Clone)]
+struct AppMcp { lifecycle: Arc<Mutex<ForwarderLifecycle>> }
+struct ForwarderRequest(Arc<Mutex<ForwarderLifecycle>>);
+impl Drop for ForwarderRequest { fn drop(&mut self) { self.0.lock_safe().finish(); } }
+impl AppMcp {
+    fn begin_request(&self) -> Res<ForwarderRequest> { self.lifecycle.lock_safe().begin()?; Ok(ForwarderRequest(self.lifecycle.clone())) }
+}
+async fn forward(method: &str, params: Value) -> Res<(Value, String)> {
     let discovery: Discovery = serde_json::from_slice(
         &fs::read(directory()?.join("host.json"))
             .map_err(|_| "AIMovieStorage를 열고 설정에서 외부 조종기를 켜세요.")?,
     )
     .map_err(|e| e.to_string())?;
+    if discovery.currently_closed() { return Err("이 GUI 세션이 정상 종료됐습니다. 앱을 정상 시작한 뒤 MCP를 다시 연결하세요.".into()); }
     let stream = TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, discovery.port))
         .await
         .map_err(|_| "앱에 연결하지 못했습니다. 설정에서 외부 조종기를 다시 켜세요.")?;
@@ -335,7 +335,7 @@ async fn forward(method: &str, params: Value) -> Res<Value> {
     if let Some(error) = response["error"].as_str() {
         return Err(error.into());
     }
-    Ok(response["result"].clone())
+    Ok((response["result"].clone(), session_id(&discovery.token)))
 }
 
 impl ServerHandler for AppMcp {
@@ -351,9 +351,9 @@ impl ServerHandler for AppMcp {
         _: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        let value = forward("tools/list", json!({}))
-            .await
-            .map_err(|e| McpError::internal_error(e, None))?;
+        let _request = self.begin_request().map_err(|e| McpError::internal_error(e, None))?;
+        let (value, session) = forward("tools/list", json!({})).await.map_err(|e| McpError::internal_error(e, None))?;
+        self.lifecycle.lock_safe().bind(session);
         serde_json::from_value(value).map_err(|e| McpError::internal_error(e.to_string(), None))
     }
     async fn call_tool(
@@ -361,6 +361,7 @@ impl ServerHandler for AppMcp {
         request: CallToolRequestParams,
         _: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
+        let _request = self.begin_request().map_err(|e| McpError::internal_error(e, None))?;
         let result = match forward(
             "tools/call",
             serde_json::to_value(request)
@@ -368,25 +369,68 @@ impl ServerHandler for AppMcp {
         )
         .await
         {
-            Ok(value) => serde_json::from_value::<CallToolResult>(value)
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+            Ok((value, session)) => {
+                self.lifecycle.lock_safe().bind(session);
+                serde_json::from_value::<CallToolResult>(value).map_err(|e| McpError::internal_error(e.to_string(), None))?
+            },
             Err(error) => CallToolResult::error(vec![ContentBlock::text(error)]),
         };
         Ok(result.into())
     }
 }
 
+fn read_discovery(path: &std::path::Path) -> Res<Discovery> {
+    let bytes=fs::read(path).map_err(|e| e.to_string())?;
+    if bytes.len()>65536 { return Err("제어 등록 정보가 너무 큽니다.".into()); }
+    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
+}
+fn publish_closed_discovery(path: &std::path::Path, token: &str, reason: &str) -> Res<()> {
+    let mut entry=read_discovery(path)?;
+    if entry.token!=token { return Err("다른 GUI의 제어 등록 정보를 변경하지 않습니다.".into()); }
+    entry.close(reason)?;
+    atomic_json(path, &serde_json::to_value(entry).map_err(|e| e.to_string())?)
+}
+pub(crate) fn publish_normal_shutdown(app: &tauri::AppHandle) -> Res<()> {
+    let state=app.state::<ControlState>();
+    let host=state.host.lock_safe();
+    if let Some(host)=host.as_ref() { publish_closed_discovery(&directory()?.join("host.json"), &host.token, "normal_shutdown")?; }
+    Ok(())
+}
+async fn wait_for_bound_gui_close(lifecycle: Arc<Mutex<ForwarderLifecycle>>, path: PathBuf) {
+    let mut timer=tokio::time::interval(Duration::from_millis(100));
+    loop {
+        timer.tick().await;
+        if let Ok(entry)=read_discovery(&path) {
+            if lifecycle.lock_safe().request_stop_if_closed(&entry) { return; }
+        }
+        // 파일 없음/일시 오류/다른 세션/제어 포트 접속 실패를 종료 신호로 추정하지 않습니다.
+    }
+}
 pub fn run_mcp() -> Res<()> {
-    tokio::runtime::Runtime::new()
-        .map_err(|e| e.to_string())?
-        .block_on(async {
-            let service = AppMcp
-                .serve(rmcp::transport::stdio())
-                .await
-                .map_err(|e| e.to_string())?;
-            service.waiting().await.map_err(|e| e.to_string())?;
-            Ok(())
-        })
+    let runtime=tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+    let result=runtime.block_on(async {
+        // GUI에 실제로 붙지 못한 headless 전달기가 EXE를 계속 잠그지 않게 합니다.
+        let (tools, session)=forward("tools/list",json!({})).await?;
+        serde_json::from_value::<ListToolsResult>(tools).map_err(|e|e.to_string())?;
+        let lifecycle=Arc::new(Mutex::new(ForwarderLifecycle::default()));
+        lifecycle.lock_safe().bind(session);
+        let path=directory()?.join("host.json");
+        let handler=AppMcp { lifecycle:lifecycle.clone() };
+        let service=tokio::select! {
+            result=handler.serve(rmcp::transport::stdio()) => result.map_err(|e|e.to_string())?,
+            _=wait_for_bound_gui_close(lifecycle.clone(),path.clone()) => return Ok(()),
+        };
+        let cancel=service.cancellation_token();
+        let monitor=tokio::spawn(async move { wait_for_bound_gui_close(lifecycle,path).await; cancel.cancel(); });
+        let ended=service.waiting().await.map_err(|e|e.to_string());
+        monitor.abort(); // 이 전달기가 만든 파일 감시 future만 정리합니다. 다른 프로세스에 신호를 보내지 않습니다.
+        ended?;
+        Ok(())
+    });
+    // Tokio stdin의 취소 불가능한 blocking read를 runtime Drop에서 영원히 기다리지 않습니다.
+    // MCP 응답/transport 종료는 waiting()으로 먼저 기다리고, 자신의 프로세스는 main에서 정상 반환합니다.
+    runtime.shutdown_background();
+    result
 }
 
 #[cfg(test)]
@@ -424,4 +468,99 @@ mod tests {
             json!([2, 3])
         );
     }
+    #[test]
+    fn close_marker_requires_own_registered_session() {
+        let dir=tempfile::tempdir().unwrap(); let path=dir.path().join("host.json");
+        let entry=Discovery::active(1234,"owner".into(),None);
+        atomic_json(&path,&serde_json::to_value(entry).unwrap()).unwrap();
+        let before=fs::read(&path).unwrap();
+        assert!(publish_closed_discovery(&path,"different","normal_shutdown").is_err());
+        assert_eq!(fs::read(&path).unwrap(),before);
+        publish_closed_discovery(&path,"owner","normal_shutdown").unwrap();
+        assert!(read_discovery(&path).unwrap().currently_closed());
+    }
+    #[test]
+    fn missing_registration_does_not_create_a_close_marker() {
+        let dir=tempfile::tempdir().unwrap(); let path=dir.path().join("host.json");
+        assert!(publish_closed_discovery(&path,"owner","normal_shutdown").is_err());
+        assert!(!path.exists());
+    }
+    // 자신의 test executable만 stdio 자식으로 쓴다. 실제 GUI/설치 IPC는 사용하지 않는다.
+    #[test]
+    fn stdio_child_fixture() {
+        if std::env::var_os("AIMOVIESTORAGE_STDIO_FIXTURE").is_some() { run_mcp().unwrap(); }
+    }
+    fn wait_own_child(child: &mut std::process::Child) -> std::process::ExitStatus {
+        let deadline=std::time::Instant::now()+Duration::from_secs(5);
+        loop {
+            if let Some(status)=child.try_wait().unwrap() { return status; }
+            if std::time::Instant::now()>=deadline {
+                // 실패해도 보유한 자신의 stdin EOF로만 정리한다. kill은 하지 않는다.
+                drop(child.stdin.take());
+                let status=child.wait().unwrap();
+                panic!("own stdio child did not close before deadline; cleaned by EOF, status={status}");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    fn stdio_scenario(mode: &str) {
+        use std::io::{BufRead, BufReader as StdReader};
+        use std::process::{Command, Stdio};
+        let dir=tempfile::tempdir().unwrap(); let path=dir.path().join("host.json");
+        let listener=std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST,0)).unwrap();
+        atomic_json(&path,&serde_json::to_value(Discovery::active(listener.local_addr().unwrap().port(),"fixture".into(),None)).unwrap()).unwrap();
+        let pending_reply=mode=="pending_reply"; let bridge_path=path.clone();
+        let (boot_tx,boot_rx)=std::sync::mpsc::channel();
+        let bridge=std::thread::spawn(move || {
+            for index in 0..if pending_reply {2}else{1} {
+                let (mut socket,_)=listener.accept().unwrap(); socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut line=String::new(); StdReader::new(socket.try_clone().unwrap()).read_line(&mut line).unwrap();
+                let request:Value=serde_json::from_str(&line).unwrap(); assert_eq!(request["token"],"fixture");
+                let value=if index==0 { assert_eq!(request["method"],"tools/list"); json!({"result":{"tools":[]}}) }
+                    else {
+                        assert_eq!(request["method"],"tools/call");
+                        publish_closed_discovery(&bridge_path,"fixture","normal_shutdown").unwrap();
+                        std::thread::sleep(Duration::from_millis(250));
+                        json!({"result":{"content":[{"type":"text","text":"completed"}],"structuredContent":{"completed":true}}})
+                    };
+                socket.write_all(&response_bytes(&value,4096).unwrap()).unwrap();
+                if index==0 { boot_tx.send(()).unwrap(); }
+            }
+        });
+        let mut child=Command::new(std::env::current_exe().unwrap())
+            .args(["--exact","control::tests::stdio_child_fixture","--nocapture"])
+            .env("AIMOVIESTORAGE_STDIO_FIXTURE","1").env("AIMOVIESTORAGE_TEST_CONTROL_DIR",dir.path())
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        let child_pid=child.id(); let started=std::time::Instant::now();
+        let (tx,rx)=std::sync::mpsc::channel(); let stdout=child.stdout.take().unwrap();
+        let reader=std::thread::spawn(move || { for line in StdReader::new(stdout).lines().map_while(Result::ok) { if let Some(start)=line.find('{') { if let Ok(value)=serde_json::from_str::<Value>(&line[start..]) { let _=tx.send(value); } } } });
+        boot_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        if mode=="before_initialize" {
+            std::thread::sleep(Duration::from_millis(150));
+            publish_closed_discovery(&path,"fixture","normal_shutdown").unwrap();
+        } else {
+            writeln!(child.stdin.as_mut().unwrap(),"{}",json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"cpu-fixture","version":"1"}}})).unwrap();
+            let init=rx.recv_timeout(Duration::from_secs(5)).unwrap(); assert_eq!(init["id"],1);
+            writeln!(child.stdin.as_mut().unwrap(),"{}",json!({"jsonrpc":"2.0","method":"notifications/initialized"})).unwrap();
+            if pending_reply {
+                writeln!(child.stdin.as_mut().unwrap(),"{}",json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fixture","arguments":{}}})).unwrap();
+                let reply=rx.recv_timeout(Duration::from_secs(5)).unwrap(); assert_eq!(reply["id"],2); assert_eq!(reply["result"]["structuredContent"]["completed"],true);
+            } else { drop(child.stdin.take()); }
+        }
+        let stdin_still_open=child.stdin.is_some(); let status=wait_own_child(&mut child);
+        drop(child.stdin.take()); reader.join().unwrap(); bridge.join().unwrap();
+        assert!(status.success());
+        if mode!="eof" { assert!(stdin_still_open); }
+        eprintln!("owned_stdio_cpu mode={mode} pid={child_pid} parent_pid={} elapsed_ms={} stdin_open_at_natural_exit={stdin_still_open} exit={} forced_kill=false",std::process::id(),started.elapsed().as_millis(),status.code().unwrap_or(-1));
+    }
+    #[test] fn own_stdio_eof_exits_naturally() { stdio_scenario("eof"); }
+    #[test] fn normal_gui_close_before_initialize_does_not_wait_for_stdin() { stdio_scenario("before_initialize"); }
+    #[test] fn normal_gui_close_preserves_pending_reply_then_self_exits() { stdio_scenario("pending_reply"); }
 }
+
+pub(crate) fn maintenance_pending(app: &tauri::AppHandle) -> usize {
+    app.state::<ControlState>().pending.lock_safe().len() + MAINTENANCE_CONNECTIONS.load(std::sync::atomic::Ordering::SeqCst)
+}
+static MAINTENANCE_CONNECTIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+struct MaintenanceConnection;
+impl Drop for MaintenanceConnection { fn drop(&mut self) { MAINTENANCE_CONNECTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); } }

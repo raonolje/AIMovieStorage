@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+import { getTask } from "./taskQueue";
 import { z } from "zod";
 import { assetSrc, importProjectMediaAsset, isVideoFile } from "./mediaLibrary";
 import { controlMediaTarget, mediaTargetSchema } from "./controlMedia";
@@ -15,6 +17,7 @@ export const mediaRegisterSchema = z.object({
   sourcePath: z.string().min(1).max(4000),
   promptKo: z.string().max(32_000).optional(), promptEn: z.string().max(32_000).optional(),
   makePrimary: z.boolean().optional(),
+  previewJobId: id.optional(),
 }).strict();
 export const assetSetPrimarySchema = z.object({
   projectId: id, expectedRevision: id, target: mediaTargetSchema, assetId: id,
@@ -53,6 +56,20 @@ function shelf(draft: NonNullable<ReturnType<typeof readProject>>, target: Targe
 /** Codex/Claude가 만든 로컬 결과를 앱 프로젝트에 복사하고 출처·프롬프트·대표 선택을 함께 저장합니다. */
 export async function registerControlMedia(raw: unknown) {
   const input = mediaRegisterSchema.parse(raw);
+  let previewMetadata: import("./projectTypes").SceneVideoAsset["previewMetadata"];
+  let verifyPreview: ((previewPath:string)=>Promise<unknown>) | undefined;
+  if(input.previewJobId){
+    const job=getTask(input.previewJobId),data=job?.result?.data;
+    if(!job||job.kind!=="control.aac-preview"||job.status!=="done"||job.projectId!==input.projectId||data?.cancelled||input.target.kind!=="cut"||data?.sourceCutId!==input.target.id||job.result?.paths?.[0]!==input.sourcePath||input.makePrimary===true||input.promptKo!==undefined||input.promptEn!==undefined)throw new ProjectControlError("invalid_preview_registration","Completed same-project preview job and nonprimary registration required.");
+    const master=readProject(input.projectId)?.scenes.flatMap(s=>s.cuts).find(c=>c.id===input.target.id)?.videos.find(v=>v.id===data.masterAssetId);
+    if(!master)throw new ProjectControlError("invalid_preview_master","Original master association missing.");
+    const verification=(data.meta as {aacPreview?:Record<string,unknown>}|undefined)?.aacPreview;
+    if(verification?.allVideoPacketsExact!==true||verification?.allDecodedFramesExact!==true||verification?.originalUnchanged!==true||verification?.lossyAudio!==true||verification?.masterSha256!==data.masterSha256||typeof verification?.outputSha256!=="string")throw new ProjectControlError("invalid_preview_verification","Verified preview provenance required.");
+    verifyPreview=(previewPath:string)=>invoke("aac_preview_verify",{sourceVideo:master.filePath,sourceSha256:data.masterSha256,previewVideo:previewPath,previewSha256:verification.outputSha256});
+    await verifyPreview(input.sourcePath);
+    previewMetadata={masterAssetId:String(data.masterAssetId),masterSha256:String(data.masterSha256),previewJobId:input.previewJobId,lossyAudio:true,verification:(data.meta??{}) as Record<string,unknown>};
+  }
+  if (/\.wav$/i.test(input.sourcePath)) return registerControlAudio(input);
   const video = isVideoFile(input.sourcePath);
   if (!video && !/\.(png|jpe?g|webp|gif|bmp)$/i.test(input.sourcePath))
     throw new ProjectControlError("unsupported_media", "이미지 또는 영상 파일만 등록할 수 있습니다.");
@@ -65,7 +82,7 @@ export async function registerControlMedia(raw: unknown) {
   if (!draft) throw new ProjectControlError("project_not_found", "프로젝트를 찾지 못했습니다.");
   const previous = shelf(draft, input.target, video).find(item => item.importOperationId === input.operationId);
   if (previous) {
-    if (previous.importSourcePath !== input.sourcePath)
+    if (previous.importSourcePath !== input.sourcePath || (video && (previous as SceneVideoAsset).previewMetadata?.previewJobId !== input.previewJobId))
       throw new ProjectControlError("operation_conflict", "같은 작업 ID에 다른 원본 파일을 지정했습니다.");
     return { assetId: previous.id, path: previous.filePath, reused: true, persisted: true };
   }
@@ -78,6 +95,7 @@ export async function registerControlMedia(raw: unknown) {
     assetType: video ? "scene-video" : destination.assetType,
     ownerName: destination.ownerName, stem: destination.stem });
   if (!imported) throw new ProjectControlError("import_unavailable", "데스크톱 앱의 프로젝트 저장 폴더가 필요합니다.");
+  if(verifyPreview)await verifyPreview(imported.path);
   const latest = await getProjectSnapshot(input.projectId, "summary");
   if (latest.revision !== input.expectedRevision)
     throw new ProjectControlError("revision_conflict", "파일 복사 중 프로젝트가 바뀌었습니다. 복사된 파일을 확인하고 최신 상태에서 다시 요청하세요.", { actualRevision: latest.revision, copiedPath: imported.path });
@@ -94,7 +112,7 @@ export async function registerControlMedia(raw: unknown) {
     const image: GeneratedImageAsset = { id: assetId, name: imported.name, filePath: imported.path,
       thumb: assetSrc(imported.path), file: null, isPrimary: primary, ...provenance };
     const movie: SceneVideoAsset = { id: assetId, name: imported.name, filePath: imported.path,
-      isPrimary: primary, endFramePath: registeredEndFrame, ...provenance };
+      isPrimary: primary, endFramePath: registeredEndFrame, ...provenance, ...(previewMetadata ? {previewMetadata} : {}) };
     if (input.target.kind === "cut") return { ...current, scenes: current.scenes.map(scene => ({ ...scene,
       cuts: scene.cuts.map(cut => cut.id !== input.target.id ? cut : video
         ? { ...cut, videos: [...cut.videos.map(item => primary ? { ...item, isPrimary: false } : item), movie],
@@ -118,6 +136,45 @@ export async function registerControlMedia(raw: unknown) {
 }
 
 /** 선반마다 대표 한 장만 남깁니다. */
+async function registerControlAudio(input: z.infer<typeof mediaRegisterSchema>) {
+  if (input.target.kind !== "character")
+    throw new ProjectControlError("invalid_target", "WAV는 인물의 음성 자료로 등록해야 합니다.");
+  const draft = readProject(input.projectId);
+  const owner = draft?.characters.find(item => item.id === input.target.id);
+  if (!draft || !owner) throw new ProjectControlError("character_not_found", "인물을 찾지 못했습니다.");
+  const previous = owner.voiceReferences?.find(item => item.operationId === input.operationId);
+  if (previous) {
+    if (previous.importSourcePath !== input.sourcePath)
+      throw new ProjectControlError("operation_conflict", "같은 작업 ID의 원음 경로가 다릅니다.");
+    return {assetId:previous.id,path:previous.filePath,reused:true,persisted:true};
+  }
+  const snapshot = await getProjectSnapshot(input.projectId,"summary");
+  if (snapshot.revision !== input.expectedRevision)
+    throw new ProjectControlError("revision_conflict", "프로젝트의 최신 상태를 읽어 주세요.");
+  const imported = await importProjectMediaAsset(input.sourcePath, {
+    projectName:projectFolderName(input.projectId,draft.title),assetType:"character-voice",
+    ownerName:owner.name,stem:`${owner.name}_입력음성`,
+  });
+  if (!imported) throw new ProjectControlError("import_unavailable", "로컬 음원 복사가 필요합니다.");
+  const latest = await getProjectSnapshot(input.projectId,"summary");
+  if (latest.revision !== input.expectedRevision)
+    throw new ProjectControlError("revision_conflict", "복사 중 프로젝트가 바뀌었습니다.", {copiedPath:imported.path});
+  const assetId=uid(),primary=input.makePrimary ?? false;
+  const outcome=await writeProjectAndConfirm(input.projectId,current=>{
+    const character=current.characters.find(item=>item.id===input.target.id);
+    if (!character || JSON.stringify(character.voiceReferences || [])!==JSON.stringify(owner.voiceReferences || []))
+      throw new ProjectControlError("revision_conflict", "인물 음성 자료가 바뀌었습니다.");
+    return {...current,characters:current.characters.map(item=>item.id!==input.target.id ? item : {
+      ...item,voiceReferences:[...(item.voiceReferences || []).map(reference=>primary ? {...reference,isPrimary:false} : reference),
+        {id:assetId,operationId:input.operationId,filePath:imported.path,source:"imported" as const,
+          importSourcePath:input.sourcePath,dialogue:input.promptKo,isPrimary:primary}],
+    })};
+  });
+  if (!outcome.persisted) throw new ProjectControlError("save_failed", "음원 등록 저장을 확인하지 못했습니다.",{copiedPath:imported.path});
+  return {assetId,path:imported.path,reused:false,persisted:true,primary,cardPromptUpdated:false,
+    source:"imported",audioValidation:"native_a2v_validates_stereo_pcm16_before_inference",lipSyncVerified:false};
+}
+
 export async function setControlAssetPrimary(raw: unknown) {
   const input = assetSetPrimarySchema.parse(raw);
   const snapshot = await getProjectSnapshot(input.projectId, "summary");

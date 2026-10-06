@@ -1,3 +1,4 @@
+vi.mock("@tauri-apps/api/core",()=>({invoke:async()=>true}));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mock = vi.hoisted(() => ({
@@ -6,7 +7,9 @@ const mock = vi.hoisted(() => ({
   write: vi.fn(),
   revision: "r1",
   endFrame: vi.fn(),
+  task: null as any,
 }));
+vi.mock("./taskQueue",()=>({getTask:()=>mock.task}));
 vi.mock("./mediaLibrary", () => ({
   assetSrc: (path: string) => `asset://${path}`,
   importProjectMediaAsset: mock.importFile,
@@ -35,6 +38,7 @@ import { registerControlMedia, setControlAssetPrimary } from "./controlAssetRegi
 beforeEach(() => {
   mock.draft = { title: "Test", characters: [], backgrounds: [], scenes: [{ cuts: [{ id: "cut-1", images: [], videos: [] }] }] };
   mock.revision = "r1";
+  mock.task = null;
   mock.importFile.mockReset().mockResolvedValue({ path: "C:/project/result.png", name: "result" });
   mock.endFrame.mockReset().mockResolvedValue("C:/project/result_마지막프레임.png");
   mock.write.mockReset().mockImplementation(async (_id: string, update: (draft: unknown) => object) => {
@@ -44,6 +48,41 @@ beforeEach(() => {
 });
 
 describe("chat asset registration", () => {
+  it("persists verified preview master provenance without changing primary or prompts",async()=>{
+    mock.draft.scenes[0].cuts[0].videos=[{id:"master",filePath:"master.mp4",isPrimary:true}];
+    mock.importFile.mockResolvedValue({path:"C:/project/preview.mp4",name:"preview"});
+    mock.task={kind:"control.aac-preview",status:"done",projectId:"p",result:{paths:["C:/qa/preview.mp4"],data:{sourceCutId:"cut-1",masterAssetId:"master",masterSha256:"1".repeat(64),lossyAudio:true,meta:{aacPreview:{allVideoPacketsExact:true,allDecodedFramesExact:true,originalUnchanged:true,lossyAudio:true,masterSha256:"1".repeat(64),outputSha256:"2".repeat(64)}}}}};
+    const input={projectId:"p",expectedRevision:"r1",operationId:"preview-reg",target:{kind:"cut",id:"cut-1"},sourcePath:"C:/qa/preview.mp4",previewJobId:"preview-job",makePrimary:false};
+    await registerControlMedia(input);
+    expect(mock.draft.scenes[0].cuts[0].videos).toMatchObject([{id:"master",isPrimary:true},{isPrimary:false,previewMetadata:{masterAssetId:"master",masterSha256:"1".repeat(64),lossyAudio:true,previewJobId:"preview-job"}}]);
+    await expect(registerControlMedia(input)).resolves.toMatchObject({reused:true});expect(mock.importFile).toHaveBeenCalledOnce();
+    await expect(registerControlMedia({...input,makePrimary:true})).rejects.toThrow("nonprimary");
+    await expect(registerControlMedia({...input,sourcePath:"other.mp4"})).rejects.toThrow("nonprimary");
+  });
+  it("rejects missing, failed or cancelled preview job before copying",async()=>{
+    const input={projectId:"p",expectedRevision:"r1",operationId:"bad-preview",target:{kind:"cut",id:"cut-1"},sourcePath:"preview.mp4",previewJobId:"bad"};
+    await expect(registerControlMedia(input)).rejects.toThrow("preview job");
+    mock.task={kind:"control.aac-preview",status:"failed",projectId:"p"};await expect(registerControlMedia(input)).rejects.toThrow("preview job");expect(mock.importFile).not.toHaveBeenCalled();
+  });
+  it("WAV를 같은 프로젝트 인물의 입력 음원으로 복사하고 원본·카드 프롬프트를 보존한다",async()=>{
+    mock.draft.characters=[{id:"mori",name:"모리",promptKo:"기존 인물",voiceReferences:[{id:"old",filePath:"old.wav",isPrimary:true}]}];
+    mock.importFile.mockResolvedValue({path:"C:/project/mori.wav",name:"mori.wav"});
+    const input={projectId:"p",expectedRevision:"r1",operationId:"audio-1",target:{kind:"character",id:"mori"},sourcePath:"C:/qa/input.wav",promptKo:"숙제는 들어보셨나요?"};
+    const result=await registerControlMedia(input);
+    expect(result).toMatchObject({assetId:"new-asset",primary:false,source:"imported",cardPromptUpdated:false});
+    expect(mock.importFile).toHaveBeenCalledWith(input.sourcePath,expect.objectContaining({assetType:"character-voice"}));
+    expect(mock.draft.characters[0]).toMatchObject({promptKo:"기존 인물",voiceReferences:[{id:"old",isPrimary:true},{id:"new-asset",source:"imported",importSourcePath:input.sourcePath,isPrimary:false}]});
+    await expect(registerControlMedia(input)).resolves.toMatchObject({reused:true});
+    expect(mock.importFile).toHaveBeenCalledOnce();
+    await expect(registerControlMedia({...input,sourcePath:"another.wav"})).rejects.toThrow("원음 경로");
+  });
+  it("WAV의 잘못된 대상과 오래된 revision은 복사 전에 거부한다",async()=>{
+    const input={projectId:"p",expectedRevision:"r1",operationId:"audio-2",target:{kind:"cut",id:"cut-1"},sourcePath:"input.wav"};
+    await expect(registerControlMedia(input)).rejects.toThrow("인물");
+    mock.draft.characters=[{id:"mori",name:"모리"}];mock.revision="later";
+    await expect(registerControlMedia({...input,target:{kind:"character",id:"mori"}})).rejects.toThrow("최신");
+    expect(mock.importFile).not.toHaveBeenCalled();
+  });
   it("영상 후보는 자동 대표가 되지 않고 명시 선택 때 마지막 프레임을 함께 저장한다", async () => {
     mock.importFile.mockResolvedValue({ path: "C:/project/result.mp4", name: "result" });
     const target = { kind: "cut", id: "cut-1" };

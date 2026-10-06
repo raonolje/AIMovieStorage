@@ -245,6 +245,45 @@ describe("Magnific 데스크톱 조종의 미리보기와 실행", () => {
     await finish(q, job.jobId);
     expect(state.native).toHaveBeenCalledTimes(2);
   });
+  it("일괄 구성 첫 항목에서 포트가 없으면 부분 업로드로 기록하지 않는다", async () => {
+    const { q, control } = await prepare();
+    const character = state.draft!.characters[0];
+    character.promptModel = "nano-banana";
+    character.promptEn = "Portrait";
+    const preview = await control.previewControlMagnificSheet({
+      projectId: "p", expectedRevision: "r1", target: { kind: "character", id: "c0" },
+    });
+    state.native.mockRejectedValue(new Error("마그니픽이 우리 앱 밖에서 켜져 있어 자동 구성을 못 합니다. 마그니픽을 닫고 «구성» 을 다시 누르면 자동 모드로 켭니다."));
+    const job = await control.enqueueControlMagnificBatch({
+      projectId: "p", expectedRevision: "r1", previewIds: [preview.previewId], operationId: "no-port",
+    });
+    const failed = await finish(q, job.jobId);
+    expect(failed.status).toBe("failed");
+    expect(failed.externalCheckpoint).toMatchObject({ phase: "not_started", completed: 0, total: 1, paidGeneration: false });
+    expect(failed.error).toContain("업로드 전에 멈췄습니다");
+    q.retryTask(job.jobId);
+    expect((await finish(q, job.jobId)).error).toContain("업로드 전에 멈췄습니다");
+    expect(state.native).toHaveBeenCalledTimes(1);
+  });
+  it("일괄 구성 중 포트가 끊겨도 완료된 항목만 남기고 다음 항목은 전송 전 실패로 구분한다", async () => {
+    const { q, control } = await prepare();
+    const character = state.draft!.characters[0];
+    character.promptModel = "nano-banana";
+    character.promptEn = "Portrait";
+    const background = state.draft!.backgrounds[0];
+    background.promptModel = "nano-banana";
+    background.promptEn = "Stage";
+    const actor = await control.previewControlMagnificSheet({ projectId: "p", expectedRevision: "r1", target: { kind: "character", id: "c0" } });
+    const stage = await control.previewControlMagnificSheet({ projectId: "p", expectedRevision: "r1", target: { kind: "background", id: "b" } });
+    state.native.mockResolvedValueOnce("첫 구성 완료").mockRejectedValueOnce(new Error("마그니픽이 우리 앱 밖에서 켜져 있어 자동 구성을 못 합니다."));
+    const job = await control.enqueueControlMagnificBatch({ projectId: "p", expectedRevision: "r1", previewIds: [actor.previewId, stage.previewId], operationId: "no-port-after-first" });
+    const failed = await finish(q, job.jobId);
+    expect(failed.externalCheckpoint).toMatchObject({ phase: "partial", completed: 1, total: 2 });
+    expect(failed.error).toContain("완료된 구성은 반복하지 말고");
+    q.retryTask(job.jobId);
+    expect((await finish(q, job.jobId)).error).toContain("완료된 구성은 반복하지 말고");
+    expect(state.native).toHaveBeenCalledTimes(2);
+  });
   it("자동 실행 요청은 각 새 이미지 구성에만 전달하고 동일 작업을 재실행하지 않는다", async () => {
     const { q, control } = await prepare();
     const character = state.draft!.characters[0];
@@ -511,6 +550,20 @@ describe("Magnific 데스크톱 조종의 미리보기와 실행", () => {
     expect(retried.error).toContain("자동으로 다시 올리지 않습니다");
     expect(retried.error).toContain("응답을 받지 못했습니다.");
     expect(retried.externalEffectStartedAt).toBeGreaterThan(0);
+    expect(state.native).toHaveBeenCalledTimes(1);
+  });
+  it("단일 구성의 포트 없음은 업로드 전 실패로 분류한다", async () => {
+    const { q, control } = await prepare();
+    const preview = await control.previewControlMagnific(request);
+    state.native.mockRejectedValue(new Error("마그니픽이 우리 앱 밖에서 켜져 있어 자동 구성을 못 합니다."));
+    const job = await control.enqueueControlMagnific({
+      projectId: "p", expectedRevision: "r1", previewId: preview.previewId, operationId: "single-no-port",
+    });
+    const failed = await finish(q, job.jobId);
+    expect(failed.externalCheckpoint).toMatchObject({ phase: "not_started", paidGeneration: false });
+    expect(failed.error).toContain("새 미리보기와 새 작업 요청 열쇠");
+    q.retryTask(job.jobId);
+    expect((await finish(q, job.jobId)).error).toContain("새 미리보기와 새 작업 요청 열쇠");
     expect(state.native).toHaveBeenCalledTimes(1);
   });
 

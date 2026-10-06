@@ -7,6 +7,14 @@ import os
 def validate_control_options(engine_id, opts, check_files=False):
     if not isinstance(opts, dict):
         raise ValueError("생성 옵션은 객체여야 합니다.")
+    if engine_id == "acestep":
+        from engines.acestep import validate
+        validate(opts)
+    if engine_id == "kimodo":
+        from engines.kimodo import validate
+        validate(opts)
+    elif any(key in opts for key in ("motion_model", "text_encoder_device")):
+        raise ValueError("KIMODO 동작 옵션은 KIMODO에서만 사용할 수 있습니다.")
     if engine_id == "qwentts":
         from engines.qwentts import validate
         validate(opts)
@@ -17,6 +25,20 @@ def validate_control_options(engine_id, opts, check_files=False):
             raise ValueError("LTX 품질 선택은 LTX 2.5에서만 사용할 수 있습니다.")
         from engines._ltx_two_stage import quality_of
         quality_of(opts)
+    end_image = opts.get("end_image")
+    if end_image is not None:
+        if engine_id not in ("ltx25", "wanvideo"):
+            raise ValueError("model_unsupported: end frame conditioning is enabled only for verified LTX and Wan I2V pipelines.")
+        if not isinstance(end_image, str) or not end_image.strip():
+            raise ValueError("end_image must be a non-empty local image path.")
+        if not isinstance(opts.get("image"), str) or not opts["image"].strip():
+            raise ValueError("End frame conditioning requires a first image.")
+        if opts.get("motion_mask"):
+            raise ValueError("End frame conditioning cannot be combined with a motion mask.")
+        if check_files:
+            for path in (opts["image"], end_image):
+                if not os.path.isfile(path):
+                    raise IOError("Condition image not found: {}".format(path))
     control = opts.get("control")
     structure = opts.get("structure_control")
     if structure is not None:

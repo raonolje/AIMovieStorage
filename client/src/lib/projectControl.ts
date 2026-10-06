@@ -93,9 +93,11 @@ export const projectCommandSchema = z.discriminatedUnion("type", [
   // 인물이 없는 컷도 [] 를 명시합니다. 빠뜨린 요청을 조용히 저장하면 시트·@태그가 끊깁니다.
   z.object({ type: z.literal("cut.add"), id: id.optional(), sceneId: id, fields: cutFields.extend({ characterIds: z.array(id).max(100) }) }).strict(),
   z.object({ type: z.literal("cut.update"), id, sceneId: id, fields: cutFields }).strict(),
+  z.object({ type: z.literal("cut.guide_video_clear"), id, sceneId: id }).strict(),
   z.object({ type: z.literal("cut.move"), id, sceneId: id, position: z.number().int().min(0).max(10000) }).strict(),
 ]);
 export const projectReadSchema = z.object({ projectId: id, detail: controlDetailSchema }).strict();
+export const cutGuideVideoClearSchema = projectReadSchema.extend({ expectedRevision: z.string().min(1).max(200), sceneId: id, cutId: id }).strict();
 export const projectUpdateSchema = projectReadSchema.extend({ expectedRevision: z.string().min(1).max(200), commands: z.array(projectCommandSchema).min(1).max(100) });
 export const projectCreateSchema = projectFields.extend({ title: name, operationId: z.string().min(1).max(300), detail: controlDetailSchema });
 export const projectChangesSchema = projectReadSchema.extend({ sinceRevision: z.string().min(1).max(200) });
@@ -504,6 +506,15 @@ export function applyProjectCommands(current: ProjectDraft, commands: ProjectCom
             ? withCutVideoPrompt(cut, { ko: recorded.videoPromptKo || "", en: recorded.videoPromptEn || "" }, "대화 조종기") : {};
           return { ...recorded, ...video };
         }) })) };
+      case "cut.guide_video_clear": return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => ({
+        ...scene, cuts: replaceById(scene.cuts, command.id, (cut) => {
+          // 실패한 진단 영상을 다음 생성에서 쓰지 않도록 선택 두 필드만 해제합니다. 파일·구도·음원은 보존합니다.
+          const next = { ...cut };
+          delete next.refVideoPath;
+          delete next.refVideoSeconds;
+          return next;
+        }),
+      })) };
       case "cut.move": return { ...draft, scenes: replaceById(draft.scenes, command.sceneId, (scene) => {
         const moved = moveById(scene.cuts, command.id, command.position);
         if (moved[0]?.cutContinuity && moved[0].cutContinuity !== "independent")
@@ -541,6 +552,13 @@ export async function updateProjectControl(input: unknown) {
     if (!outcome.persisted) throw new ProjectControlError("save_failed", outcome.why || "편집 내용을 파일에 저장하지 못했습니다.", { applied: Boolean(outcome.draft), snapshot: snapshot(request.projectId, latest, request.detail) });
     return { ...snapshot(request.projectId, latest, request.detail), persisted: true, created: commands.flatMap((command) => isAddCommand(command) ? [{ type: command.type, id: command.id }] : []) };
   } finally { working.delete(request.projectId); pendingControllerEdits.delete(request.projectId); }
+}
+
+/** 공식 프로젝트 판 검사·저장 확인을 그대로 사용하며 파일 삭제는 요청하지 않습니다. */
+export async function clearCutGuideVideo(input: unknown) {
+  const request = cutGuideVideoClearSchema.parse(input);
+  return updateProjectControl({ projectId: request.projectId, expectedRevision: request.expectedRevision, detail: request.detail,
+    commands: [{ type: "cut.guide_video_clear", sceneId: request.sceneId, id: request.cutId }] });
 }
 
 interface CreationDraft extends ProjectDraft { controllerCreation?: { fingerprint: string } }

@@ -16,7 +16,7 @@ class WanDimensionTests(unittest.TestCase):
         # 설치된 diffusers 파이프라인과 같은 기본값입니다. 크기를 안 보내면 실패합니다.
         def pipe(width=832, height=480, **kwargs):
             captured.update(width=width, height=height, **kwargs)
-            return types.SimpleNamespace(frames=[["frame"]])
+            return types.SimpleNamespace(frames=[list(range(kwargs["num_frames"]))])
 
         opts = {"width": 1280, "height": 720, "seconds": 5, "fps": 24, "seed": 17}
         if image:

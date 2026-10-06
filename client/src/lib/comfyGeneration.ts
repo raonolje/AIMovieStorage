@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isDesktopApp } from "@/lib/llm";
-import { getMediaLibrarySettings, queueMirrorWrite, registerMirrorSection, type ProjectAssetType } from "@/lib/mediaLibrary";
+import { getMediaLibrarySettings, queueMirrorWrite, queueMirrorWriteAndConfirm, registerMirrorSection, type ProjectAssetType } from "@/lib/mediaLibrary";
 
 export type ComfyKind = "image" | "video";
 export type ComfyValue = string | number | boolean;
@@ -53,6 +53,40 @@ export function getComfyGenerationSettings(): ComfyGenerationSettings { return r
 export function saveComfyGenerationSettings(update: (current: ComfyGenerationSettings) => ComfyGenerationSettings): ComfyGenerationSettings {
   const next = normalizeComfyGenerationSettings(update(getComfyGenerationSettings()));
   window.localStorage.setItem(KEY, JSON.stringify(next)); queueMirrorWrite(SECTION, next); publish(); return next;
+}
+/** 외부 조종기는 파일 저장이 실패한 값을 성공으로 돌려주면 안 됩니다. */
+export async function saveComfyGenerationSettingsAndConfirm(update: (current: ComfyGenerationSettings) => ComfyGenerationSettings): Promise<ComfyGenerationSettings> {
+  const previous = getComfyGenerationSettings();
+  const next = normalizeComfyGenerationSettings(update(previous));
+  const text = JSON.stringify(next);
+  window.localStorage.setItem(KEY, text); publish();
+  try { await queueMirrorWriteAndConfirm(SECTION, next); }
+  catch (error) {
+    // 저장을 기다리는 동안 사용자가 고친 새 설정은 되돌리지 않습니다.
+    if (window.localStorage.getItem(KEY) === text) {
+      window.localStorage.setItem(KEY, JSON.stringify(previous)); publish();
+    }
+    throw error;
+  }
+  return next;
+}
+/** 설정 화면과 조종기가 같은 검사를 사용합니다. 파일 업로드나 생성은 하지 않습니다. */
+export function validateComfyWorkflowConfig(config: ComfyWorkflowConfig, info: ComfyWorkflowInfo): void {
+  const references: ComfyReference[] = [];
+  for (const kind of ["image", "video", "audio"] as const) {
+    const indices = config.mappings.filter(m => m.source === "reference" && (m.referenceKind ?? "image") === kind).map(m => m.referenceIndex ?? 0);
+    if (indices.length && (!indices.every(i => Number.isInteger(i) && i >= 0 && i < 64)
+      || new Set(indices).size !== Math.max(...indices) + 1))
+      throw new Error("레퍼런스 순서는 갈래별로 1번부터 빠짐없이 연결하세요.");
+    for (let i = 0; i <= Math.max(-1, ...indices); i++) references.push({ kind, path: "검사용 파일" });
+  }
+  for (const mapping of config.mappings) {
+    const field = info.nodes.find(n => n.id === mapping.nodeId)?.inputs.find(f => f.name === mapping.input);
+    if (["prompt", "negative"].includes(mapping.source) && typeof field?.value !== "string")
+      throw new Error("프롬프트는 문자열 입력에 연결하세요.");
+  }
+  if (new Set(config.outputNodeIds).size !== config.outputNodeIds.length) throw new Error("결과 노드가 중복됐습니다.");
+  prepareComfyBindings(config, info, { prompt: "검사용 프롬프트", negative: "검사용 부정 프롬프트", references });
 }
 registerMirrorSection(SECTION, { read: readSettings, write(value) { window.localStorage.setItem(KEY, JSON.stringify(normalizeComfyGenerationSettings(value))); publish(); } });
 

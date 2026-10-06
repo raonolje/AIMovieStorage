@@ -52,6 +52,21 @@ vi.mock("@/lib/projectWrite", () => ({
 
 const cleanups: (() => void)[] = [];
 const current = () => state.projects.get("p")!.draft;
+
+it("공식 음악 도구 스키마가 ACE-Step 설정의 범위를 광고한다", async () => {
+  const { dispatchAppControl } = await import("./appControlRegistry");
+  const listed = await dispatchAppControl("tools/list", {}) as { tools: Array<{ name: string; inputSchema: { properties: Record<string, Record<string, unknown>> } }> };
+  const tool = listed.tools.find(entry => entry.name === "bgm_generate")!;
+  expect(tool.inputSchema.properties.seed).toMatchObject({ type: "integer", minimum: -1, maximum: 2147483647 });
+  expect(tool.inputSchema.properties.steps).toMatchObject({ type: "integer", minimum: 1, maximum: 200 });
+  expect(tool.inputSchema.properties.guidance).toMatchObject({ type: "number", minimum: 0, maximum: 30 });
+  const generation = { seed: 123, steps: 60, guidance: 15 };
+  state.tasks.push({ id: "music-settings", status: "done", payload: { prompt: "private" }, requestFingerprint: "private", result: { paths: ["music.wav"], data: { generation } } });
+  const result = await dispatchAppControl("tools/call", { name: "job_get", arguments: { jobId: "music-settings" } }) as ControlToolResult;
+  expect(result.structuredContent).toMatchObject({ result: { data: { generation } } });
+  expect(result.structuredContent).not.toHaveProperty("payload");
+  expect(result.structuredContent).not.toHaveProperty("requestFingerprint");
+});
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
@@ -107,6 +122,11 @@ async function compositionFixture() {
 }
 
 describe("MCP 도구 등록부와 실제 호출의 계약", () => {
+  it("모든 도구의 inputSchema 최상위에 object 형식을 명시한다", async () => {
+    const { tools } = await listedTools();
+    expect(tools.filter(tool => tool.inputSchema.type !== "object").map(tool => tool.name)).toEqual([]);
+  });
+
   it("큰 전체 응답은 명시적으로 거절하고 기본 요약·수정 결과는 같은 ID와 리비전을 돌려준다", async () => {
     current().scenes[0].cuts[0].guideImage = `data:image/png;base64,${"A".repeat(5 * 1024 * 1024)}`;
     const summary = await call("project_get", { projectId: "p" });
@@ -142,7 +162,9 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
     const comfy = await import("./controlComfy");
     for (const [name, schema] of [
       ["project_create", project.projectCreateSchema], ["project_update", project.projectUpdateSchema],
+      ["cut_guide_video_clear", project.cutGuideVideoClearSchema],
       ["composition_apply", composition.compositionApplyRequestSchema], ["composition_commit", composition.compositionSessionRequestSchema],
+      ["composition_measure_contact", composition.compositionMeasureContactSchema],
       ["media_generate", media.generateMediaSchema], ["media_upscale", media.upscaleMediaSchema],
       ["media_register", registration.mediaRegisterSchema], ["asset_set_primary", registration.assetSetPrimarySchema],
       ["voice_extract", voice.voiceExtractSchema], ["voice_generate", voice.voiceGenerateSchema], ["voice_engine_install", voice.voiceEngineInstallSchema], ["voice_select", voice.voiceSelectSchema],
@@ -167,7 +189,9 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
       ["comfy_workflow_get", comfy.comfyWorkflowSchema],
       ["comfy_generate", comfy.comfyGenerateSchema],
     ] as const) {
-      expect(tools.find(tool => tool.name === name)?.inputSchema).toEqual(z.toJSONSchema(schema));
+      const generated = z.toJSONSchema(schema);
+      const expected = generated.type === undefined ? { type: "object", ...generated } : generated;
+      expect(tools.find(tool => tool.name === name)?.inputSchema).toEqual(expected);
     }
     expect(new Set(tools.map(tool => tool.name)).size).toBe(tools.length);
     expect(JSON.parse(JSON.stringify(tools))).toEqual(tools);
@@ -188,8 +212,10 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
     for (const [name, args] of [
       ["project_update", { projectId: "p", commands: [{ type: "project.update", fields: { title: "덮기" } }] }],
       ["project_update", { projectId: "p", expectedRevision: 0, commands: [] }],
+      ["cut_guide_video_clear", { projectId: "p", sceneId: "scene", cutId: "cut" }],
       ["composition_apply", { sessionId: f.sessionId, commands: [{ op: "camera.set", fovDegrees: 70 }] }],
       ["composition_undo", { sessionId: f.sessionId }],
+      ["composition_measure_contact", { sessionId: f.sessionId, timeSeconds: 0, characterId: "p", side: "Right", finger: "Index", objectIds: ["box"] }],
       ["composition_redo", { sessionId: f.sessionId }],
       ["composition_commit", { sessionId: f.sessionId }],
       ["composition_export_video", { projectId: "p", sessionId: f.sessionId, operationId: "op" }],
@@ -303,4 +329,21 @@ describe("MCP 도구 등록부와 실제 호출의 계약", () => {
       for (const field of ["private-input", "requestFingerprint", "llmResponseId"]) expect(wire).not.toContain(field);
     }
   });
+});
+
+it("로라 다운로드 도구가 승인된 공식 파일만 받고 인증값 입력·조회는 노출하지 않는다", async () => {
+  const { tools } = await listedTools();
+  const tool = tools.find(item => item.name === "lora_download")!;
+  expect(tool).toBeDefined();
+  expect(tool.annotations).toMatchObject({ readOnlyHint: false, openWorldHint: true });
+  const properties = tool.inputSchema.properties as Record<string, unknown>;
+  expect(Object.keys(properties).sort()).toEqual(["engine", "expectedSha256", "file", "operationId", "repo"]);
+  expect(tools.some(item => /token|api_key/.test(item.name))).toBe(false);
+  const input = { operationId: "lora-qa", engine: "ltx25", repo: "Lightricks/LTX-2.5", file: "loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors" };
+  for (const bad of [{ token: "private" }, { repo: "evil/repo" }, { file: "../private" }, { engine: "minimaxh3" }])
+    expectFailure(await call("lora_download", { ...input, ...bad }), "invalid_request");
+  expect(state.enqueue).not.toHaveBeenCalled();
+  state.enqueue.mockResolvedValue({ jobId: "download-qa" });
+  expect((await call("lora_download", input)).structuredContent).toEqual({ jobId: "download-qa" });
+  expect(state.enqueue).toHaveBeenCalledWith(expect.objectContaining({ kind: "control.lora.download", operationId: input.operationId }));
 });

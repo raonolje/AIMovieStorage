@@ -11,6 +11,7 @@
 //! 브라우저에서 직접 부르면 API 키가 개발자 도구에 그대로 보이고, 제공사
 //! 서버가 CORS 로 막습니다. 키는 앱 설정 폴더에 두고 호출도 여기서 합니다.
 
+mod engine_evidence;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -24,6 +25,8 @@ mod codex_skill;
 mod comfy_generation;
 mod asset_upload;
 mod control;
+mod control_lifecycle;
+mod maintenance;
 pub use control::run_mcp;
 mod datafiles;
 mod download;
@@ -33,6 +36,10 @@ mod magnific;
 mod local;
 mod private_update;
 mod lora;
+mod model_component;
+mod native_a2v;
+mod gpu_handoff;
+mod planar_overlay;
 mod magnific_mcp;
 /// 지운 것을 곧바로 없애지 않고 `.휴지통/` 에 한 단계 둡니다.
 mod trash;
@@ -128,7 +135,7 @@ const DELETABLE: &[&str] = &[
     "png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff", "mp4", "mov", "webm", "avi", "mkv",
     // 음원 — BGM 프로젝트의 곡과 구도잡기 타임라인에 올린 노래가 여기 들어옵니다.
     "mp3", "wav", "flac", "m4a", "aac", "ogg", "opus",
-    "json", "txt", "md",
+    "json", "txt", "md", "bvh",
     // 시나리오·기획안 원본(`DOCU/`). 화면에서 지우면 폴더의 원본도 지웁니다(규칙 3).
     "pdf", "docx", "rtf", "csv",
 ];
@@ -138,6 +145,14 @@ pub(crate) fn extension_allowed(path: &Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| DELETABLE.contains(&e.to_ascii_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+#[test]
+fn kimodo_bvh_is_a_project_media_file() {
+    assert!(extension_allowed(Path::new("dance.bvh")));
+    assert!(extension_allowed(Path::new("dance.BVH")));
+    assert!(!extension_allowed(Path::new("dance.exe")));
 }
 
 /// **프로젝트 폴더 밖은 절대 건드리지 않습니다.**
@@ -330,6 +345,9 @@ fn owner_dir(base: &str, project: &str, category: &str, owner: &str) -> PathBuf 
 fn asset_stem(category: &str, stem: &str) -> String {
     let (_, _, prefixed) = asset_layout(category);
     let safe = safe_name(stem);
+    // 컷 그림과 영상은 같은 storyboard 폴더입니다. 확장자별 번호만 세면 둘 다
+    // «컷_1_001» 이 되어 Magnific의 @파일이름 참조가 모호해집니다.
+    if category == "scene-video" { return format!("{safe}_영상"); }
     if prefixed { format!("ref_{safe}") } else { safe }
 }
 
@@ -1461,7 +1479,12 @@ pub fn run() {
         // 업스케일 워커·설치 상태를 앱이 사는 동안 들고 있습니다.
         .manage(upscale::UpscaleState::default())
         .manage(control::ControlState::default())
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(|invoke| {
+            if maintenance::closing() && !matches!(invoke.message.command(), "control_respond" | "maintenance_status" | "control_status") {
+                invoke.resolver.reject("정상 종료 처리 중에는 새 명령을 받지 않습니다.");
+                return true;
+            }
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             installer_app_locale,
             control::control_status,
             control::control_enable,
@@ -1558,6 +1581,11 @@ pub fn run() {
             lora::lora_verify_h3_preset,
             lora::lora_delete,
             lora::lora_download,
+            lora::lora_download_control,
+            lora::lora_download_cancel,
+            model_component::model_component_download,
+            model_component::model_component_download_cancel,
+            model_component::model_component_inspect,
             lora::lora_import,
             lora::lora_pick_files,
             lora::lora_search,
@@ -1570,13 +1598,29 @@ pub fn run() {
             local::local_worker_info,
             local::local_stop_workers,
             local::local_run,
+            native_a2v::native_a2v_status,
+            planar_overlay::planar_overlay_status,
+            planar_overlay::planar_overlay_run,
+            planar_overlay::protected_edit_status,
+            planar_overlay::protected_edit_run,
+            planar_overlay::media_edit_status,
+            planar_overlay::media_edit_probe,
+            planar_overlay::media_edit_run,
+            planar_overlay::aac_preview_status,
+            planar_overlay::aac_preview_run,
+            planar_overlay::aac_preview_verify,
             local::choose_video_files,
             local::choose_audio_files,
             local::motion_capture_output,
             local::read_motion_capture,
             local::probe_hardware,
+            maintenance::maintenance_comfy_queue,
+            maintenance::maintenance_status,
+            maintenance::maintenance_request_quit,
             private_update::private_update_token,
-        ])
+            ];
+            handler(invoke)
+        })
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             match codex_skill::install_for_current_user() {
@@ -1593,13 +1637,27 @@ pub fn run() {
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if !maintenance::safe_exit() {
+                    api.prevent_close();
+                    let _ = tauri::Emitter::emit(window, "maintenance-close-request", ());
+                }
+            }
+        })
         .build(tauri::generate_context!())
         .expect("앱을 띄우지 못했습니다")
         .run(|app, event| {
             // 앱이 꺼질 때 업스케일 워커를 반드시 내립니다. 남으면 파이썬이 VRAM 을 문 채
             // 살아 있어서 다음에 앱을 켰을 때 «CUDA out of memory» 가 납니다.
             // 이름이 아니라 우리가 띄우며 받아 둔 자식 핸들로만 끝냅니다.
-            if matches!(event, tauri::RunEvent::Exit) {
+            if let tauri::RunEvent::ExitRequested { ref api, .. } = event {
+                if !maintenance::safe_exit() {
+                    api.prevent_exit();
+                    let _ = tauri::Emitter::emit(app, "maintenance-close-request", ());
+                }
+            }
+            if matches!(event, tauri::RunEvent::Exit) && !maintenance::safe_exit() {
                 upscale::stop_all_workers(app);
             }
         });
@@ -1608,6 +1666,23 @@ pub fn run() {
 #[cfg(test)]
 mod empty_reservation_tests {
     use super::*;
+
+    #[test]
+    fn cut_image_and_video_keep_distinct_magnific_tags_across_retries() {
+        let directory = tempfile::tempdir().unwrap();
+        let image_stem = asset_stem("scene-cut", "컷_1");
+        let video_stem = asset_stem("scene-video", "컷_1");
+        let image = next_numbered_path(directory.path(), &image_stem, "png");
+        fs::write(&image, b"image").unwrap();
+        let video = next_numbered_path(directory.path(), &video_stem, "mp4");
+        fs::write(&video, b"video").unwrap();
+        let retried = next_numbered_path(directory.path(), &video_stem, "mp4");
+        assert_eq!(image.file_stem().unwrap(), "컷_1_001");
+        assert_eq!(video.file_stem().unwrap(), "컷_1_영상_001");
+        assert_eq!(retried.file_stem().unwrap(), "컷_1_영상_002");
+        assert_eq!(fs::read(&image).unwrap(), b"image");
+        assert_eq!(fs::read(&video).unwrap(), b"video");
+    }
 
     fn fixture() -> (tempfile::TempDir, PathBuf) {
         let directory = tempfile::tempdir().unwrap();

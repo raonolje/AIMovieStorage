@@ -1,5 +1,7 @@
 # 대화로 AIMovieStorage 조종하기
 
+구도잡기의 실내 방에는 `composition_apply`의 `floorplan.wall_upsert`/`floorplan.wall_remove` 명령으로 실측 벽과 문·창을 편집할 수 있습니다. 먼저 `room.add`로 실내 방을 만들고 반환된 방 ID를 `roomId`에 넣으세요. 평면도 좌표는 방 중심 기준 미터(`x`, `z`)이며, 문·창은 벽 중앙의 개구부입니다. 같은 데이터가 환경 탭의 2D 편집 화면, 3D 뷰포트, 레퍼런스 영상 캡처에 쓰입니다. 벽을 놓은 뒤 `composition_commit`으로 저장하고 재열기 때 값을 확인하세요. 기존 여섯 면 이미지는 방 배경으로 별도 유지됩니다.
+
 `project_update`의 `scene.move`·`cut.move`는 장면과 컷 순서를 0부터 지정합니다. 컷 이동 후 `order`를 다시 매기며 저장된 이미지·영상·구도는 그대로 둡니다.
 
 이 문서는 현재 개발 소스의 앱 조종기를 설명합니다. 설치본마다 기능이 다를 수 있으므로 연결 후 `tools/list`와 `app_status`를 먼저 확인하세요. 실제 Tauri/WebView 앱과 stdio MCP 사이의 편집·저장·모캡·영상 내보내기를 확인했고, 로컬 H3·LTX 영상 생성도 실측했습니다. 모든 버튼이 API로 연결되거나 모든 모델·입력 조합의 검증이 끝난 것은 아닙니다. 큰 모캡 프로젝트의 WebView 메모리 오류를 줄이기 위한 변경 후, 실제 대형 프로젝트의 저장·수동 되돌리기·오래된 편집 거절을 한 차례 확인했습니다. 재열기와 장시간 반복 부하는 추가 검증 대상입니다.
@@ -38,7 +40,7 @@ Codex에서는 스킬 이름을 길게 적지 않고 `사용자올제 국호 프
 
 ## 현재 소스의 API 범위
 
-현재 개발 소스의 [도구 등록부](../client/src/lib/appControlRegistry.ts)에는 **MCP 도구 75개**, `composition_apply`가 받는 [구도 명령](../client/src/lib/compositionControlCommands.ts)은 **81종**입니다. 음악을 놓는 명령은 LLM이 길이를 추측할 수 없게 별도 `composition_music_use`로 분리했습니다. 이 PC의 기존 0.3.16 설치본에는 각각 53개·69개만 들어 있으므로 새 기능 실측은 새 빌드가 필요합니다. 도구 수와 그 안의 편집 명령 수는 별개입니다. [프로젝트 명령](../client/src/lib/projectControl.ts)과 [BGM 명령](../client/src/lib/controlBgm.ts)도 각각 입력 규격을 검증합니다.
+현재 개발 소스의 [도구 등록부](../client/src/lib/appControlRegistry.ts)에는 **MCP 도구 85개**, `composition_apply`가 받는 [구도 명령](../client/src/lib/compositionControlCommands.ts)은 **84종**입니다. 평면도 벽 추가·수정과 삭제 명령은 실행 중인 개발 앱의 `app_status`와 실제 호출로 확인했습니다. 음악을 놓는 명령은 LLM이 길이를 추측할 수 없게 별도 `composition_music_use`로 분리했습니다. 도구 수와 그 안의 편집 명령 수는 별개입니다. [프로젝트 명령](../client/src/lib/projectControl.ts)과 [BGM 명령](../client/src/lib/controlBgm.ts)도 각각 입력 규격을 검증합니다.
 
 아래 표는 코드에 등록된 범위입니다. 모든 기능의 실제 앱 검증이 끝났다는 뜻은 아닙니다. 실행 중인 판의 `tools/list`와 `app_status`가 실제로 사용할 수 있는 규격입니다.
 
@@ -49,9 +51,9 @@ Codex에서는 스킬 이름을 길게 적지 않고 `사용자올제 국호 프
 | 구도 열기·확인 | 열린 편집기와 컷 대상 조회, 구도 열기, 상태·에셋 ID 조회, 가이드·배경판 이미지 캡처, 저장 | 구도 열기는 현재 프로젝트의 씬 화면에 등록된 컷을 대상으로 합니다. 앱을 켜 둔 채 편집기를 사용합니다. |
 | 카메라·공간 | 카메라 위치·시선·화각, 방 생성·크기·배치·장소 연결·면 이미지·파노라마·배경 흐름·면 영상·방 프리셋 적용·저장, 로컬 배경/HDRI/파노라마 가져오기와 선택, 샷 저장·이동 | 미터·도·초 등 규격에 명시한 단위를 사용합니다. 새 프리셋은 `composition_commit` 뒤 `project_update`의 `room_preset.save_from_cut`으로 프로젝트 라이브러리에 담습니다. `composition_background_import`는 파노라마를 전용 폴더에 복사합니다. |
 | 인물·소품 | 인물·마네킹 배치, 포즈·뼈 회전·손가락 접기, 소품·조명·그룹, 장착·부착·피벗, GLB 파일 가져오기·기존 트랙 편집 | 앱의 구도 편집 함수를 사용합니다. `composition_glb_import`는 파일을 프로젝트에 복사한 다음 트랙을 추가합니다. GLTF가 별도 외부 리소스를 참조하면 그 파일까지 복사하지 않으므로 GLB를 권합니다. |
-| 타임라인·카메라 | 카메라 동작의 프리셋·순서·앵커 잠금, 카메라·동작량·모션·관절별 자세·접힌 자세·가림 키프레임 편집과 이징, 길이·FPS·레이어 구간, BGM 등록곡 사용·새 음원 가져오기·오프셋·BPM·마디 나누기·자르기·제거 | `composition_music_use`와 `composition_music_import`가 음원 파일의 실제 길이를 측정합니다. 모캡 흔들림은 `composition_motion_cleanup_prepare`의 화면과 같은 요청문을 대화에서 판단하거나 `composition_motion_cleanup_apply`의 자동 모드로 다듬습니다. UI 재생 버튼과 타임라인 높이 조절은 별도 MCP 명령이 없습니다. |
+| 타임라인·카메라 | 카메라 동작의 프리셋·순서·앵커 잠금, 카메라·동작량·모션·관절별 자세·접힌 자세·가림 키프레임 편집과 이징, 길이·FPS·레이어 구간, BGM 등록곡 사용·새 음원 가져오기·오프셋·BPM·박자 분석·마디 나누기·자르기·제거 | `composition_music_use`와 `composition_music_import`가 음원 파일의 실제 길이를 측정합니다. `composition_music_analyze`가 BPM·박자 후보를 기록하고 `music.update`의 `downbeatIndex`로 첫 박을 확인한 뒤 `music.split_detected_bars`로 구간을 나눕니다. 모캡 흔들림은 기존 다듬기 명령으로 처리합니다. UI 재생 버튼과 타임라인 높이 조절은 별도 MCP 명령이 없습니다. |
 | 레퍼런스 영상 | `composition_export_video`로 열린 구도를 MP4로 내보내고 컷에 연결 | 기본 15초·1920×1080·24fps입니다. 타임라인에 음악이 있으면 해당 구간을 MP4에 합치고 같은 구간의 WAV도 저장합니다. 파일 생성과 컷 경로 저장을 확인한 뒤 완료됩니다. 구도 자체 저장은 `composition_commit`으로 별도 확인합니다. |
-| 모션 캡처 | 원본 목록·몸 분석·MediaPipe 손 추가 추적·결과 조회·캐릭터 타임라인 적용 | `mocap_analyze`는 프로젝트에 등록된 로컬 영상만 받습니다. `mocap_result`는 기본 요약이며 사람을 지정하면 최대 30표본씩 조회합니다. `composition_apply_mocap`은 원본 구간과 타임라인 시작 시각·적용 채널을 지정할 수 있고 실행 취소 한 단계로 묶습니다. |
+| 모션 캡처·군무 | 원본 목록·몸 분석·MediaPipe 손 추가 추적·결과 조회·캐릭터 타임라인 적용, KIMODO SOMA BVH 가져오기, 음악 구간별 동일 춤을 여러 캐릭터에 적용 | `mocap_analyze`는 등록된 로컬 영상만 분석합니다. `mocap_import_kimodo`는 이미 생성한 BVH를 프로젝트에 복사하고 관절 JSON으로 변환합니다. `composition_apply_dance`는 저장된 한 사람의 자세를 선택한 노래 구간과 여러 캐릭터에 적용하고 자리·카메라 키는 보존합니다. `kimodo_install`과 `kimodo_generate`는 설정·음악 탭과 같은 설치/생성 경로로 SOMA 모델을 실행하고 프롬프트·설정을 저장합니다. 모델 설치와 안무 품질·구간 경계의 자연스러운 연결은 실제 GPU/UI 검증이 아직 필요합니다. |
 | 편집 협업 | 프로젝트·BGM·구도의 변경 내역과 변경 기다리기, 구도의 되돌리기·다시 실행 | 구도는 앱과 같은 이력을 사용하므로 수동 편집도 되돌릴 수 있습니다. 먼저 최신 상태를 확인합니다. |
 | 에셋·로컬 생성 | 에셋 목록·이미지 미리보기, 로컬 이미지·영상 생성, 이미지 업스케일, 작업 조회·취소, `media_register`로 외부 생성 파일과 프롬프트 가져오기, `asset_set_primary`로 대표 선택 | 해당 판의 엔진만 실행합니다. 결과를 인물·배경·컷에 연결하며, 영상 생성 대상은 컷입니다. 지원되는 엔진에는 모캡 포즈 또는 LTX Canny 기준을 전달할 수 있습니다. |
 | LoRA | `loras_list`로 실제 내려받은 파일 조회, `media_generate.loras`로 선택 | 경로 대신 불투명 ID와 세기를 받으며 실행 전 목록을 다시 확인합니다. 목록에 있다는 사실은 기반 모델·워크플로 호환성이 검증됐다는 뜻이 아닙니다. 다운로드·임의 파일 경로는 제공하지 않습니다. |
@@ -68,7 +70,7 @@ Codex에서는 스킬 이름을 길게 적지 않고 `사용자올제 국호 프
 
 Codex와 Claude는 인물·장소·컷 이미지·컷 영상·장면 영상을 작성할 때 `prompt_prepare`를 먼저 호출합니다. `target`은 `{kind:"character"|"background",id}` 또는 `{kind:"cutImage"|"cutVideo",sceneId,cutId}` 또는 `{kind:"sceneVideo",sceneId}`입니다. 이 명령은 현재 프로젝트의 카드 값, 구도·등장인물, 선택한 시트 칸, 모델·플랫폼·공통 규칙과 실제 이미지 순서를 앱의 API 버튼과 같은 함수로 조립해 반환합니다. 실내 6면 전개도 틀이 필요한 장소는 먼저 틀을 프로젝트에 저장하므로 반환된 새 `revision`을 사용합니다. 답변은 한국어·영어 프롬프트와 두 네거티브를 별도로 작성하고 `project_update`의 `prompt.apply`로 저장합니다. 이때 API 버튼과 같은 카드 이력에 이전 값과 새 값을 남깁니다. 사용자가 그 사이 앱에서 고쳤다면 `revision_conflict`가 나며 최신 상태로 다시 준비해야 합니다.
 
-`project_prompt_status`와 `project_prompt_history`는 작품의 인물·장소·장면·컷 그림·컷 영상 프롬프트와 이력을 페이지별로 점검합니다. 추가 요청문도 화면과 같은 자료 함수를 사용합니다. `prompt_prepare_extra`는 인물 프로필·인물/장소 레퍼런스 분석·첫 레퍼런스·장소 6면, `natural_prompt_prepare`는 카드·씬·컷의 자연어 설명과 연기·배경 움직임·VFX, `bgm_prompt_prepare`는 BGM 스타일·가사를 준비합니다. `bootstrap_input_update`로 일괄 생성의 시나리오·원하는 수를 기록하고, 기존 입력은 `bootstrap_input_get`으로 읽습니다. `bootstrap_document_import`는 시나리오 파일을 앱 추출기로 읽어 원본과 함께 기록하며, `bootstrap_reference_register`는 이미지·영상에 앱과 같은 `@ref_img_N`·`@ref_mov_N` 이름표와 사용 메모를 붙입니다. 그 뒤 `bootstrap_prompt_prepare`를 작품 목록 → 상세 → 컷 구도 순서로 호출합니다. 답을 검토하고 `bootstrap_apply`를 호출하면 화면의 일괄 생성 해석·구도 조립 함수를 통해 저장하며 같은 `operationId`의 중복 적용을 막습니다. 반환된 카드별 4단계 작업표는 `bootstrap_prompt_targets`로 다시 읽을 수 있습니다. 각 인물·장소·컷 그림·컷 영상의 상세 요청은 `prompt_prepare`로 만들고, 한·영 본문과 네거티브를 `project_update`의 `prompt.apply`로 저장해야 완료로 표시됩니다. 완성된 장소 십자 전개도는 `background_unfold`가 화면과 같은 안전 판정·6면 커팅·세트 저장을 실행합니다. 이미지가 이미 있는 컷을 모아 `storyboard_bake`로 시트를 굽고 그 씬의 영상 요청을 준비할 수 있습니다. 이 새 경로들은 아직 기존 0.3.16 설치본에 없습니다.
+`project_prompt_status`와 `project_prompt_history`는 작품의 인물·장소·장면·컷 그림·컷 영상 프롬프트와 이력을 페이지별로 점검합니다. 추가 요청문도 화면과 같은 자료 함수를 사용합니다. `prompt_prepare_extra`는 인물 프로필·인물/장소 레퍼런스 분석·첫 레퍼런스·장소 6면, `natural_prompt_prepare`는 카드·씬·컷의 자연어 설명과 연기·배경 움직임·VFX, `bgm_prompt_prepare`는 BGM 스타일·가사를 준비합니다. `bootstrap_input_update`로 일괄 생성의 시나리오·원하는 수를 기록하고, 기존 입력은 `bootstrap_input_get`으로 읽습니다. `bootstrap_document_import`는 시나리오 파일을 앱 추출기로 읽어 원본과 함께 기록하며, `bootstrap_reference_register`는 이미지·영상에 앱과 같은 `@ref_img_N`·`@ref_mov_N` 이름표와 사용 메모를 붙입니다. 그 뒤 `bootstrap_prompt_prepare`를 작품 목록 → 상세 → 컷 구도 순서로 호출합니다. 답을 검토하고 `bootstrap_apply`를 호출하면 화면의 일괄 생성 해석·구도 조립 함수를 통해 저장하며 같은 `operationId`의 중복 적용을 막습니다. 반환된 카드별 4단계 작업표는 `bootstrap_prompt_targets`로 다시 읽을 수 있습니다. 각 인물·장소·컷 그림·컷 영상의 상세 요청은 `prompt_prepare`로 만들고, 한·영 본문과 네거티브를 `project_update`의 `prompt.apply`로 저장해야 완료로 표시됩니다. 완성된 장소 십자 전개도는 `background_unfold`가 화면과 같은 안전 판정·6면 커팅·세트 저장을 실행합니다. 이미지가 이미 있는 컷을 모아 `storyboard_bake`로 시트를 굽고 그 씬의 영상 요청을 준비할 수 있습니다. 이 경로들은 0.3.21의 도구 목록에 있지만 실제 화면에서의 전체 동작 검증은 별개입니다.
 
 이미지 생성에 앱의 Magnific «구성»을 쓰려면 인물·장소 카드에는 `magnific_sheet_compose_preview`, 컷에는 `magnific_compose_preview`를 호출합니다. 이미지 미리보기의 `count`는 기본 4장, 선택 범위는 1~4장입니다. 생성기 하나의 Magnific `numberOfGenerations`에 이 값을 넣어 한 번 실행으로 여러 선택지를 받습니다. 이미지가 여러 개라면 각각 미리보기를 확인한 뒤 `magnific_compose_batch`에 `previewIds`를 원하는 순서로 보냅니다. `runAfterCompose`를 켜면 각 구성 직후 **방금 만든 이미지 생성기만** 선택해 순차 실행합니다. Magnific 화면에서 2K와 무한대(크레딧 없음) 표시를 모두 확인하지 못하거나 정확한 선택에 실패하면 누르지 않고 멈춥니다. 생략하면 생성기를 구성만 합니다. `Ctrl+A`로 기존 보드 전체를 실행하지 않습니다. 카드의 저장 프롬프트·선택 모델·`@`로 연결된 참조와 배경 비율을 그대로 사용하며, 같은 보드·페이지에 이전에 올린 같은 내용의 레퍼런스 파일은 업로드 ID를 재사용합니다. 실행 제출은 결과 완성을 뜻하지 않습니다. 완료된 후보는 `magnific_results_list`에서 확인하고, 고른 결과 ID만 `magnific_result_register`로 인물·장소·컷에 저장합니다. 대표 이미지만 `makePrimary`로 지정합니다. 영상 및 유료 모델의 자동 실행은 이 경로에서 지원하지 않습니다.
 
@@ -171,9 +173,43 @@ BGM 작업은 `bgm_projects_list` → `bgm_get` / `bgm_create` → `bgm_prompt_p
 남아 있는 검증:
 
 - Claude Desktop·Codex 각각에서 설정 추가 후 실제 대화·연결 종료·재시작·복구
-- 새 소스의 81개 구도 명령 전체를 실제 화면에서 왕복하고 복합 편집을 검증하는 일, 모든 모델·LoRA 조합과 음악 생성 전체 흐름
+- 새 소스의 82개 구도 명령 전체를 실제 화면에서 왕복하고 복합 편집을 검증하는 일, 모든 모델·LoRA 조합과 음악 생성 전체 흐름
 - LTX 두 단계의 다양한 장면·긴 영상 품질과 카메라·동작 보존, 장시간 반복 생성·메모리와 취소·오류 뒤 복구
 - 큰 다인 모캡 프로젝트의 재열기·카메라 타임라인 연속 편집·장시간 반복 저장 안정성: 변경 후 한 차례의 실제 저장·무결성·충돌 거절은 통과했으나 재열기와 반복 부하는 아직 확인하지 않았습니다. 이전 OOM 문제가 모든 조건에서 해결됐다고 보지 않습니다.
 - 이 최신 소스가 반영된 최종 공개 설치본·무설치본의 구성과 실제 연결
 
 도구 등록, 자동 시험, 직접 stdio 연결, 대화 클라이언트 연결, GPU 출력과 시각 품질은 서로 다른 검증 단계입니다.
+
+## 공식 LTX-2.5 LoRA 다운로드 조종기 (2026-10-05)
+
+`lora_download`는 승인된 파일 하나만 앱의 기존 인증·다운로드 서비스를 통해 받습니다.
+
+```json
+{"operationId":"ltx25-official-distilled-lora-20261005","engine":"ltx25","repo":"Lightricks/LTX-2.5","file":"loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors"}
+```
+
+반환된 `jobId`를 `job_get`으로 조회하고 `job_cancel`로 취소합니다. 같은 `operationId`는 기존 작업을 반환하며, 실패 후 다시 시도하려면 먼저 오류와 부분 파일 상태를 확인하고 새 ID를 사용합니다. 취소한 부분 파일은 기존 정책대로 이어받을 수 있도록 남깁니다. 다운로드는 현재 media 작업 줄에서 직렬 실행되며 GPU 모델을 실행하지 않습니다.
+
+임의 URL·제공자·경로·다른 모델·토큰 입력은 받지 않습니다. 기존 등록 인증은 앱 내부에서만 사용하며 조회·반환·로그 도구를 추가하지 않습니다. 공식 HEAD 응답에서 크기와 원본 SHA-256을 확인하고, 새 파일은 크기·원본 해시·safetensors 구조를 확인한 뒤 완료 이름을 만듭니다. 공급자 해시를 확인할 수 없으면 새 가중치를 받지 않습니다. HTTP 401/403은 추가 가중치 요청이나 자동 재시도 없이 오류로 끝납니다.
+
+같은 파일에 쓰는 UI·조종기 다운로드는 파일 잠금을 공유합니다. 조종기는 기존 완료 파일을 덮어쓰지 않으며, 기존 파일의 크기·구조·제공된 기대 해시를 검사합니다. 기대 해시 없이 기존 파일을 재사용한 경우 결과의 `expectedSha256Verified`는 false입니다. 결과에는 실제 SHA-256과 크기·재사용 여부를 반환합니다. 파일 수신은 기본 LoRA 선택이나 native LTX 모델 설치·생성 가능 여부를 바꾸지 않습니다. 실제 영상 생성과 품질 검수는 별도 검증 단계입니다.
+
+
+### Native model component download
+`model_component_download` accepts operationId, engine `ltx25`, repo `Lightricks/LTX-2.5`, and component transformer/text_encoder/video_vae/audio_vae/spatial_upsampler. Uses existing model downloader and registered internal auth; tokens, arbitrary URLs and LoRA paths are excluded. Download jobs are serialized separately from GPU media jobs. Completed files remain unselected until their native contracts are verified. Existing or partial files are preserved; checksum/size/structure checks precede promotion. Cancellation owns only its transfer.
+
+## Experimental native A2V (QA only)
+
+Read `native_a2v_status` before submission. Only if it is ready, use `media_generate` with `engine:"ltx25"`, `options.ltx_a2v:"experimental"`, same-project `audioAssetId`, explicit `audioDurationSeconds`, optional `audioStartSeconds` (default 0), and optional `imageAssetId`/`endImageAssetId`. Audio must be local stereo PCM16 WAV. Offset and length round to the nearest sample (Python round-to-even ties); duration clamps at EOF. Visible frames are ceil(actual sample duration * fps); generation uses the next 8n+1 frame count at least as large. End image conditions the last visible frame, before zero audio padding. Both native stages freeze original conditioned audio; final MP4 uses lossless ALAC from the original selected samples and crops only the last video packet duration. Additional LoRA selections, masks, pose/structure guides, references, precision, seconds, steps, guidance, and ltx_quality are rejected rather than ignored. Omitted ltx_a2v preserves existing LTX defaults. This is not approved general production or proven lip sync; generated file creation is not quality review. Native cancellation waits for the isolated process to finish and skips attachment; no forced termination. OOM is a normal failed job, with only the own-process CUDA cache released. No automatic downloads or runtime install.
+
+Audio asset IDs include existing saved composition music.path entries. If importing new local audio, reuse composition_music_import and composition_commit, then assets_list; native A2V does not add another importer.
+
+
+## CPU planar overlay (prepared candidate)
+
+Read planar_overlay_status first. media_planar_overlay uses same-project video/image IDs, exact source/replacement SHA256, complete frame-indexed TL/TR/BR/BL quads and actual CFR specs. It uses the independent CPU lane, never downloads tools or uses GPU, preserves original input and publishes a derivative. Results remain unregistered with registrationRequired:true; honor the current explicit registration/install hold. Review before separately authorized media_register(makePrimary:false). S02 non-text is allowed; S03 requires declared exact 한국사 raster, which still needs human glyph review. See docs/PLANAR_OVERLAY.md.
+
+
+## 원본 보호 CPU 편집 (준비 후보)
+
+protected_edit_status를 읽고 media_local_edit를 사용한다. 명시적 같은 프로젝트 선택/보호 이미지 ID와 SHA256, 원본/crop 매핑이 필요하다. 보호가 우선하며 정확 문자 레이어가 보호에 걸리면 자르지 않고 거절한다. 자동 의미 분할·글자 인식·새 모델·GPU 사용은 없다. 결과는 비대표·미등록이고 검수 후 별도 허가된 media_register(makePrimary:false) 또는 기존 comfy_masked_compose를 재사용한다. 현재 앱 쓰기/설치 보류를 지킨다. docs/LOCAL_PROTECTED_EDIT.md 참고.

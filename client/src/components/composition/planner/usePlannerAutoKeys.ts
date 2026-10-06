@@ -11,6 +11,7 @@ import {
   type UpdateComposition,
 } from "@/lib/compositionEdit";
 import type { CompositionState } from "@/lib/composition";
+import { isControllerState } from "@/lib/compositionControllerState";
 
 /**
  * **자동 키** — 값이 바뀌면 트랙에 스스로 키가 찍힙니다(인물·소품 · 자유 경로 카메라).
@@ -74,7 +75,7 @@ export function usePlannerAutoKeys({
         const poseStamp = JSON.stringify(character.bonePose ?? {});
         const poseBefore = lastValuesRef.current.get(poseKey);
         lastValuesRef.current.set(poseKey, poseStamp);
-        if (poseBefore === undefined || poseBefore === poseStamp) continue;
+        if (isControllerState(state) || poseBefore === undefined || poseBefore === poseStamp) continue;
         /*
           바뀐 관절을 «찍은 관절» 로 — 관절 줄에 방금 만진 자리가 점으로 섭니다.
           비교 상대는 상태에 남은 옛 자세가 아니라 **이 시각에 보이던 자세**입니다(`changedBones` 주석).
@@ -95,7 +96,7 @@ export function usePlannerAutoKeys({
       const before = lastValuesRef.current.get(key);
       lastValuesRef.current.set(key, stamp);
       // 처음 본 값은 «바뀐 것» 이 아닙니다 — 창을 열자마자 키가 찍히면 안 됩니다.
-      if (before === undefined || before === stamp) continue;
+      if (isControllerState(state) || before === undefined || before === stamp) continue;
       next = addMotionKeyIn(
         next,
         track.targetId,
@@ -148,7 +149,7 @@ export function usePlannerAutoKeys({
     const before = lastCameraRef.current;
     lastCameraRef.current = stamp;
     // 처음 본 값은 «바뀐 것» 이 아닙니다 — 클립을 고르자마자 키가 찍히면 안 됩니다.
-    if (before === null || before === stamp) return;
+    if (isControllerState(state) || before === null || before === stamp) return;
     setState((current) =>
       addCameraKeyIn(current, cameraMove.id, Math.max(0, local)),
     );

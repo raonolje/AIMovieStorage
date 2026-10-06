@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "AIMovieStorage",
-  "version": "0.3.20",
+  "version": "0.3.26",
   "identifier": "com.aivideostorage.local",
   "build": {
     "frontendDist": "../dist/public",
@@ -55,6 +55,7 @@
       "resources/upscale/engines/*/manifest.json",
       "resources/local/*.py",
       "resources/local/h3-ref2va-preset.json",
+      "resources/local/masked-composite-api.json",
       "resources/local/engines/*.py",
       "resources/local/engines/*/requirements.txt",
       "resources/local/engines/*/manifest.json"

@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import { toast } from "sonner";
 import { applyMovedPaths, revertOwnerNames, syncOwnerFolders } from "@/lib/ownerFolders";
 import { useAutoSave } from "@/lib/autoSave";
+import { startMaintenanceActivity } from "@/lib/maintenanceGate";
 import GlobalNav from "@/components/GlobalNav";
 import { WORK_WIDTH } from "@/lib/layout";
 import StepBasics from "@/components/project/StepBasics";
@@ -356,12 +357,14 @@ function ProjectEditor({ initialProject }: { initialProject?: LocalProject }) {
   const syncFolders = (target: ProjectDraft, id: string) => {
     // 마그니픽 후보함(magnific/)은 프로젝트가 생기는 순간부터 있어야 합니다.
     //
-    void ensureProjectInbox({ projectName: projectFolderName(id, target.title) });
+    const inboxFinished = startMaintenanceActivity(`후보 폴더: ${id}`);
+    void ensureProjectInbox({ projectName: projectFolderName(id, target.title) }).then(() => inboxFinished(true), () => inboxFinished(false));
     if (syncBusy.current) {
       syncAgain.current = id;
       return;
     }
     syncBusy.current = true;
+    const syncFinished = startMaintenanceActivity(`프로젝트 폴더: ${id}`);
     // finally 에서 재실행할 때 이번 결과를 초안에 먼저 반영하려고 밖에 둡니다.
     let settled: Awaited<ReturnType<typeof syncOwnerFolders>> | null = null;
     void (async () => {
@@ -399,6 +402,7 @@ function ProjectEditor({ initialProject }: { initialProject?: LocalProject }) {
           window.addEventListener("focusout", handler, true);
         }
       } finally {
+        syncFinished(Boolean(settled && !settled.failed.length && !settled.postponed));
         syncBusy.current = false;
         const again = syncAgain.current;
         syncAgain.current = null;

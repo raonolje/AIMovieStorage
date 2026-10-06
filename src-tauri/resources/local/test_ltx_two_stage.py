@@ -46,10 +46,18 @@ class FakePipe:
             return "generated-only-latents", "unaltered-audio-latents"
         if self.fail:
             raise RuntimeError("취소 또는 추론 오류")
-        return types.SimpleNamespace(frames=[["정제 영상"]])
+        return types.SimpleNamespace(frames=[list(range(kwargs["num_frames"]))])
 
 
 class TwoStageTests(unittest.TestCase):
+    def setUp(self):
+        # 기존 프레임/조건 테스트는 저장 경계를 모형화한다. 실제 음원 검증은 test_generated_audio.
+        from unittest.mock import patch
+        saver = patch('generated_audio.save_generated_video',
+            side_effect=lambda frames, audio, rate, output, fps, save: (save(frames, output, fps), {'source':'unit-test-stub'})[1])
+        saver.start()
+        self.addCleanup(saver.stop)
+
     def invoke(self, pipe):
         diffusers = types.ModuleType("diffusers")
         diffusers.FlowMatchEulerDiscreteScheduler = FakeScheduler
@@ -118,7 +126,7 @@ class TwoStageTests(unittest.TestCase):
         with patch.dict(sys.modules, {"diffusers.pipelines.ltx2.latent_upsampler": module}):
             load_upsampler("bf16")
         module.LTX2LatentUpsamplerModel.from_pretrained.assert_called_once_with(
-            "Lightricks/LTX-2.5-Diffusers", subfolder="latent_upsampler", revision=UPSAMPLER_REVISION, dtype="bf16")
+            "Lightricks/LTX-2.5-Diffusers", local_files_only=True, subfolder="latent_upsampler", revision=UPSAMPLER_REVISION, dtype="bf16")
 
     def test_engine_reports_final_size_but_sends_half_size_to_structure_and_stage_one(self):
         from PIL import Image
@@ -154,7 +162,7 @@ class TwoStageTests(unittest.TestCase):
                 self.assertEqual(pose.call_args.args[1:3], (640, 384))
                 self.assertEqual(pipe.calls[0][0]["conditions"][0].frames.size, (640, 384))
                 self.assertEqual(pipe.calls[1][0]["conditions"][0].frames.size, (1280, 768))
-                self.assertEqual((result["width"], result["height"], result["frames"], result["fps"]), (1280, 768, 113, 24))
+                self.assertEqual((result["width"], result["height"], result["frames"], result["fps"]), (1280, 768, 120, 24))
                 self.assertEqual(result["inference_steps"], 11)
                 self.assertEqual(result["two_stage"]["adapters"], "stage1-only")
         finally:

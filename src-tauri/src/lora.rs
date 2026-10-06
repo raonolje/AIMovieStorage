@@ -234,9 +234,18 @@ async fn download_into(
     file_name: &str,
     beat: impl Fn(Option<f64>, &str),
 ) -> Res<PathBuf> {
+    download_into_controlled(dir, url, file_name, beat, None, None, || false, false).await.map(|value| value.0)
+}
+
+async fn download_into_controlled(
+    dir: &Path, url: &str, file_name: &str, beat: impl Fn(Option<f64>, &str),
+    expected_size: Option<u64>, expected_sha: Option<&str>, stop: impl Fn() -> bool, checked: bool,
+) -> Res<(PathBuf, bool)> {
     // 받은 이름은 남의 것입니다 — 부르는 쪽이 이미 걸렀어도 여기서 한 번 더(두 번 걸러도 같은 값).
     let name = safe_file(file_name);
     let dest = dir.join(&name);
+    // UI와 조종기가 같은 부분 파일에 동시에 쓰면 이어받은 내용이 섞입니다.
+    let _lock = lock_download(&dest)?;
     /*
       ── 주소에 맞는 키를 붙입니다 ────────────────────────────────────────
        Civitai 는 상당수 로라를 로그인한
@@ -259,32 +268,60 @@ async fn download_into(
         (Some(_), true) => format!("{site} 가 저장된 키를 거부했습니다(만료·권한). 설정 → 로라 칸에서 새 키로 바꿔 주세요."),
         _ => "이 파일은 로그인해야 받을 수 있습니다. 브라우저에서 직접 받은 뒤 «파일 고르기» 로 넣어 주세요.".to_string(),
     };
-    crate::download::fetch(
-        crate::download::Download {
+    let provider_hash = if checked && !dest.exists() {
+        // 공식 응답의 원본 해시를 앱 내부에서 확인하며 인증·서명 URL은 돌려주지 않습니다.
+        let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_secs(20)).build().map_err(|_| "공식 파일 정보를 요청하지 못했습니다.".to_string())?;
+        let mut request = client.head(url);
+        if let Some(token) = bearer.as_deref() { request = request.bearer_auth(token); }
+        let pending = request.send(); tokio::pin!(pending);
+        let response = loop {
+            tokio::select! {
+                value = &mut pending => break value.map_err(|_| "공식 파일 정보 요청이 실패했습니다.".to_string())?,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                    if stop() { return Err("멈췄습니다.".into()); }
+                }
+            }
+        };
+        let code = response.status().as_u16();
+        if !response.status().is_success() && !response.status().is_redirection() {
+            return Err(format!("HTTP {code}: 공식 파일 정보 요청이 거절됐습니다."));
+        }
+        if let Some(size) = response.headers().get("x-linked-size").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()) {
+            if Some(size) != expected_size { return Err("공식 파일 크기가 승인된 규격과 다릅니다.".into()); }
+        }
+        response.headers().get("x-linked-etag").or_else(|| response.headers().get("etag"))
+            .and_then(|value| value.to_str().ok()).map(|value| value.trim_matches('"').to_string())
+            .filter(|value| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()))
+    } else { None };
+    if let (Some(requested), Some(provider)) = (expected_sha, provider_hash.as_deref()) {
+        if !requested.eq_ignore_ascii_case(provider) { return Err("지정한 sha256이 공식 파일 정보와 다릅니다.".into()); }
+    }
+    let effective_sha = provider_hash.as_deref().or(expected_sha);
+    if checked && !dest.exists() && effective_sha.is_none() {
+        return Err("공식 원본 sha256을 확인하지 못했습니다. 가중치를 받지 않았습니다.".into());
+    }
+    let spec = crate::download::Download {
             url,
             dest: &dest,
             label: &name,
             // Civitai 는 sha256·크기를 검색 결과에 주기도 하지만 주소를 직접 넣는 길도
             // 있어서, 받기 전에 «맞는 값» 을 늘 알 수는 없습니다. 아는 것만 확인합니다.
-            expected_sha: None,
-            expected_size: None,
+            expected_sha: effective_sha,
+            expected_size,
             login_hint: Some(login_hint.as_str()),
             bearer,
-        },
-        |tick| {
-            if tick.verifying {
-                return;
-            }
+        };
+    let progress = |tick: crate::download::Beat| {
+            if tick.verifying { beat(None, "sha256 확인 중"); return; }
             beat(
                 tick.percent,
                 &format!("{} 받음", crate::download::human(tick.written)),
             );
-        },
-        // 로라 받기에는 아직 «멈추기» 가 없습니다. 생기면 여기에 깃발을 답니다.
-        || false,
-    )
-    .await?;
-    Ok(dest)
+        };
+    if checked { crate::download::fetch_checked(spec, progress, stop).await?; }
+    else { crate::download::fetch(spec, progress, stop).await?; }
+    Ok((dest, effective_sha.is_some()))
 }
 
 /// 주소 하나를 받아 엔진 폴더에 놓습니다. 진행은 `lora-progress` 로 흘립니다.
@@ -1011,5 +1048,142 @@ mod h3_preset_tests {
         }
         fs::remove_file(path).unwrap();
         fs::remove_dir(dir).unwrap();
+    }
+}
+
+// 취소 플래그는 앱 안에만 두며 인증값이나 요청 헤더는 여기에 보관하지 않습니다.
+use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicBool, Ordering}};
+use std::collections::HashMap;
+fn transfers() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    static MAP: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+struct TransferGuard(String);
+impl Drop for TransferGuard {
+    fn drop(&mut self) { if let Ok(mut map) = transfers().lock() { map.remove(&self.0); } }
+}
+fn lock_download(dest: &Path) -> Res<fs::File> {
+    use fs2::FileExt;
+    let lock = dest.with_file_name(format!("{}.lock.{}", dest.file_name().and_then(|n| n.to_str()).unwrap_or("로라"), crate::download::PARTIAL_SUFFIX));
+    let handle = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(lock)
+        .map_err(|_| "다운로드 잠금 파일을 만들지 못했습니다.".to_string())?;
+    handle.try_lock_exclusive().map_err(|_| "같은 로라를 이미 받고 있습니다.".to_string())?;
+    Ok(handle)
+}
+const CONTROL_REPO: &str = "Lightricks/LTX-2.5";
+const CONTROL_FILE: &str = "loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors";
+const CONTROL_SIZE: u64 = 8_899_889_568;
+fn validate_control_download(engine: &str, repo: &str, file: &str, sha: Option<&str>) -> Res<()> {
+    // 현재 승인된 공식 파일 하나만 연결합니다. 임의 URL·경로·다른 모델 설치는 받지 않습니다.
+    if engine != "ltx25" || repo != CONTROL_REPO || file != CONTROL_FILE {
+        return Err("승인된 공식 LTX-2.5 distilled LoRA만 받을 수 있습니다.".into());
+    }
+    if let Some(sha) = sha {
+        if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) { return Err("sha256은 64자리 16진수여야 합니다.".into()); }
+    }
+    Ok(())
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlDownloadResult {
+    engine: String, file_name: String, size_bytes: u64, sha256: String,
+    expected_sha256_verified: bool, reused: bool,
+}
+#[tauri::command]
+pub fn lora_download_cancel(transfer_id: String) -> Res<bool> {
+    let map = transfers().lock().map_err(|_| "다운로드 상태를 읽지 못했습니다.".to_string())?;
+    if let Some(stop) = map.get(&transfer_id) { stop.store(true, Ordering::Relaxed); return Ok(true); }
+    Ok(false)
+}
+#[tauri::command]
+pub async fn lora_download_control(
+    app: AppHandle, engine: String, repo: String, file: String, transfer_id: String,
+    expected_sha256: Option<String>,
+) -> Res<ControlDownloadResult> {
+    validate_control_download(&engine, &repo, &file, expected_sha256.as_deref())?;
+    if transfer_id.is_empty() || transfer_id.len() > 300 { return Err("다운로드 작업 ID가 올바르지 않습니다.".into()); }
+    let dir = lora_dir(&app, &engine)?;
+    let name = file.rsplit('/').next().ok_or("파일 이름이 없습니다.")?.to_string();
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let mut map = transfers().lock().map_err(|_| "다운로드 상태를 만들지 못했습니다.".to_string())?;
+        if map.contains_key(&transfer_id) { return Err("같은 작업 ID가 이미 실행 중입니다.".into()); }
+        map.insert(transfer_id.clone(), stop.clone());
+    }
+    let _guard = TransferGuard(transfer_id);
+    let reused = dir.join(&name).is_file();
+    beat(&app, &engine, &name, None, "공식 로라 다운로드 준비");
+    let url = format!("https://huggingface.co/{repo}/resolve/main/{file}");
+    let result: Res<ControlDownloadResult> = async {
+        let (path, checksum_verified) = download_into_controlled(&dir, &url, &name,
+            |percent, message| beat(&app, &engine, &name, percent, message),
+            Some(CONTROL_SIZE), expected_sha256.as_deref(), || stop.load(Ordering::Relaxed), true).await?;
+        beat(&app, &engine, &name, None, "완료 파일 sha256 기록 중");
+        let hash = crate::download::sha256_cancellable(&path, &|| stop.load(Ordering::Relaxed))?;
+        Ok(ControlDownloadResult { engine: engine.clone(), file_name: name.clone(), size_bytes: CONTROL_SIZE,
+            sha256: hash, expected_sha256_verified: checksum_verified, reused })
+    }.await;
+    match &result {
+        Ok(_) => beat_done(&app, &engine, &name, None),
+        Err(message) => beat_done(&app, &engine, &name, Some(message)),
+    }
+    result
+}
+
+#[cfg(test)]
+mod control_download_tests {
+    use super::*;
+    #[test]
+    fn official_input_only() {
+        assert!(validate_control_download("ltx25", CONTROL_REPO, CONTROL_FILE, None).is_ok());
+        for (engine, repo, file) in [("minimaxh3", CONTROL_REPO, CONTROL_FILE), ("ltx25", "evil/LTX-2.5", CONTROL_FILE), ("ltx25", CONTROL_REPO, "../secret"), ("ltx25", CONTROL_REPO, "loras/x.safetensors?token=x")] {
+            assert!(validate_control_download(engine, repo, file, None).is_err());
+        }
+        assert!(validate_control_download("ltx25", CONTROL_REPO, CONTROL_FILE, Some("bad")).is_err());
+    }
+    #[test]
+    fn shared_file_lock_blocks_concurrent_writes() {
+        let dir = tempfile::tempdir().unwrap(); let dest = dir.path().join("x.safetensors");
+        let first = lock_download(&dest).unwrap(); assert!(lock_download(&dest).is_err());
+        drop(first); assert!(lock_download(&dest).is_ok());
+    }
+    #[test]
+    fn cancel_only_own_transfer() {
+        let key = uuid::Uuid::new_v4().to_string(); let flag = Arc::new(AtomicBool::new(false));
+        transfers().lock().unwrap().insert(key.clone(), flag.clone()); let guard = TransferGuard(key.clone());
+        assert!(!lora_download_cancel("unknown".into()).unwrap()); assert!(!flag.load(Ordering::Relaxed));
+        assert!(lora_download_cancel(key.clone()).unwrap()); assert!(flag.load(Ordering::Relaxed));
+        drop(guard); assert!(!lora_download_cancel(key).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod control_service_http_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    #[tokio::test]
+    async fn official_service_head_401_stops_before_weight_request() {
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let addr=listener.local_addr().unwrap();
+        let server=std::thread::spawn(move|| { let (mut sock,_)=listener.accept().unwrap(); let mut b=[0;2048]; let n=sock.read(&mut b).unwrap(); assert!(String::from_utf8_lossy(&b[..n]).starts_with("HEAD ")); sock.write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap(); });
+        let dir=tempfile::tempdir().unwrap(); let url=format!("http://{addr}/file");
+        let result=download_into_controlled(dir.path(),&url,"x.safetensors",|_,_|{},Some(100),None,||false,true).await;
+        assert!(result.unwrap_err().starts_with("HTTP 401:")); server.join().unwrap(); assert!(!dir.path().join("x.safetensors").exists());
+    }
+    #[tokio::test]
+    async fn provider_hash_and_resume_use_same_service() {
+        use sha2::{Digest,Sha256};
+        let header=br#"{"x":{"dtype":"U8","shape":[4],"data_offsets":[0,4]}}"#;
+        let mut content=(header.len() as u64).to_le_bytes().to_vec();content.extend(header);content.extend([1,2,3,4]);
+        let hash=format!("{:x}",Sha256::digest(&content));let size=content.len();let sent=content.clone();let server_hash=hash.clone();
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();let addr=listener.local_addr().unwrap();
+        let server=std::thread::spawn(move||{
+            let (mut head,_)=listener.accept().unwrap();let mut req=[0;2048];head.read(&mut req).unwrap();
+            write!(head,"HTTP/1.1 302 Found\r\nx-linked-etag: \"{server_hash}\"\r\nx-linked-size: {size}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();drop(head);
+            let(mut get,_)=listener.accept().unwrap();let n=get.read(&mut req).unwrap();let text=String::from_utf8_lossy(&req[..n]).to_lowercase();assert!(text.starts_with("get "));assert!(text.contains("range: bytes=10-"));
+            write!(get,"HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes 10-{}/{size}\r\nConnection: close\r\n\r\n",size-10,size-1).unwrap();get.write_all(&sent[10..]).unwrap();
+        });
+        let dir=tempfile::tempdir().unwrap();fs::write(dir.path().join(format!("x.safetensors.{}",crate::download::PARTIAL_SUFFIX)),&content[..10]).unwrap();let url=format!("http://{addr}/file");
+        let(path,verified)=download_into_controlled(dir.path(),&url,"x.safetensors",|_,_|{},Some(size as u64),None,||false,true).await.unwrap();
+        server.join().unwrap();assert!(verified);assert_eq!(fs::read(path).unwrap(),content);assert_eq!(crate::download::sha256_of(&dir.path().join("x.safetensors")).unwrap(),hash);
     }
 }

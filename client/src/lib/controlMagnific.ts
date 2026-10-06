@@ -136,6 +136,14 @@ function fail(code: string, message: string, details?: unknown): never {
   throw new ProjectControlError(code, t(message), details);
 }
 
+/** Rust의 이 오류는 포트 확인 직후, 파일 업로드나 보드 조작 전에만 반환됩니다. */
+function isPreUploadNoPort(error: unknown): boolean {
+  return String(error instanceof Error ? error.message : error)
+    .startsWith("마그니픽이 우리 앱 밖에서 켜져 있어 자동 구성을 못 합니다.");
+}
+
+const noPortRecovery = "Magnific 연결 포트가 없어 이번 구성은 업로드 전에 멈췄습니다. Magnific을 트레이까지 완전히 종료한 뒤 새 미리보기와 새 작업 요청 열쇠로 구성해 주세요.";
+
 /** 프롬프트에 출력 비율이 한 가지로 명시되면 구성 칩의 생성기 비율과 충돌하지 않게 합니다. */
 function assertBackgroundPromptAspect(prompt: string, aspectRatio: string, blueprint: string[]) {
   const ratios = [...new Set(prompt.match(/\b(?:21:9|16:9|9:16|4:3|3:4|3:2|2:3|1:1)\b/g) ?? [])];
@@ -525,6 +533,8 @@ registerTaskRunner(KIND, async (raw, report, task) => {
   const saved = getTask(task.id)!;
   if (saved.externalCheckpoint?.phase === "completed")
     return { data: saved.externalCheckpoint };
+  if (saved.externalCheckpoint?.preUploadNoPort)
+    fail("magnific_no_port", String(saved.externalCheckpoint.message));
   if (saved.externalEffectStartedAt)
     fail(
       "external_result_unknown",
@@ -550,6 +560,12 @@ registerTaskRunner(KIND, async (raw, report, task) => {
       },
     });
   } catch (error) {
+    if (isPreUploadNoPort(error)) {
+      await saveTaskExternalCheckpoint(task.id, {
+        phase: "not_started", preUploadNoPort: true, paidGeneration: false, message: noPortRecovery,
+      }).catch(() => undefined);
+      throw new ProjectControlError("magnific_no_port", noPortRecovery);
+    }
     if (getTask(task.id)?.externalEffectStartedAt) {
       // 업로드가 일부라도 끝났을 수 있습니다. 자동 재시도나 완료로 단정하지 않습니다.
       const explanation = t(
@@ -631,6 +647,8 @@ registerTaskRunner(BATCH_KIND, async (raw, report, task) => {
   const payload = raw as BatchPayload;
   const saved = getTask(task.id)!;
   if (saved.externalCheckpoint?.phase === "completed") return { data: saved.externalCheckpoint };
+  if (saved.externalCheckpoint?.preUploadNoPort)
+    fail("magnific_no_port", String(saved.externalCheckpoint.message));
   if (saved.externalEffectStartedAt)
     fail("external_result_unknown", "Magnific 일괄 구성의 완료 여부를 확인하지 못했습니다. 보드를 확인한 뒤 새 작업으로 요청해 주세요.");
   let completed = 0;
@@ -658,6 +676,18 @@ registerTaskRunner(BATCH_KIND, async (raw, report, task) => {
       });
     }
   } catch (error) {
+    if (isPreUploadNoPort(error)) {
+      const message = completed
+        ? `Magnific 이미지 ${completed}/${payload.items.length}개 구성은 확인됐고, 다음 구성은 연결 포트가 없어 업로드 전에 멈췄습니다. 완료된 구성은 반복하지 말고 남은 항목만 새 미리보기와 새 작업 요청 열쇠로 구성해 주세요.`
+        : noPortRecovery;
+      await saveTaskExternalCheckpoint(task.id, {
+        phase: completed ? "partial" : "not_started", preUploadNoPort: true,
+        completed, total: payload.items.length,
+        runSubmitted: payload.requestExecution.runAfterCompose && completed > 0,
+        paidGeneration: false, message,
+      }).catch(() => undefined);
+      throw new ProjectControlError("magnific_no_port", message);
+    }
     if (getTask(task.id)?.externalEffectStartedAt) {
       const cause = (error instanceof Error ? error.message : String(error))
         .replace(/Bearer\s+\S+/gi, "Bearer [숨김]")

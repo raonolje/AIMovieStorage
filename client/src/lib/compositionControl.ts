@@ -30,6 +30,7 @@ export interface CompositionCapture {
   plate: string;
 }
 export interface CompositionSessionPort {
+  measureContact?: (input: import("./compositionContact").CompositionContactInput) => unknown | Promise<unknown>;
   /** history와 같은 불변 판입니다. 편집은 apply의 함수형 갱신으로 새 참조를 만듭니다. */
   read: () => {
     state: CompositionState;
@@ -90,6 +91,11 @@ export const compositionApplyRequestSchema =
   compositionSessionRequestSchema.extend({
     commands: compositionCommandsSchema,
   });
+export const compositionMeasureContactSchema = compositionSessionRequestSchema.extend({
+  timeSeconds: z.number().finite().min(0).max(600), characterId: z.string().min(1).max(200),
+  side: z.enum(["Left", "Right"]), finger: z.enum(["Thumb", "Index", "Middle", "Ring", "Pinky"]),
+  objectIds: z.array(z.string().min(1).max(200)).min(1).max(10),
+}).strict();
 export const compositionOpenRequestSchema = z
   .object({
     projectName: z.string().min(1).max(500),
@@ -597,6 +603,24 @@ export async function commitComposition(input: unknown) {
   });
 }
 
+/** 시각을 평가하되 편집·키·프로젝트·파일을 저장하지 않는 렌더 좌표 조회입니다. */
+export async function measureCompositionContact(input: unknown) {
+  const request = parse(compositionMeasureContactSchema, input);
+  const session = requireSession(request.sessionId);
+  return exclusive(session, async () => {
+    guard(session, request.expectedRevision);
+    await session.port.settle?.();
+    guard(session, request.expectedRevision);
+    const state = session.port.read().state;
+    if (request.timeSeconds > (state.timeline?.duration ?? 5))
+      throw new CompositionControlError("invalid_time", "측정 시각이 타임라인 길이를 넘습니다.");
+    if (!session.port.measureContact) throw new CompositionControlError("measurement_unavailable", "이 구도 창은 접촉 측정이 준비되지 않았습니다.");
+    const data = await session.port.measureContact(request);
+    guard(session, request.expectedRevision);
+    return { sessionId: session.sessionId, revision: session.revision, ...session.identity, data };
+  });
+}
+
 /** 내보내기 동안 같은 세션의 명령을 직렬화하고 수동 편집은 판 충돌로 알립니다. */
 export async function exportCompositionVideo(
   input: unknown,
@@ -622,7 +646,7 @@ export async function exportCompositionVideo(
     const video = await session.port.exportVideo(options, { ...controls, assertCurrent });
     assertCurrent();
     guard(session, request.expectedRevision);
-    // 파일 쓰기만 성공한 상태를 완료로 보고하지 않습니다. 프로젝트 저장 관문의 ack가 필요합니다.
+    // 호출자가 선택한 저장 계약을 확인합니다. 진단 내보내기는 파일만 저장하고 컷에는 적용하지 않습니다.
     await persist(video, { ...session.identity });
     reconcile(session);
     return { ...video, sessionId: session.sessionId, sourceRevision: request.expectedRevision,

@@ -1,0 +1,17 @@
+{
+  "id": "kimodo",
+  "name": "동작 생성 — NVIDIA KIMODO",
+  "purpose": "텍스트로 SOMA 동작 BVH를 생성하여 음악 타임라인에 적용",
+  "version": "KIMODO 1aece8c · SOMA v1.1",
+  "kind": "python",
+  "python": "3.12",
+  "heavy": false,
+  "experimental": true,
+  "models_dir": "models",
+  "code": [], "models": [], "empty_files": [],
+  "notes": [
+    "환경 설치와 가중치 준비는 별도입니다. 선택한 SOMA 모델과 텍스트 인코더는 첫 생성 때 받습니다.",
+    "Hugging Face Meta-Llama-3-8B-Instruct 접근 승인을 받고 설정에 토큰을 등록하세요.",
+    "Windows 실제 GPU 생성 품질은 검증 중입니다. SMPL-X 모델은 제공하지 않습니다."
+  ]
+}

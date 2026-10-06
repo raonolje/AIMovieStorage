@@ -766,6 +766,7 @@ def quantized_component(repo, dtype, bits, subfolder="transformer", skip_modules
     return AutoModel.from_pretrained(
         repo,
         subfolder=subfolder,
+        local_files_only=True,
         quantization_config=config,
         torch_dtype=dtype,
     )

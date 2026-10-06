@@ -15,6 +15,7 @@ export default function TimelineMusicRow({
   gutterStyle,
   ratioOf,
   onSeek,
+  onDragStart,
 }: {
   /** 올려 둔 노래. 없으면 줄 자체가 안 보입니다. */
   music: CompositionMusic | null | undefined;
@@ -24,6 +25,7 @@ export default function TimelineMusicRow({
   /** 시각 → 가로 비율(0~1). */
   ratioOf: (time: number) => number;
   onSeek: (time: number) => void;
+  onDragStart: (event: React.PointerEvent) => void;
 }) {
   if (!music) return null;
   return (
@@ -48,7 +50,7 @@ export default function TimelineMusicRow({
           줄을 키웠습니다(5 → 9). 파형이 눌리면 조용한 데와 센 데가 구분이 안 가서,
           「소리가 있다」 는 알아도 «어디가 후렴인지» 는 못 읽습니다.
         */}
-        <div className="relative h-9 flex-1" style={{ background: "oklch(1 0 0 / 3%)", borderRadius: 3 }}>
+        <div className="relative h-9 flex-1 overflow-hidden" style={{ background: "oklch(1 0 0 / 3%)", borderRadius: 3 }}>
           {/*
             ── 파형 ────────────────────────────────────────────────
             
@@ -56,7 +58,15 @@ export default function TimelineMusicRow({
             구간을 안 나눠 두면 이 줄이 **텅 비어** 있었습니다 — 노래를 올렸는지조차
             알 수 없었습니다. 파형은 구간 칸 **뒤에** 깔립니다(칸이 덮으면 안 되니까).
           */}
-          <MusicWave path={music.path} offset={music.offset ?? 0} timelineSeconds={span} />
+          <div role="slider" tabIndex={0} aria-label="음악 레이어 시작 위치" aria-valuemin={0} aria-valuemax={span}
+            aria-valuenow={music.startTime ?? 0} title="음악 레이어를 끌어서 시작 위치를 옮깁니다"
+            onPointerDown={onDragStart}
+            className="absolute top-0 h-9 cursor-grab overflow-hidden rounded border border-violet-400/70 bg-violet-600/20 active:cursor-grabbing"
+            style={{ left: `${ratioOf(music.startTime ?? 0) * 100}%`,
+              width: `${ratioOf(Math.max(0, music.seconds - (music.offset ?? 0))) * 100}%` }}>
+            <MusicWave path={music.path} offset={music.offset ?? 0}
+              timelineSeconds={Math.max(0.001, music.seconds - (music.offset ?? 0))} />
+          </div>
           {music.sections.map((section, index) => {
             const left = ratioOf(section.start) * 100;
             const width = Math.max(0.4, (ratioOf(section.end) - ratioOf(section.start)) * 100);
@@ -65,8 +75,9 @@ export default function TimelineMusicRow({
                 key={section.id}
                 type="button"
                 onClick={() => onSeek(section.start)}
+                onPointerDown={event => event.stopPropagation()}
                 title={`${section.label} — ${section.start.toFixed(2)}초 ~ ${section.end.toFixed(2)}초 (${(section.end - section.start).toFixed(1)}초). 누르면 그 자리로 갑니다`}
-                className="absolute top-0.5 h-8 overflow-hidden truncate px-1 text-[8px] font-semibold"
+                className="absolute bottom-0 z-10 h-3 overflow-hidden truncate px-1 text-[8px] font-semibold"
                 style={{
                   left: `${left}%`,
                   width: `${width}%`,

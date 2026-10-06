@@ -8,7 +8,7 @@ model-specific prompts, while keeping characters, 3D blocking and generated asse
 
 **[Download for Windows](https://github.com/raonolje/AIMovieStorage/releases/latest)** · [Installation](#installation) ·
 [Local models](#local-models-and-seedvr2) · [Claude / OpenAI APIs](#claude-and-openai-api-connections) ·
-[Codex / Claude controller](docs/APP_CONTROL.md) ·
+[Codex / Claude controller](docs/APP_CONTROL.md) · [Hand tracking](docs/MOCAP_HANDS.md) ·
 [Feature details](#what-it-does) · [Build from source](#build-from-source) ·
 [Report an issue](https://github.com/raonolje/AIMovieStorage/issues)
 
@@ -36,7 +36,10 @@ The top half is a **15-second reference video exported from AIMovieStorage's sho
 > **Beta.** Local generation and model-specific prompts are still being verified. Check results and keep backups.
 > The interface defaults to Korean; English, Japanese and Chinese are available in Settings, with some screens still untranslated.
 
-For chat-based editing, the bundled [Codex skill](skills/aimoviestorage-control/SKILL.md) is registered when the app starts. Connect the local app controller in Settings; the skill alone does not configure MCP. It can save chat-created images, videos and prompts back into a project. [Connection guide](docs/APP_CONTROL.md).
+**Chat-based project control.** Connect Codex or Claude Desktop to the local app from Settings. The bundled
+[Codex skill](skills/aimoviestorage-control/SKILL.md) is registered when the app starts, while the local MCP
+connection is configured separately. Supported commands can read changes made in the app, edit projects and shots,
+and register chat-created media with its prompt and representative selection. See [setup and current API coverage](docs/APP_CONTROL.md).
 
 ## Local models and SeedVR2
 
@@ -57,6 +60,10 @@ ComfyUI is not required for these engines.
   Image/video LoRAs can be searched on Civitai or Hugging Face, imported, and configured with strengths and trigger words.
 - **SeedVR2 workflow:** upscale still images to a target long edge of 2K, 4K, 6K or 8K and keep the result with the project's assets.
   The current in-app SeedVR2 integration processes still images; video generation is handled by the video engines above.
+- **Memory policy — current source, not v0.2.3:** local generation releases its worker after each run by default.
+  Alternatively, retain models between runs or release the worker when RAM or VRAM reaches a chosen limit
+  (85% each by default). Adaptive cleanup checks usage after generation; unreadable usage also releases the worker.
+  Reloading models can make the next run slower. See [policy details and verification limits](docs/APP_CONTROL.md).
 
 Model weights are separate downloads. Some models require a Hugging Face token or access approval.
 Hardware fit is an estimate, and each model has its own [license terms](#license).
@@ -96,7 +103,7 @@ Choose one:
 | Package | How to use it |
 | --- | --- |
 | Installer (`*-setup.exe`) | Run the installer and follow the setup steps. |
-| Portable (`*_portable.zip`) | Extract the entire archive, then run the included `.exe`. Keep the `resources` folder beside it. Settings and model downloads still use the user's app data folder. |
+| Portable (`*-portable.zip`) | Extract the entire archive, then run the included `.exe`. Keep the `resources` folder beside it. Settings and model downloads still use the user's app data folder. |
 
 GitHub's automatic **Source code (zip/tar.gz)** archives contain source files, not a ready-to-run app.
 
@@ -225,8 +232,10 @@ pnpm test          # unit tests
 pnpm build:public  # public installer + portable build
 ```
 
-The installer is written to `src-tauri/target/release/bundle/nsis/` and the portable archive to
-`src-tauri/target/release/bundle/portable/` with the default build configuration.
+The public installer is written to `src-tauri/target/public/release/bundle/nsis/` and the portable archive to
+`src-tauri/target/public/release/bundle/portable/` with the default build configuration.
+Private builds use `src-tauri/target/private/`; each edition has a separate build directory.
+The release workflow verifies exact artifact names and hashes against `bundle/build-manifest.json` before upload.
 The public edition excludes the engines listed in [edition.json](edition.json).
 `pnpm dev:desktop` without `--edition public` defaults to the private edition; the engines' license terms still apply.
 
@@ -264,7 +273,7 @@ For the same reason a few engines are not part of this build — `edition.json` 
 
 **[Windows 다운로드](https://github.com/raonolje/AIMovieStorage/releases/latest)** · [설치 안내](#설치-안내) ·
 [로컬 모델](#로컬-모델과-seedvr2) · [Claude / OpenAI API](#claudeopenai-api-연결) ·
-[Codex / Claude 조종기](docs/APP_CONTROL.md) ·
+[Codex / Claude 조종기](docs/APP_CONTROL.md) · [손 추적](docs/MOCAP_HANDS.md) ·
 [기능 자세히 보기](#무엇을-해-주는가) · [소스에서 실행](#소스에서-실행) ·
 [오류 제보](https://github.com/raonolje/AIMovieStorage/issues)
 
@@ -292,7 +301,10 @@ For the same reason a few engines are not part of this build — `edition.json` 
 > **베타입니다.** 로컬 생성과 모델별 프롬프트는 검증 중입니다. 결과를 확인하고 중요한 자료는 백업해 주세요.
 > 기본 언어는 한국어이며 설정에서 English · 日本語 · 中文으로 바꿀 수 있습니다. 일부 화면은 아직 한국어로 표시됩니다.
 
-대화로 편집할 때는 앱 실행 시 등록되는 [Codex 스킬](skills/aimoviestorage-control/SKILL.md)을 사용할 수 있습니다. 로컬 MCP 조종기 연결은 설정에서 별도로 합니다. 채팅에서 만든 이미지·영상·프롬프트를 프로젝트에 기록하고 대표 이미지를 지정할 수 있습니다. [연결 안내](docs/APP_CONTROL.md).
+**대화로 프로젝트 조종하기.** 설정에서 Codex 또는 Claude Desktop을 로컬 앱에 연결합니다.
+[Codex 스킬](skills/aimoviestorage-control/SKILL.md)은 앱을 실행할 때 등록하고 MCP 연결은 별도로 설정합니다.
+지원되는 명령으로 앱에서 직접 고친 내용도 다시 읽고, 프로젝트와 구도를 수정하며, 채팅에서 만든 이미지·영상을
+프롬프트와 대표 선택을 포함해 프로젝트에 등록할 수 있습니다. [연결 방법과 현재 API 범위](docs/APP_CONTROL.md)를 확인하세요.
 
 ## 로컬 모델과 SeedVR2
 
@@ -312,6 +324,10 @@ For the same reason a few engines are not part of this build — `edition.json` 
   이미지·영상용 LoRA를 Civitai·Hugging Face에서 검색하거나 직접 등록하고, 강도와 트리거 단어를 관리합니다.
 - **SeedVR2 작업 흐름:** 정지 이미지를 긴 변 기준 2K·4K·6K·8K로 업스케일하고 결과를 프로젝트 에셋과 함께 관리합니다.
   현재 앱의 SeedVR2 연결은 정지 이미지용이며, 영상 생성은 위 영상 엔진이 담당합니다.
+- **생성 뒤 메모리 정책 — 현재 소스에 추가, v0.2.3에는 없음:** 기본값은 매 생성 뒤 사용한 로컬 워커를 종료합니다.
+  연속 생성을 위해 모델을 유지하거나, RAM·VRAM 중 하나가 정한 사용률 기준 이상일 때 해제하도록 고를 수도 있습니다(각각 기본 85%).
+  사용률 기준 정리는 생성이 끝난 뒤 판단하며, 측정할 수 없을 때도 워커를 해제합니다. 다음 생성의 모델 로딩은 더 오래 걸릴 수 있습니다.
+  [정책과 검증 범위](docs/APP_CONTROL.md)를 확인하세요.
 
 모델 가중치는 별도로 내려받습니다. 일부 모델에는 Hugging Face 토큰이나 접근 승인이 필요합니다.
 하드웨어 판정은 추정치이며, 모델마다 [라이선스 조건](#라이선스)이 다릅니다.
@@ -349,7 +365,7 @@ API 사용료는 선택한 제공자의 과금 기준을 따릅니다.
 | 파일 | 실행 방법 |
 | --- | --- |
 | 설치본(`*-setup.exe`) | 파일을 실행하고 설치 안내를 따릅니다. |
-| 무설치본(`*_portable.zip`) | 압축을 모두 푼 뒤 안의 `.exe`를 실행합니다. `resources` 폴더를 실행 파일 옆에 유지하세요. 설정과 모델은 사용자 앱 데이터 폴더에 저장됩니다. |
+| 무설치본(`*-portable.zip`) | 압축을 모두 푼 뒤 안의 `.exe`를 실행합니다. `resources` 폴더를 실행 파일 옆에 유지하세요. 설정과 모델은 사용자 앱 데이터 폴더에 저장됩니다. |
 
 GitHub가 자동으로 제공하는 **Source code** 압축 파일(`zip`/`tar.gz`)은 바로 실행하는 앱이 아닌 소스 코드입니다.
 
@@ -464,7 +480,9 @@ pnpm dev:desktop --edition public  # 공개판 엔진 제한을 적용해 실행
 
 `pnpm check`로 타입을 확인하고 `pnpm test`로 단위 테스트를 실행합니다.
 배포용 파일은 `pnpm build:public`으로 만듭니다. 기본 빌드 설정에서 설치본은
-`src-tauri/target/release/bundle/nsis/`, 무설치본은 `src-tauri/target/release/bundle/portable/`에 생성됩니다.
+`src-tauri/target/public/release/bundle/nsis/`, 무설치본은 `src-tauri/target/public/release/bundle/portable/`에 생성됩니다.
+비공개판은 `src-tauri/target/private/`를 사용해 빌드 폴더를 분리합니다.
+배포 워크플로는 `bundle/build-manifest.json`에 기록된 정확한 파일 이름과 해시를 검증한 뒤 업로드합니다.
 
 공개판은 [edition.json](edition.json)에 명시된 엔진을 제외합니다.
 `--edition public` 없이 `pnpm dev:desktop`을 실행하면 기본값은 비공개판이며, 각 엔진의 라이선스 조건은 그대로 적용됩니다.

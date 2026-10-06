@@ -10,6 +10,7 @@ import {
   type CompositionIdentity,
 } from "@/lib/compositionControl";
 import type { CompositionCommandContext } from "@/lib/compositionControlCommands";
+import { controllerEdit, markControllerState } from "@/lib/compositionControllerState";
 import type { CompositionVideoOptions, CompositionVideoControls, SavedReferenceVideo } from "@/lib/referenceVideoExport";
 
 export type ControlledCapture = (options?: {
@@ -32,6 +33,7 @@ export function useCompositionControl(options: {
   capture: () => ControlledCapture | null;
   stopPlayback: () => void;
   exportVideo?: (options: CompositionVideoOptions, controls: CompositionVideoControls) => Promise<SavedReferenceVideo>;
+  measureContact?: (input: import("@/lib/compositionContact").CompositionContactInput) => unknown;
   commit?: (
     state: CompositionState,
     captures: CompositionCapture,
@@ -80,16 +82,29 @@ export function useCompositionControl(options: {
         };
       },
       apply: (updater) => {
-        flushSync(() => current.current.history.set(updater));
+        flushSync(() => current.current.history.set(state => markControllerState(updater(state))));
       },
       undo: () => {
-        flushSync(() => current.current.history.undo());
+        controllerEdit(() => {
+          flushSync(() => current.current.history.undo());
+          markControllerState(current.current.history.value);
+        });
       },
       redo: () => {
-        flushSync(() => current.current.history.redo());
+        controllerEdit(() => {
+          flushSync(() => current.current.history.redo());
+          markControllerState(current.current.history.value);
+        });
       },
       // 자동 키·방 규칙도 기존 effect 한 벌이 적용합니다. 적용된 판을 읽기 전에 React와 viewport가 따라올 틈을 줍니다.
       settle: settleCompositionEditor,
+      measureContact: async (input) => {
+        flushSync(() => current.current.stopPlayback());
+        await settleCompositionEditor();
+        const measure = current.current.measureContact;
+        if (!measure) throw new CompositionControlError("measurement_unavailable", "접촉 측정 렌더러가 준비되지 않았습니다.");
+        return measure(input);
+      },
       capture: captureCurrent,
       exportVideo: async (options, controls) => {
         if (!current.current.open || !current.current.exportVideo)

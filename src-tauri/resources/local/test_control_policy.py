@@ -34,7 +34,7 @@ class FakePipe:
     def __call__(self, reference_conditions=None, conditions=None, reference_downscale_factor=1, **kwargs):
         self.received = reference_conditions
         self.kwargs = dict(kwargs, reference_downscale_factor=reference_downscale_factor, conditions=conditions)
-        return types.SimpleNamespace(frames=[["완료 프레임"]])
+        return types.SimpleNamespace(frames=[list(range(kwargs["num_frames"]))])
 
 
 class ControlPolicyTests(unittest.TestCase):
