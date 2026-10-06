@@ -11,7 +11,7 @@ class NativeDiskTests(unittest.TestCase):
             with wave.open(str(source),'wb') as output:
                 output.setnchannels(2);output.setsampwidth(2);output.setframerate(48000);output.writeframes(pcm)
             assets=[{'id':'audio','projectId':'qa','kind':'audio','filePath':str(source)}]
-            request={'engine':'ltx-a2v-native','audioAssetId':'audio','audioDurationSeconds':2.72,'fps':16,'offloadMode':'disk'}
+            request={'engine':'ltx-a2v-native','audioAssetId':'audio','audioDurationSeconds':2.72,'fps':16,'offloadMode':'disk','checkpointReadBackend':'pread'}
             prepared=prepare_app_request('qa',request,assets)
             self.assertEqual(prepared['offload_mode'],'disk')
             self.assertEqual((prepared['plan'].visible_frames,prepared['plan'].generation_frames),(44,49))
@@ -20,7 +20,7 @@ class NativeDiskTests(unittest.TestCase):
             with wave.open(result['conditioning'],'rb') as conditioning:
                 data=conditioning.readframes(conditioning.getnframes())
                 self.assertEqual(data[:len(pcm)],pcm);self.assertEqual(data[len(pcm):],bytes(16440*4))
-            self.assertEqual(prepare_app_request('qa',{k:v for k,v in request.items() if k!='offloadMode'},assets)['offload_mode'],'cpu')
+            self.assertEqual(prepare_app_request('qa',{k:v for k,v in request.items() if k not in ('offloadMode','checkpointReadBackend')},assets)['offload_mode'],'cpu')
     def test_invalid_mode_rejected_before_path_resolution(self):
         for mode in ['none','fp8',True,3]:
             with self.assertRaisesRegex(ValueError,'offloadMode'):

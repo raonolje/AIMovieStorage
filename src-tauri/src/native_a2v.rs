@@ -1,6 +1,7 @@
 //! 원음 조건 실험 경로는 기존 상주 LTX 환경을 바꾸지 않고 격리 프로세스로만 실행합니다.
 use std::{fs, path::{Path, PathBuf}, process::{Command, Stdio}, sync::Mutex, time::Instant};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager};
 use crate::{err, Res};
 use crate::upscale::GenerateResult;
@@ -10,6 +11,37 @@ const WORKER: &str = include_str!("../resources/native_a2v/a2v_worker.py");
 const ADAPTER: &str = include_str!("../resources/native_a2v/a2v_adapter.py");
 const GPU_HANDOFF: &str = include_str!("../resources/native_a2v/gpu_handoff.py");
 const MEMORY_BUDGET: &str = include_str!("../resources/native_a2v/memory_budget.py");
+const SDK_BOOTSTRAP: &str = include_str!("../resources/native_a2v/sdk_bootstrap.py");
+const SDK_MANIFEST: &str = include_str!("../resources/native_a2v/sdk_candidate/manifest.json");
+
+fn sdk_manifest_sha() -> String { format!("{:x}", Sha256::digest(SDK_MANIFEST.as_bytes())) }
+
+fn verify_sdk_root(root: &Path, expected_sha: &str) -> Res<PathBuf> {
+    let root=root.canonicalize().map_err(|e|err("bundled_sdk_missing",e))?;
+    let bytes=fs::read(root.join("manifest.json")).map_err(|e|err("bundled_sdk_manifest_missing",e))?;
+    if format!("{:x}",Sha256::digest(&bytes)) != expected_sha { return Err("bundled_sdk_manifest_hash_mismatch".into()); }
+    let data:Value=serde_json::from_slice(&bytes).map_err(|e|err("bundled_sdk_manifest_invalid",e))?;
+    if data["schema"]!="aistorage-bundled-native-sdk-v1" { return Err("bundled_sdk_manifest_invalid".into()); }
+    let files=data["files"].as_array().filter(|x|!x.is_empty()).ok_or("bundled_sdk_manifest_invalid")?;
+    let mut seen=std::collections::HashSet::new();
+    for item in files {
+        let relative=item["file"].as_str().ok_or("bundled_sdk_path_invalid")?;
+        let p=Path::new(relative);
+        if relative.contains('\\') || !(relative.starts_with("ltx_core/") || relative.starts_with("ltx_pipelines/")) || p.extension().and_then(|x|x.to_str())!=Some("py") || p.components().any(|c|!matches!(c,std::path::Component::Normal(_))) || !seen.insert(relative) {
+            return Err("bundled_sdk_path_invalid".into());
+        }
+        let actual=root.join(p).canonicalize().map_err(|e|err("bundled_sdk_file_missing",e))?;
+        if !actual.starts_with(&root) { return Err("bundled_sdk_path_escape".into()); }
+        let bytes=fs::read(actual).map_err(|e|err("bundled_sdk_file_missing",e))?;
+        if item["sha256"].as_str()!=Some(format!("{:x}",Sha256::digest(bytes)).as_str()) { return Err("bundled_sdk_file_hash_mismatch".into()); }
+    }
+    Ok(root)
+}
+
+fn bundled_sdk_root(app: &AppHandle) -> Res<PathBuf> {
+    let root=app.path().resolve("resources/native_a2v/sdk_candidate",tauri::path::BaseDirectory::Resource).map_err(|e|err("bundled_sdk_resource_path",e))?;
+    verify_sdk_root(&root,&sdk_manifest_sha())
+}
 
 fn manifest_path(app: &AppHandle) -> Res<PathBuf> {
     Ok(app.path().app_data_dir().map_err(|e| err("앱 데이터 경로 오류", e))?
@@ -48,9 +80,14 @@ pub fn native_a2v_status(app: AppHandle) -> Res<Value> {
         Ok(value) => value,
         Err(_) => return Ok(json!({"ready":false,"blockers":["managed_native_environment_not_configured"],"experimental":true,"gpuQaCompleted":false,"lipSyncVerified":false})),
     };
-    let errors = blockers(&manifest);
+    let mut errors = blockers(&manifest);
+    let sdk_ready=bundled_sdk_root(&app).is_ok();
+    if !sdk_ready { errors.push("bundled_sdk_not_verified".into()); }
     Ok(json!({"ready":errors.is_empty(),"blockers":errors,"experimental":true,
+        "bundledSdkReady":sdk_ready,"bundledSdkManifestSha256":sdk_manifest_sha(),"nativeMemoryPhaseDiagnostics":true,
         "gpuQaCompleted":manifest["native_gpu_qa_completed"] == true,"lipSyncVerified":false,
+        "checkpointReadBackends":["mmap","pread"],"legacyCpuCheckpointReadBackend":"pread","diskCheckpointReadBackend":"explicit_required","metadataReadBackend":"pread",
+        "checkpointReadScope":"explicit native disk job; pread can be much slower; conservative admission is not a full GPU peak guarantee; no automatic switching",
         "requestScopedGpuHandoffSupported":true,"gpuHandoffScope":"one explicit media_generate request; persistent execution permission unchanged",
         "offloadModes":["cpu","disk"],"defaultOffloadMode":"cpu","diskMode":"installed official block streaming; smaller host cache; measured QA still required",
         "audioSupport":"stereo PCM16 WAV; nearest-sample offset, EOF clamp; conditioning zero-padded to 8n+1 frames; original selected samples in ALAC master",
@@ -59,7 +96,7 @@ pub fn native_a2v_status(app: AppHandle) -> Res<Value> {
 
 fn worker_request(opts: &Value) -> Res<Value> {
     let obj = opts.as_object().ok_or("invalid_request: native options")?;
-    let allowed = ["ltx_a2v", "audio_path", "audio_start_seconds", "audio_duration_seconds", "prompt", "negative", "width", "height", "seed", "fps", "image", "end_image", "loras", "references", "control", "structure_control", "motion_mask", "ltx_a2v_offload", "local_files_only", "native_gpu_handoff"];
+    let allowed = ["ltx_a2v", "audio_path", "audio_start_seconds", "audio_duration_seconds", "prompt", "negative", "width", "height", "seed", "fps", "image", "end_image", "loras", "references", "control", "structure_control", "motion_mask", "ltx_a2v_offload", "ltx_a2v_checkpoint_read_backend", "local_files_only", "native_gpu_handoff"];
     for (key,value) in obj {
         if !allowed.contains(&key.as_str()) { return Err(format!("unsupported_options: {key}")); }
         if ["loras","references"].contains(&key.as_str()) && !value.is_null() && value.as_array().is_none_or(|a| !a.is_empty()) { return Err(format!("unsupported_control: {key}")); }
@@ -68,13 +105,18 @@ fn worker_request(opts: &Value) -> Res<Value> {
     if opts["ltx_a2v"] != "experimental" { return Err("invalid_request: 명시적인 실험 경로 선택이 필요합니다".into()); }
     let offload = opts.get("ltx_a2v_offload").and_then(Value::as_str).unwrap_or("cpu");
     if !matches!(offload,"cpu"|"disk") || opts.get("ltx_a2v_offload").is_some_and(|v| !v.is_string()) { return Err("unsupported_options: ltx_a2v_offload".into()); }
+    if offload=="disk" && opts.get("ltx_a2v_checkpoint_read_backend").is_none() { return Err("invalid_request: explicit_checkpoint_read_backend_required_for_disk".into()); }
+    let read_explicit=opts.get("ltx_a2v_checkpoint_read_backend").is_some();
+    let read_backend=opts.get("ltx_a2v_checkpoint_read_backend").and_then(Value::as_str).unwrap_or("pread");
+    if !matches!(read_backend,"mmap"|"pread") || opts.get("ltx_a2v_checkpoint_read_backend").is_some_and(|v| !v.is_string()) || (read_explicit && offload!="disk") { return Err("unsupported_options: ltx_a2v_checkpoint_read_backend requires mmap/pread and disk offload".into()); }
     if opts.get("local_files_only").is_some_and(|v| v != &json!(true)) { return Err("invalid_request: native_always_offline".into()); }
     let duration = opts["audio_duration_seconds"].as_f64().filter(|n| n.is_finite() && *n>0. && *n<=40.).ok_or("invalid_request: audio_duration_seconds")?;
     let start = opts.get("audio_start_seconds").unwrap_or(&Value::Null).as_f64().unwrap_or(0.);
     if opts.get("audio_start_seconds").is_some() && (!opts["audio_start_seconds"].is_number() || !start.is_finite() || start<0.) { return Err("invalid_request: audio_start_seconds".into()); }
     let mut assets = Vec::new();
     let mut inputs = json!({"engine":"ltx-a2v-native","audioAssetId":"audio","audioStartSeconds":start,"audioDurationSeconds":duration,
-        "offloadMode":offload,"prompt":opts["prompt"],"negativePrompt":opts.get("negative").cloned().unwrap_or(json!(""))});
+        "offloadMode":offload,"checkpointReadBackend":read_backend,"checkpointReadBackendExplicit":read_explicit,
+        "prompt":opts["prompt"],"negativePrompt":opts.get("negative").cloned().unwrap_or(json!(""))});
     for key in ["width","height","seed","fps"] { if let Some(value)=opts.get(key) { inputs[key]=value.clone(); } }
     for (key,id,kind,input_key) in [("audio_path","audio","audio","audioAssetId"),("image","first","image","imageAssetId"),("end_image","end","image","endImageAssetId")] {
         if let Some(value)=opts.get(key).filter(|v| !v.is_null()) {
@@ -101,6 +143,8 @@ pub(crate) fn generate(app: AppHandle, output: String, opts: Value) -> Res<Gener
     if let Some(context)=handoff { crate::gpu_handoff::validate(context)?; }
     let errors:Vec<_>=blockers(&manifest).into_iter().filter(|b| !(handoff.is_some() && b=="separate_gpu_handoff_required")).collect(); if !errors.is_empty() { return Err(format!("native_not_ready: {}",errors.join(", "))); }
     let mut request=worker_request(&opts)?;
+    // Verify bundled source before one-job grant/cache actions. Installed SDK stays untouched.
+    let sdk_root=bundled_sdk_root(&app)?;
     if let Some(context)=handoff {request["gpuHandoffContext"]=context.clone();}
     let target=PathBuf::from(output);let parent=target.parent().filter(|p|p.is_dir()).ok_or("invalid_output: 결과 폴더")?;
     if target.extension().and_then(|s|s.to_str())!=Some("mp4") { return Err("invalid_output: MP4 결과가 필요합니다".into()); }
@@ -120,6 +164,7 @@ pub(crate) fn generate(app: AppHandle, output: String, opts: Value) -> Res<Gener
         fs::write(&execution_manifest,serde_json::to_vec_pretty(&scoped).unwrap()).map_err(|e|err("handoff environment",e))?;
     }
     let mut command=python(&manifest)?;
+    command.env("AISTORAGE_NATIVE_SDK_ROOT",&sdk_root).env("AISTORAGE_NATIVE_SDK_MANIFEST_SHA256",sdk_manifest_sha());
     command.arg(dir.join("a2v_worker.py")).arg("--request").arg(request_file).arg("--environment").arg(execution_manifest).arg("--output-directory").arg(&output_dir).arg("--execute");
     let executed=command.output().map_err(|e|err("격리 A2V 실행 오류",e))?;
     fs::write(dir.join("worker-stdout.log"),&executed.stdout).map_err(|e|err("로그 저장 오류",e))?;
@@ -142,6 +187,7 @@ pub(crate) fn generate(app: AppHandle, output: String, opts: Value) -> Res<Gener
 
 fn prepare_native_workspace(dir: &Path, request: &Value) -> Res<(PathBuf,PathBuf)> {
     fs::create_dir(dir).map_err(|e|err("작업 폴더 생성 오류",e))?;
+    fs::write(dir.join("sdk_bootstrap.py"),SDK_BOOTSTRAP).map_err(|e|err("SDK bootstrap staging",e))?;
     fs::write(dir.join("a2v_worker.py"),WORKER).map_err(|e|err("워커 준비 오류",e))?;
     fs::write(dir.join("a2v_adapter.py"),ADAPTER).map_err(|e|err("워커 준비 오류",e))?;
     fs::write(dir.join("gpu_handoff.py"),GPU_HANDOFF).map_err(|e|err("handoff worker",e))?;
@@ -155,6 +201,18 @@ fn prepare_native_workspace(dir: &Path, request: &Value) -> Res<(PathBuf,PathBuf
 #[cfg(test)] mod tests {
     use super::*;
     #[test] fn execution_boundary_is_required() { assert!(blockers(&json!({"native_weight_contract_verified":true})).contains(&"separate_gpu_handoff_required".into())); }
+    #[test] fn bundled_sdk_source_manifest_is_verified_without_inference() {
+        let root=Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/native_a2v/sdk_candidate");
+        assert!(verify_sdk_root(&root,&sdk_manifest_sha()).is_ok());
+        assert!(verify_sdk_root(&root,"wrong-sha").unwrap_err().contains("manifest_hash"));
+    }
+    #[test] fn sdk_path_traversal_rejected_before_read() {
+        let dir=tempfile::tempdir().unwrap();
+        let bytes=serde_json::to_vec(&json!({"schema":"aistorage-bundled-native-sdk-v1","files":[{"file":"ltx_core/../outside.py","sha256":"not-used"}]})).unwrap();
+        let digest=format!("{:x}",Sha256::digest(&bytes));
+        fs::write(dir.path().join("manifest.json"),bytes).unwrap();
+        assert!(verify_sdk_root(dir.path(),&digest).unwrap_err().contains("path_invalid"));
+    }
     #[test] fn unsupported_controls_rejected_before_file_access() { assert!(worker_request(&json!({"ltx_a2v":"experimental","loras":[{}]})).unwrap_err().contains("unsupported_control")); }
     #[test] fn injected_option_rejected() { assert!(worker_request(&json!({"ltx_a2v":"experimental","manifest":"C:/other.json"})).unwrap_err().contains("unsupported_options")); }
     #[test] fn protocol_can_skip_native_library_chatter() { assert_eq!(parse_worker(b"library log\n{\"status\":\"error\",\"error\":\"out_of_memory\"}\n").unwrap()["error"],"out_of_memory"); }
@@ -164,6 +222,7 @@ fn prepare_native_workspace(dir: &Path, request: &Value) -> Res<(PathBuf,PathBuf
         let (request_file,output)=prepare_native_workspace(&dir,&request).unwrap();
         assert_eq!(serde_json::from_slice::<Value>(&fs::read(request_file).unwrap()).unwrap(),request);
         assert_eq!(fs::read(dir.join("a2v_worker.py")).unwrap(),WORKER.as_bytes());
+        assert_eq!(fs::read(dir.join("sdk_bootstrap.py")).unwrap(),SDK_BOOTSTRAP.as_bytes());
         assert_eq!(fs::read(dir.join("memory_budget.py")).unwrap(),MEMORY_BUDGET.as_bytes());
         assert!(!output.exists());
         fs::create_dir(&output).unwrap();
@@ -172,10 +231,30 @@ fn prepare_native_workspace(dir: &Path, request: &Value) -> Res<(PathBuf,PathBuf
     #[test] fn disk_mode_is_forwarded_with_original_audio_contract() {
         let dir=tempfile::tempdir().unwrap();let audio=dir.path().join("input.wav");
         fs::write(&audio,b"path binding CPU fixture").unwrap();
-        let request=worker_request(&json!({"ltx_a2v":"experimental","ltx_a2v_offload":"disk","local_files_only":true,"audio_path":audio,"audio_duration_seconds":2.72,"fps":16})).unwrap();
+        let request=worker_request(&json!({"ltx_a2v":"experimental","ltx_a2v_offload":"disk","ltx_a2v_checkpoint_read_backend":"pread","local_files_only":true,"audio_path":audio,"audio_duration_seconds":2.72,"fps":16})).unwrap();
         assert_eq!(request["inputs"]["offloadMode"],"disk");
         assert_eq!(request["inputs"]["audioDurationSeconds"],2.72);
         assert_eq!(request["inputs"]["fps"],16);
+        assert_eq!(request["inputs"]["checkpointReadBackend"],"pread");
+        assert_eq!(request["inputs"]["checkpointReadBackendExplicit"],true);
+    }
+    #[test] fn explicit_read_modes_reach_worker_request_and_change_identity() {
+        let dir=tempfile::tempdir().unwrap();let audio=dir.path().join("input.wav");fs::write(&audio,b"fixture").unwrap();
+        let mut hashes=Vec::new();
+        for backend in ["mmap","pread"] {
+            let request=worker_request(&json!({"ltx_a2v":"experimental","ltx_a2v_offload":"disk","ltx_a2v_checkpoint_read_backend":backend,"audio_path":audio,"audio_duration_seconds":2.72})).unwrap();
+            assert_eq!(request["inputs"]["checkpointReadBackend"],backend);
+            assert_eq!(request["inputs"]["checkpointReadBackendExplicit"],true);
+            hashes.push(format!("{:x}",Sha256::digest(serde_json::to_vec(&request).unwrap())));
+        }
+        assert_ne!(hashes[0],hashes[1]);
+    }
+    #[test] fn invalid_read_mode_and_offload_rejected_before_asset_access() {
+        assert!(worker_request(&json!({"ltx_a2v":"experimental","ltx_a2v_offload":"disk"})).unwrap_err().contains("explicit_checkpoint_read_backend_required"));
+        for value in [json!("auto"),json!(true),json!(1),Value::Null] {
+            assert!(worker_request(&json!({"ltx_a2v":"experimental","ltx_a2v_offload":"disk","ltx_a2v_checkpoint_read_backend":value})).unwrap_err().contains("checkpoint_read_backend"));
+        }
+        assert!(worker_request(&json!({"ltx_a2v":"experimental","ltx_a2v_checkpoint_read_backend":"mmap"})).unwrap_err().contains("checkpoint_read_backend"));
     }
     #[test] fn offload_and_local_policy_cannot_be_faked() {
         for mode in [json!("none"),json!(true),json!(1)] {

@@ -18,11 +18,11 @@ class NativeVisibleEndpointTests(unittest.TestCase):
             self.assertEqual(prepared['images'][-1][1],191)
 
     def test_installed_native_api_keeps_pixel_frame_index(self):
-        root=pathlib.Path(__file__).resolve().parents[4]/'native-a2v-runtime/source/packages'
-        helper=ast.parse((root/'ltx-pipelines/src/ltx_pipelines/utils/helpers.py').read_text(encoding='utf8'))
+        root=pathlib.Path(__file__).resolve().parent/'sdk_candidate'
+        helper=ast.parse((root/'ltx_pipelines/utils/helpers.py').read_text(encoding='utf8'))
         calls=[n for n in ast.walk(helper) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='VideoConditionByKeyframeIndex']
         self.assertTrue(any(any(k.arg=='frame_idx' and ast.unparse(k.value)=='img.frame_idx' for k in call.keywords) for call in calls))
-        body=ast.parse((root/'ltx-core/src/ltx_core/conditioning/types/keyframe_cond.py').read_text(encoding='utf8'))
+        body=ast.parse((root/'ltx_core/conditioning/types/keyframe_cond.py').read_text(encoding='utf8'))
         self.assertTrue(any(isinstance(n,ast.AugAssign) and ast.unparse(n.value)=='self.frame_idx' and isinstance(n.op,ast.Add) for n in ast.walk(body)))
 
 

@@ -3,6 +3,7 @@
 The public app must expose this engine only after native_ready() succeeds in its
 separate interpreter. This module's prepare path imports no GPU libraries.
 """
+from ltx_core.memory_observer import memory_phase
 from dataclasses import dataclass, asdict, replace
 from fractions import Fraction
 from pathlib import Path
@@ -87,6 +88,18 @@ def prepare_app_request(project_id, request, assets):
     offload_mode = request.get("offloadMode", "cpu")
     if offload_mode not in ("cpu", "disk"):
         raise ValueError("unsupported_options: native offloadMode must be cpu or disk")
+    read_backend=request.get("checkpointReadBackend","pread")
+    if not isinstance(read_backend,str) or read_backend not in ("mmap","pread"):
+        raise ValueError("unsupported_options: checkpointReadBackend must be mmap or pread")
+    explicit=request.get("checkpointReadBackendExplicit","checkpointReadBackend" in request)
+    if not isinstance(explicit,bool):
+        raise ValueError("invalid_request: checkpointReadBackendExplicit")
+    if (explicit or read_backend=="mmap") and offload_mode!="disk":
+        raise ValueError("unsupported_options: explicit checkpointReadBackend requires disk offload")
+    if read_backend=="mmap" and not explicit:
+        raise ValueError("invalid_request: mmap must be explicitly selected")
+    if offload_mode=="disk" and not explicit:
+        raise ValueError("invalid_request: explicit checkpointReadBackend required for disk")
     by_id = {asset["id"]: asset for asset in assets}
 
     def asset_path(key, kind, required=False):
@@ -122,6 +135,10 @@ def prepare_app_request(project_id, request, assets):
         images.append((end, plan.visible_frames - 1, 1.0))
     return {"plan": plan, "images": images, "seed": seed, "width": width, "height": height,
             "offload_mode": offload_mode,
+            "checkpoint_read_policy":{"requestedBackend":read_backend if explicit else None,
+                "payloadBackend":read_backend,"metadataBackend":"pread","explicitlySelected":explicit,
+                "legacyBackend":"pread","automaticFallback":False,
+                "tradeoff":"pread can be much slower; transient mapping and full GPU peak remain unverified"},
             "prompt": str(request.get("prompt") or ""),
             "negative_prompt": str(request.get("negativePrompt") or "")}
 
@@ -276,9 +293,10 @@ def _run_native_inference(prepared, manifest, output_directory):
     silent = str(Path(output_directory) / "generated-padded-silent.mp4")
     # Output uses the original sidecar, never generated sound or padded conditioning audio.
     from ltx_core.model.video_vae import get_video_chunks_number
-    encode_video(video=result.video, audio=None, fps=prepared["plan"].fps,
-                 output_path=silent,
-                 video_chunks_number=get_video_chunks_number(result.num_frames, result.tiling_config))
+    with memory_phase("video.encode"):
+        encode_video(video=result.video, audio=None, fps=prepared["plan"].fps,
+                     output_path=silent,
+                     video_chunks_number=get_video_chunks_number(result.num_frames, result.tiling_config))
     return {"silent_video": silent, **segments, "generation": asdict(prepared["plan"]), "offload_mode": prepared["offload_mode"],
             "lip_sync_verified": False, "actual_hearing": False}
 

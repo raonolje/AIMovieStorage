@@ -68,7 +68,7 @@ fn response_bytes(value: &Value, limit: usize) -> Res<Vec<u8>> {
 
 fn directory() -> Res<PathBuf> {
     // 실제 작품과 실행 중인 앱의 연결 정보를 통합 시험이 건드리지 않도록 격리합니다.
-    #[cfg(debug_assertions)]
+    #[cfg(any(test, debug_assertions))]
     if let Some(root) = std::env::var_os("AIMOVIESTORAGE_TEST_CONTROL_DIR") {
         let path = PathBuf::from(root);
         if !path.is_absolute() {

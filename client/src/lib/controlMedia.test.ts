@@ -392,6 +392,16 @@ it("native A2V 원음 경로와 offset/길이 및 시작끝 그림을 실제 작
   expect(state.run.mock.calls[0][0]).toMatchObject({engine:"ltx25",opts:{ltx_a2v:"experimental",audio_path:"p/원음.wav",audio_start_seconds:.25,audio_duration_seconds:1,image:"p/원본.png",end_image:"p/끝.png"}});
 });
 
+it("공식 요청의 작업별 읽기 선택이 두 native 작업에 독립적으로 전달된다",async()=>{
+  const {q,media}=await prepare();
+  draft().sharedAssets=[{id:"audio",name:"원음",filePath:"p/original.wav"}] as ProjectDraft["sharedAssets"];
+  for(const backend of ["mmap","pread"] as const){
+    const accepted=await media.enqueueControlGeneration({...request,engine:"ltx25",operationId:`read-${backend}`,audioAssetId:"audio",audioDurationSeconds:1,imageAssetId:"img",options:{prompt:"sphere",ltx_a2v:"experimental",ltx_a2v_offload:"disk",ltx_a2v_checkpoint_read_backend:backend,width:384,height:256}});
+    expect((await finish(q,accepted.jobId)).status).toBe("done");
+  }
+  expect(state.run.mock.calls.map(call=>call[0].opts.ltx_a2v_checkpoint_read_backend)).toEqual(["mmap","pread"]);
+});
+
 it("기존 타임라인 음원을 중복 서비스 없이 프로젝트별 에셋 ID로 공개한다",async()=>{
   const {media}=await prepare();
   Object.assign(draft().scenes[0].cuts[0],{composition:{music:{path:"p/original.wav",name:"원음"}}});

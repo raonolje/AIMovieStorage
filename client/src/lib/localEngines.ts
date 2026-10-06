@@ -904,6 +904,7 @@ export interface LocalLora {
 export interface LocalRunOptions {
   /** 명시적으로 선택했을 때만 원음 조건 워커로 보내 기존 LTX 기본값을 보존합니다. */
   ltx_a2v?: "experimental";
+  ltx_a2v_checkpoint_read_backend?: "mmap" | "pread";
   audio_path?: string;
   audio_start_seconds?: number;
   audio_duration_seconds?: number;

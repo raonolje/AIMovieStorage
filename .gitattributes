@@ -1,3 +1,8 @@
 # 프롬프트 md 는 빌드 때 `?raw` 로 글자 그대로 읽힙니다. 윈도의 autocrlf 가 CRLF 로
 # 받아 오면 본문에 CR 이 섞여 예전 템플릿 문자열과 달라지므로 늘 LF 로 받게 못 박습니다.
 client/src/prompts/**/*.md text eol=lf
+
+# The SDK manifest hashes exact source bytes; preserve them on Windows too.
+src-tauri/resources/native_a2v/sdk_candidate/** -text
+# Preserve this upstream comment's existing trailing space without changing its hash.
+src-tauri/resources/native_a2v/sdk_candidate/ltx_core/model/transformer/transformer.py whitespace=-blank-at-eol

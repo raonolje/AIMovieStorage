@@ -58,7 +58,12 @@
       "resources/local/masked-composite-api.json",
       "resources/local/engines/*.py",
       "resources/local/engines/*/requirements.txt",
-      "resources/local/engines/*/manifest.json"
+      "resources/local/engines/*/manifest.json",
+      "resources/native_a2v/sdk_candidate/**/*.py",
+      "resources/native_a2v/sdk_candidate/manifest.json",
+      "resources/native_a2v/sdk_candidate/LICENSE",
+      "resources/native_a2v/sdk_candidate/LICENSE-2",
+      "resources/native_a2v/sdk_candidate/LICENSE-2_x"
     ],
     "windows": {
       "nsis": {
