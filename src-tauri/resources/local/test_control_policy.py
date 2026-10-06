@@ -105,6 +105,9 @@ class ControlPolicyTests(unittest.TestCase):
         utils_module.DISTILLED_SIGMA_VALUES = [1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875]
         ltx25._state["repo"] = ltx25.REPO
         with patch.dict(sys.modules, {"diffusers.pipelines.ltx2": condition_module, "diffusers.pipelines.ltx2.utils": utils_module}), \
+                patch('generated_audio.save_generated_video',
+                    side_effect=lambda frames, audio, rate, output, fps, save:
+                        (save(frames, output, fps), {'source': 'unit-test-stub'})[1]), \
                 patch.object(ltx25, "_pose_frames", return_value=["뼈 그림"]), \
                 patch.multiple(ltx25.common, check_motion_mask=lambda _: None, resolve_seed=lambda _: 1,
                                generator=lambda _: None, step_reporter=lambda *_: None,

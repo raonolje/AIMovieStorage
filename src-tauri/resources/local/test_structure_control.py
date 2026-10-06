@@ -122,6 +122,9 @@ class StructureControlTests(unittest.TestCase):
         Image.new("RGB", (128, 64)).save(image)
         try:
             with patch.dict(sys.modules, {"diffusers.pipelines.ltx2": module, "diffusers.pipelines.ltx2.utils": utils}), \
+                    patch('generated_audio.save_generated_video',
+                        side_effect=lambda frames, audio, rate, output, fps, save:
+                            (save(frames, output, fps), {'source': 'unit-test-stub'})[1]), \
                     patch.multiple(ltx25.common, check_motion_mask=lambda _: None, resolve_seed=lambda _: 1,
                         generator=lambda _: None, step_reporter=lambda *_: None, run_attention_safe=lambda _, call: call(),
                         freeze_by_mask=lambda frames, _: frames, save_video=lambda *_: None, precision_fields=lambda _: {}):
