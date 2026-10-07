@@ -1,0 +1,869 @@
+{
+  "scope": "CPU-only TS/native conformance inputs; never runtime reviewed policy or user permissions",
+  "cases": [
+    {
+      "id": "fixed-length",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": {
+        "fps": 24,
+        "frameCount": 36,
+        "durationSeconds": 1.5
+      }
+    },
+    {
+      "id": "fixed-num-frames",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "num_frames": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": {
+        "fps": 24,
+        "frameCount": 36,
+        "durationSeconds": 1.5
+      }
+    },
+    {
+      "id": "fixed-audio-duration",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "durationSeconds": 1.5
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": {
+        "fps": null,
+        "frameCount": null,
+        "durationSeconds": 1.5
+      }
+    },
+    {
+      "id": "consistent-direct-and-derived",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36,
+            "durationSeconds": 1.5
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": {
+        "fps": 24,
+        "frameCount": 36,
+        "durationSeconds": 1.5
+      }
+    },
+    {
+      "id": "consistent-multiple-nodes",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36
+          }
+        },
+        "b": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "num_frames": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": {
+        "fps": 24,
+        "frameCount": 36,
+        "durationSeconds": 1.5
+      }
+    },
+    {
+      "id": "different-fixed-fps",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36
+          }
+        },
+        "b": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 30
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_ambiguous"
+    },
+    {
+      "id": "different-fixed-frame-aliases",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36,
+            "num_frames": 48
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_ambiguous"
+    },
+    {
+      "id": "direct-derived-conflict",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36,
+            "durationSeconds": 2
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_conflict"
+    },
+    {
+      "id": "invalid-fixed-fps-0",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 0,
+            "length": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_invalid"
+    },
+    {
+      "id": "invalid-fixed-fps-1",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": -1,
+            "length": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_invalid"
+    },
+    {
+      "id": "invalid-fixed-fps-2",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": "24",
+            "length": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_invalid"
+    },
+    {
+      "id": "invalid-fixed-fps-3",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": true,
+            "length": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_invalid"
+    },
+    {
+      "id": "invalid-fixed-fps-4",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": [
+              "b",
+              0
+            ],
+            "length": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_invalid"
+    },
+    {
+      "id": "invalid-fixed-fps-5",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": null,
+            "length": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_invalid"
+    },
+    {
+      "id": "invalid-fixed-frame-fraction",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36.5
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_invalid"
+    },
+    {
+      "id": "invalid-fixed-frame-unsafe",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 9007199254740992
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_invalid"
+    },
+    {
+      "id": "invalid-fixed-duration-zero",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36,
+            "durationSeconds": 0
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_invalid"
+    },
+    {
+      "id": "invalid-fixed-value-never-skipped",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36
+          }
+        },
+        "b": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": "24"
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_invalid"
+    },
+    {
+      "id": "missing-fps",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "durationSeconds": 1.5
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": {
+        "fps": null,
+        "frameCount": null,
+        "durationSeconds": 1.5
+      }
+    },
+    {
+      "id": "missing-duration",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [],
+      "expected": {
+        "fps": 24,
+        "frameCount": null,
+        "durationSeconds": null
+      }
+    },
+    {
+      "id": "semantic-override",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36,
+            "durationSeconds": 1.5
+          }
+        }
+      },
+      "selection": {
+        "slots": [
+          {
+            "id": "fps",
+            "nodeId": "a",
+            "input": "fps",
+            "semantic": "fps",
+            "required": true
+          },
+          {
+            "id": "frames",
+            "nodeId": "a",
+            "input": "length",
+            "semantic": "frameCount",
+            "required": true
+          }
+        ]
+      },
+      "values": {
+        "fps": 30,
+        "frames": 45
+      },
+      "bindings": [
+        {
+          "nodeId": "a",
+          "input": "fps",
+          "value": 30
+        },
+        {
+          "nodeId": "a",
+          "input": "length",
+          "value": 45
+        }
+      ],
+      "expected": {
+        "fps": 30,
+        "frameCount": 45,
+        "durationSeconds": 1.5
+      }
+    },
+    {
+      "id": "generic-scalar-override",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 45,
+            "durationSeconds": 1.5
+          }
+        }
+      },
+      "selection": {
+        "slots": [
+          {
+            "id": "scalar",
+            "nodeId": "a",
+            "input": "fps",
+            "semantic": "value",
+            "required": true
+          }
+        ]
+      },
+      "values": {
+        "scalar": 30
+      },
+      "bindings": [
+        {
+          "nodeId": "a",
+          "input": "fps",
+          "value": 30
+        }
+      ],
+      "expected": {
+        "fps": 30,
+        "frameCount": 45,
+        "durationSeconds": 1.5
+      }
+    },
+    {
+      "id": "semantic-missing-binding",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": [
+          {
+            "id": "fps",
+            "nodeId": "a",
+            "input": "fps",
+            "semantic": "fps",
+            "required": true
+          }
+        ]
+      },
+      "values": {
+        "fps": 30
+      },
+      "bindings": [],
+      "expected": null,
+      "error": "reference_timebase_binding_invalid"
+    },
+    {
+      "id": "semantic-provenance-conflict",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": [
+          {
+            "id": "fps",
+            "nodeId": "a",
+            "input": "fps",
+            "semantic": "fps",
+            "required": true
+          }
+        ]
+      },
+      "values": {
+        "fps": 24
+      },
+      "bindings": [
+        {
+          "nodeId": "a",
+          "input": "fps",
+          "value": 30
+        }
+      ],
+      "expected": null,
+      "error": "reference_timebase_binding_invalid"
+    },
+    {
+      "id": "semantic-invalid-no-fallback",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": [
+          {
+            "id": "fps",
+            "nodeId": "a",
+            "input": "fps",
+            "semantic": "fps",
+            "required": true
+          }
+        ]
+      },
+      "values": {
+        "fps": "24"
+      },
+      "bindings": [
+        {
+          "nodeId": "a",
+          "input": "fps",
+          "value": "24"
+        }
+      ],
+      "expected": null,
+      "error": "reference_timebase_invalid"
+    },
+    {
+      "id": "multiple-semantic-conflict",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36,
+            "second_fps": 24
+          }
+        }
+      },
+      "selection": {
+        "slots": [
+          {
+            "id": "fps",
+            "nodeId": "a",
+            "input": "fps",
+            "semantic": "fps",
+            "required": true
+          },
+          {
+            "id": "second",
+            "nodeId": "a",
+            "input": "second_fps",
+            "semantic": "fps",
+            "required": true
+          }
+        ]
+      },
+      "values": {
+        "fps": 24,
+        "second": 30
+      },
+      "bindings": [
+        {
+          "nodeId": "a",
+          "input": "fps",
+          "value": 24
+        },
+        {
+          "nodeId": "a",
+          "input": "second_fps",
+          "value": 30
+        }
+      ],
+      "expected": null,
+      "error": "reference_timebase_ambiguous"
+    },
+    {
+      "id": "multiple-semantic-consistent",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36,
+            "second_fps": 24
+          }
+        }
+      },
+      "selection": {
+        "slots": [
+          {
+            "id": "fps",
+            "nodeId": "a",
+            "input": "fps",
+            "semantic": "fps",
+            "required": true
+          },
+          {
+            "id": "second",
+            "nodeId": "a",
+            "input": "second_fps",
+            "semantic": "fps",
+            "required": true
+          }
+        ]
+      },
+      "values": {
+        "fps": 24,
+        "second": 24
+      },
+      "bindings": [
+        {
+          "nodeId": "a",
+          "input": "fps",
+          "value": 24
+        },
+        {
+          "nodeId": "a",
+          "input": "second_fps",
+          "value": 24
+        }
+      ],
+      "expected": {
+        "fps": 24,
+        "frameCount": 36,
+        "durationSeconds": 1.5
+      }
+    },
+    {
+      "id": "semantic-precedence-over-fixed",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 45,
+            "durationSeconds": 1.5
+          }
+        },
+        "b": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 25
+          }
+        }
+      },
+      "selection": {
+        "slots": [
+          {
+            "id": "fps",
+            "nodeId": "a",
+            "input": "fps",
+            "semantic": "fps",
+            "required": true
+          }
+        ]
+      },
+      "values": {
+        "fps": 30
+      },
+      "bindings": [
+        {
+          "nodeId": "a",
+          "input": "fps",
+          "value": 30
+        }
+      ],
+      "expected": {
+        "fps": 30,
+        "frameCount": 45,
+        "durationSeconds": 1.5
+      }
+    },
+    {
+      "id": "duration-semantic-precedence",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 48,
+            "durationSeconds": 1.5
+          }
+        }
+      },
+      "selection": {
+        "slots": [
+          {
+            "id": "duration",
+            "nodeId": "a",
+            "input": "durationSeconds",
+            "semantic": "durationSeconds",
+            "required": true
+          }
+        ]
+      },
+      "values": {
+        "duration": 2
+      },
+      "bindings": [
+        {
+          "nodeId": "a",
+          "input": "durationSeconds",
+          "value": 2
+        }
+      ],
+      "expected": {
+        "fps": 24,
+        "frameCount": 48,
+        "durationSeconds": 2
+      }
+    },
+    {
+      "id": "duplicate-binding",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": [
+          {
+            "id": "fps",
+            "nodeId": "a",
+            "input": "fps",
+            "semantic": "fps",
+            "required": true
+          }
+        ]
+      },
+      "values": {
+        "fps": 24
+      },
+      "bindings": [
+        {
+          "nodeId": "a",
+          "input": "fps",
+          "value": 24
+        },
+        {
+          "nodeId": "a",
+          "input": "fps",
+          "value": 24
+        }
+      ],
+      "expected": null,
+      "error": "reference_timebase_binding_invalid"
+    },
+    {
+      "id": "unreviewed-binding",
+      "graph": {
+        "a": {
+          "class_type": "CPU-only",
+          "inputs": {
+            "fps": 24,
+            "length": 36
+          }
+        }
+      },
+      "selection": {
+        "slots": []
+      },
+      "values": {},
+      "bindings": [
+        {
+          "nodeId": "a",
+          "input": "fps",
+          "value": 30
+        }
+      ],
+      "expected": null,
+      "error": "reference_timebase_binding_invalid"
+    }
+  ]
+}

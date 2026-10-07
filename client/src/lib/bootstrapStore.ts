@@ -588,7 +588,7 @@ export function deliver(project: string, announce = false) {
       expectEmptyProjectSave();
     return applyBootstrapToDraft(current, result, { mode });
   })
-    .then((wrote) => {
+    .then(async (wrote) => {
       if (!wrote.draft) {
         // 까닭은 저장 통로가 준 것 그대로(`WriteOutcome.why`). 못 넣은 답은 어디에도 없으니 열 때 다시 붓습니다.
         hold(`${wrote.why} 그 프로젝트를 열면 바로 들어갑니다.`);
@@ -601,7 +601,7 @@ export function deliver(project: string, announce = false) {
         `some` 이라 훅이 하나 참을 주면 나머지는 안 부릅니다 — 지금은 하나뿐입니다.
       */
       const handedOver = deliveredHooks.some((hook) => hook(project, wrote.draft, result, run.input));
-      if (!handedOver && run.input.thenGenerate) startProjectGeneration(project, wrote.draft);
+      if (!handedOver && run.input.thenGenerate) await startProjectGeneration(project, wrote.draft);
     })
     .finally(() => delivering.delete(project));
 }

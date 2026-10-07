@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { assertMagnificMcpImageInputs } from "./magnificImageInputs";
 import { isDesktopApp } from "@/lib/llm";
 import { safeFileName, saveProjectMediaAsset, type ProjectAssetType } from "@/lib/mediaLibrary";
 import { loadMagnificModels } from "@/lib/magnificModels";
@@ -151,6 +152,7 @@ export async function generateWithMagnific(input: {
 }): Promise<{ path: string; name: string; metadata: MagnificGenerationMetadata }> {
   const requested = JSON.parse(JSON.stringify({ kind: input.kind, args: input.args })) as MagnificGenerationMetadata["requested"];
   let args = input.args;
+  if (input.kind === "image") assertMagnificMcpImageInputs(args);
   if (input.kind === "video") {
     const selected = String(args.slug ?? args.model ?? "");
     if (selected || args.references || args.keyframes) {

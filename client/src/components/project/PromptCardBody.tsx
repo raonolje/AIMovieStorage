@@ -1,3 +1,4 @@
+import WorkflowPromptSelect from "@/components/WorkflowPromptSelect";
 import { composeInMagnific } from "@/lib/magnificCompose";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -650,12 +651,13 @@ export default function PromptCardBody<
         <select
           value={normalizeModelId(entity.promptModel)}
           onChange={(event) =>
-            patch(() => ({ promptModel: event.target.value }) as Partial<T>)
+            patch(() => ({ promptModel: event.target.value, promptEngine: "magnific", promptWorkflow: undefined }) as Partial<T>)
           }
           className="rounded-md px-2 py-1.5 text-[11px] outline-none"
           style={fieldStyle}
         >
-          {IMAGE_MODELS.map((model) => (
+          {entity.promptModel && !IMAGE_MODELS.some(model => model.id === normalizeModelId(entity.promptModel)) && <option value={entity.promptModel}>{entity.promptModel}</option>}
+          {IMAGE_ONLY_MODELS.map((model) => (
             <option key={model.id} value={model.id}>
               {model.label}
             </option>
@@ -669,8 +671,13 @@ export default function PromptCardBody<
           한쪽에만 달면 규칙 1 을 어기는 자리가 또 하나 생깁니다.
           로컬 모델이 하나도 안 깔려 있으면 단추가 아예 안 보입니다.
         */}
+        <WorkflowPromptSelect projectName={projectName} kind="image" value={card.selection.workflowTarget} onChange={target => patch(() => ({promptWorkflow:target,promptEngine:target?"comfy":undefined}) as Partial<T>)} />
         <LocalGenerateButton
           kind="image"
+          workflowTarget={card.selection.workflowTarget}
+          target={(kind==="character"||kind==="background")&&(entity as {id?:string}).id?{kind,id:(entity as {id?:string}).id!}:undefined}
+          selectedEngine={card.selection.route}
+          onEngineChange={engine => patch(() => ({ promptEngine: engine }) as Partial<T>)}
           prompt={{
             ko: entity.promptKo,
             en: entity.promptEn,
@@ -706,6 +713,7 @@ export default function PromptCardBody<
           }
         />
 
+        {card.staleMessage && <p className="w-full text-[10px] text-amber-300">{card.staleMessage}</p>}
         {extraActions}
 
         {/* 어디에 붙여넣느냐에 따라 레퍼런스 문법이 달라집니다. */}
@@ -715,7 +723,7 @@ export default function PromptCardBody<
         <LlmRequestButton
           template={promptTemplate}
           title={`프롬프트 요청 · ${name || "이름 없음"}`}
-          modelId={entity.promptModel}
+          modelId={card.selection.modelId}
           data={card.promptRequestData}
           imageCount={() => card.referenceSources().length}
           // 직접 부른 것과 같은 길로 넣습니다 — 네 칸과 이력이 늘 한 벌이어야 합니다.
@@ -794,8 +802,8 @@ export default function PromptCardBody<
           놓입니다 — 프롬프트의 `--ar`·`--no` 가 그 칸에 글자 그대로 들어가고요.
           첫 레퍼런스 칸과 같은 규칙입니다.
         */
-        composeTitle={`프롬프트와 레퍼런스를 ${modelLabel(entity.promptModel)} 생성기로 이어 붙입니다.`}
-        onCompose={!magnificModelOf(entity.promptModel) ? undefined : async (text) => {
+        composeTitle={`프롬프트와 레퍼런스를 ${modelLabel(card.selection.modelId)} 생성기로 이어 붙입니다.`}
+        onCompose={!magnificModelOf(card.selection.modelId) ? undefined : async (text) => {
           // 프롬프트에 태그로 쓰인 그림만 올립니다. 하나도 안 쓰였으면 전부 올립니다(태그 없이 쓴 프롬프트).
           const tags = buildReferenceTags(references, "magnific");
           const used = tags
@@ -809,7 +817,8 @@ export default function PromptCardBody<
             referencePaths: used.length ? used : all,
             owner: { kind, name },
             // 카드의 «이미지 모델» 선택이 여기까지 이어집니다.
-            model: magnificModelOf(entity.promptModel),
+            model: magnificModelOf(card.selection.modelId),
+            requestedImageModel: card.selection.modelId,
             // 배경은 고른 칩의 비율로 — 전개도가 16:9 로 놓이면 틀이 늘어나 칸이 어긋납니다(`backgroundComposeAspect`).
             aspectRatio:
               kind === "background"
@@ -1220,6 +1229,7 @@ function FirstReferencePanel({
       aspectRatio: FIRST_REFERENCE_RATIO[kind],
       // 고른 모델 그대로. 미드저니면 «구성» 단추가 아예 안 붙습니다.
       model: magnificModelOf(modelId),
+      requestedImageModel: modelId,
       onStatus: (status) => toast.message(status),
     }).then((message) => toast.success(message));
   };

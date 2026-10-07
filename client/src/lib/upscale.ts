@@ -690,7 +690,7 @@ export async function workerInfo(engine: UpscaleEngineId): Promise<UpscaleWorker
   };
 }
 
-/** 워커를 전부 내립니다(`quit` → 3초 뒤 PID 로 kill). VRAM 을 비우고 싶을 때. */
+/** 유휴 워커에 정상 종료와 EOF를 요청합니다. 시간 초과 시 소유 핸들을 유지하고 실패를 알립니다. */
 export async function stopWorkers(): Promise<void> {
   if (!isDesktopApp()) return;
   await invoke("upscale_stop_workers");

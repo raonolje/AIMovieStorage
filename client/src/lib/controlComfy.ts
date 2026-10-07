@@ -1,54 +1,11 @@
 import { z } from "zod";
-import { join, resourceDir } from "@tauri-apps/api/path";
-import { readProject } from "./projectWrite";
-import { getProjectSnapshot, ProjectControlError } from "./projectControl";
-import { projectFolderName } from "./localProjectStore";
-import { getMediaLibrarySettings } from "./mediaLibrary";
-import { attachControlMediaResult, controlMediaTarget, listControlAssets, mediaTargetSchema } from "./controlMedia";
 import { checkComfy } from "./upscale";
-import {
-  getComfyGenerationSettings, inspectComfyGenerationWorkflow, prepareComfyBindings,
-  type ComfyGenerationSettings, type ComfyKind, type ComfyReference,
-} from "./comfyGeneration";
-import { runQueuedComfy } from "./comfyTasks";
-import { requireLocalComfyUrl } from "./controlComfySettings";
-import { enqueueTaskOperation, getTaskByOperationId, isStopping, registerTaskRunner, whenTaskJournalReady } from "./taskQueue";
-
-const id = z.string().min(1).max(200);
-export const comfyWorkflowSchema = z.object({ kind: z.enum(["image", "video"]) }).strict();
-export const comfyGenerateSchema = z.object({
-  projectId: id,
-  target: mediaTargetSchema,
-  expectedRevision: id,
-  operationId: id,
-  kind: z.enum(["image", "video"]),
-  prompt: z.string().min(1).max(32000),
-  negative: z.string().max(32000).optional(),
-  referenceAssetIds: z.array(id).max(16).default([]),
-  values: z.record(z.string().min(1).max(200), z.union([
-    z.string().max(32000), z.number().finite(), z.boolean(),
-  ])).default({}).describe("Only nodeId.input fields explicitly configured as value mappings may be overridden."),
-}).strict();
-export const comfyMaskedComposeSchema = z.object({
-  projectId: id,
-  target: mediaTargetSchema,
-  expectedRevision: id,
-  operationId: id,
-  baseAssetId: id,
-  replacementAssetId: id,
-  maskAssetId: id,
-}).strict();
-type Input = z.infer<typeof comfyGenerateSchema>;
-type Payload = { input: Input; settings: ComfyGenerationSettings; references: ComfyReference[]; workflowSha256: string; baseDirectory: string; projectFolder: string };
-
-const storageKey = (path: string) => path.trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-function assertDestination(input: Input, baseDirectory: string, projectFolder: string, title: string) {
-  if (!baseDirectory || storageKey(getMediaLibrarySettings().baseDirectory) !== storageKey(baseDirectory))
-    throw new Error("ComfyUI 작업을 접수한 뒤 저장 폴더가 바뀌었습니다. 원래 저장 폴더로 돌아와 결과를 이어받으세요.");
-  if (!projectFolder || projectFolderName(input.projectId, title) !== projectFolder)
-    throw new Error("ComfyUI 작업을 접수한 뒤 프로젝트 위치가 바뀌었습니다. 원래 프로젝트를 확인하세요.");
-}
-
+import { getComfyGenerationSettings, inspectComfyGenerationWorkflow, type ComfyKind } from "./comfyGeneration";
+import { explicitComfyGenerateSchema, explicitMaskedComposeSchema, enqueueExplicitComfy, enqueueExplicitMaskedCompose } from "./workflowControlRoutes";
+import { registerTaskRunner } from "./taskQueue";
+export const comfyWorkflowSchema=z.object({kind:z.enum(["image","video"])}).strict();
+export const comfyGenerateSchema=explicitComfyGenerateSchema;
+export const comfyMaskedComposeSchema=explicitMaskedComposeSchema;
 function configured(kind: ComfyKind) {
   const settings = getComfyGenerationSettings();
   if (!settings[kind].workflowPath) throw new Error("설정에서 ComfyUI 생성 워크플로를 먼저 고르세요.");
@@ -85,107 +42,8 @@ export async function getControlComfyWorkflow(raw: unknown) {
       "취소는 앱의 대기를 중지합니다. ComfyUI 서버 작업은 계속될 수 있습니다."],
   };
 }
-function resolveReferences(input: Input): ComfyReference[] {
-  const assets = listControlAssets(input.projectId);
-  return input.referenceAssetIds.map(assetId => {
-    const asset = assets.find(item => item.id === assetId);
-    if (!asset || asset.kind === "other") throw new Error("현재 프로젝트에서 생성 레퍼런스를 찾지 못했습니다.");
-    return { kind: asset.kind, path: asset.path };
-  });
-}
-async function requireRevision(input: Input) {
-  const snapshot = await getProjectSnapshot(input.projectId, "summary");
-  if (snapshot.revision !== input.expectedRevision)
-    throw new ProjectControlError("revision_conflict", "그 사이 프로젝트가 바뀌었습니다. 최신 상태를 읽은 뒤 생성 요청을 다시 보내세요.",
-      { actualRevision: snapshot.revision, expectedRevision: input.expectedRevision });
-}
-async function enqueueControlComfyInput(input: Input, overrideSettings?: ComfyGenerationSettings) {
-  await whenTaskJournalReady();
-  const previous = getTaskByOperationId(input.operationId);
-  if (previous) {
-    const payload = previous.payload as Payload;
-    if (previous.kind !== "control.comfy" || JSON.stringify(payload.input) !== JSON.stringify(input))
-      throw new Error("같은 작업 요청 열쇠에 다른 내용이 들어왔습니다.");
-    return enqueueTaskOperation({ lane: "media", kind: "control.comfy", projectId: input.projectId,
-      projectTitle: previous.projectTitle, label: previous.label, operationId: input.operationId, payload });
-  }
-  await requireRevision(input);
-  const draft = readProject(input.projectId);
-  if (!draft) throw new Error("프로젝트를 찾지 못했습니다.");
-  const baseDirectory = getMediaLibrarySettings().baseDirectory.trim();
-  if (!baseDirectory) throw new Error("프로젝트 저장 폴더를 먼저 설정하세요.");
-  const projectFolder = projectFolderName(input.projectId, draft.title);
-  controlMediaTarget(draft, input.target);
-  if (input.kind === "video" && input.target.kind !== "cut") throw new Error("영상 결과는 컷에 붙입니다.");
-  const settings = overrideSettings ?? configured(input.kind);
-  const references = resolveReferences(input);
-  const info = await inspectComfyGenerationWorkflow(settings[input.kind].workflowPath);
-  prepareComfyBindings(settings[input.kind], info, { ...input, references });
-  await requireRevision(input);
-  assertDestination(input, baseDirectory, projectFolder, draft.title);
-  return enqueueTaskOperation({
-    lane: "media", kind: "control.comfy", projectId: input.projectId, projectTitle: draft.title,
-    label: `ComfyUI · ${input.kind === "image" ? "이미지" : "영상"}`,
-    operationId: input.operationId, payload: { input, settings, references, workflowSha256: info.sha256, baseDirectory, projectFolder } satisfies Payload,
-  });
-}
 
-export async function enqueueControlComfy(raw: unknown) {
-  return enqueueControlComfyInput(comfyGenerateSchema.parse(raw));
-}
-
-/** 흰 마스크 영역에만 교체 이미지를 합성한다. 기존 생성 워크플로 설정은 변경하지 않는다. */
-export async function enqueueControlComfyMasked(raw: unknown) {
-  const input = comfyMaskedComposeSchema.parse(raw);
-  if (new Set([input.baseAssetId, input.replacementAssetId, input.maskAssetId]).size !== 3)
-    throw new Error("원본·교체·마스크는 서로 다른 이미지 자산이어야 합니다.");
-  const assets = listControlAssets(input.projectId);
-  for (const assetId of [input.baseAssetId, input.replacementAssetId, input.maskAssetId]) {
-    if (assets.find(asset => asset.id === assetId)?.kind !== "image")
-      throw new Error("마스크 합성 입력은 같은 프로젝트의 이미지 자산이어야 합니다.");
-  }
-  const workflowPath = await join(await resourceDir(), "resources", "local", "masked-composite-api.json");
-  const current = getComfyGenerationSettings();
-  const settings: ComfyGenerationSettings = { ...current, baseUrl: requireLocalComfyUrl(current.baseUrl), image: {
-    workflowPath, outputNodeIds: ["5"], mappings: [
-      { nodeId: "1", input: "image", source: "reference", referenceKind: "image", referenceIndex: 0 },
-      { nodeId: "2", input: "image", source: "reference", referenceKind: "image", referenceIndex: 1 },
-      { nodeId: "3", input: "image", source: "reference", referenceKind: "image", referenceIndex: 2 },
-      { nodeId: "5", input: "filename_prefix", source: "prompt" },
-    ],
-  } };
-  return enqueueControlComfyInput(comfyGenerateSchema.parse({
-    projectId: input.projectId, target: input.target, expectedRevision: input.expectedRevision,
-    operationId: input.operationId, kind: "image", prompt: "AIMovieStorage-masked",
-    referenceAssetIds: [input.baseAssetId, input.replacementAssetId, input.maskAssetId],
-  }), settings);
-}
-
-registerTaskRunner("control.comfy", async (raw, report, task) => {
-  const payload = raw as Payload;
-  const input = comfyGenerateSchema.parse(payload.input);
-  if (isStopping(task.id)) return;
-  const draft = readProject(input.projectId);
-  if (!draft) throw new Error("프로젝트를 찾지 못했습니다.");
-  assertDestination(input, payload.baseDirectory, payload.projectFolder, draft.title);
-  const target = controlMediaTarget(draft, input.target);
-  // 큐에서 기다리는 동안 참조가 교체되면 다른 파일을 몰래 올리지 않습니다.
-  if (!task.externalCheckpoint && JSON.stringify(resolveReferences(input)) !== JSON.stringify(payload.references))
-    throw new Error("대기 중 레퍼런스가 바뀌었습니다. 최신 상태로 생성 요청을 다시 보내세요.");
-  const made = await runQueuedComfy({
-    ...input, settings: payload.settings, references: payload.references, workflowSha256: payload.workflowSha256,
-    projectName: payload.projectFolder, baseDirectory: payload.baseDirectory,
-    assetType: input.kind === "video" ? "scene-video" : target.assetType,
-    ownerName: target.ownerName, stem: target.stem,
-  }, report, task);
-  const paths = made.files.map(file => file.path);
-  if (isStopping(task.id)) return { paths, data: { promptId: made.promptId, attached: false } };
-  const latest = readProject(input.projectId);
-  if (!latest) throw new Error("프로젝트를 찾지 못했습니다.");
-  assertDestination(input, payload.baseDirectory, payload.projectFolder, latest.title);
-  const assetIds: string[] = [];
-  for (const file of made.files) assetIds.push(await attachControlMediaResult(
-    input.projectId, input.target, file.path, file.name, file.kind === "video",
-  ));
-  return { paths, assetIds, data: { promptId: made.promptId, attached: true } };
-});
+export async function enqueueControlComfy(raw:unknown){return enqueueExplicitComfy(raw);}
+export async function enqueueControlComfyMasked(raw:unknown){return enqueueExplicitMaskedCompose(raw);}
+// 이전 작업을 전역 mapping으로 재발주하면 모델과 참조가 달라질 수 있어 이력은 남기고 차단합니다.
+registerTaskRunner("control.comfy",async()=>{throw new Error("workflow_legacy_task_requires_explicit_role: 이전 작업 기록은 보존했습니다. workflow 역할과 입력을 확인해 새 요청으로 접수하세요.");});

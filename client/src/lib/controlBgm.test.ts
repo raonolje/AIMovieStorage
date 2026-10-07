@@ -60,7 +60,7 @@ describe("BGM 외부 조종과 수동 편집 왕복", () => {
     const unsubscribe = bgm.subscribeBgmProjects(() => { displayed = bgm.loadBgmProjects(); });
     const initial = await control.getBgmSnapshot("b");
     const changed = await control.updateBgmControl({ projectId: "b", expectedRevision: initial.revision, commands: [{ type: "track.update", id: "t", fields: { styleEn: "strings", lyricsKo: "함께 걷자", instrumental: false } }] });
-    expect(displayed[0].tracks[0]).toMatchObject({ styleEn: "strings", promptEn: "strings", lyrics: "함께 걷자", lyricsKo: "함께 걷자", instrumental: false, vocals: [] });
+    expect(displayed[0].tracks[0]).toMatchObject({ styleEn: "strings", promptEn: "strings", lyrics: "함께 걷자\n[end]", lyricsKo: "함께 걷자\n[end]", instrumental: false, vocals: [] });
     bgm.updateBgmProjects((current) => current.map((project) => ({ ...project, tracks: project.tracks.map((track) => bgm.patchBgmTrack(track, { name: "사람이 바꾼 곡명" })) })));
     const changes = await control.getBgmChanges({ projectId: "b", sinceRevision: initial.revision });
     expect(changes.changes).toEqual(expect.arrayContaining([expect.objectContaining({ source: "controller", path: "/tracks/t/styleEn", after: "strings" }), expect.objectContaining({ source: "app", path: "/tracks/t/name", after: "사람이 바꾼 곡명" })]));
@@ -141,126 +141,28 @@ describe("BGM 외부 조종과 수동 편집 왕복", () => {
   });
 });
 
-describe("BGM 공용 작업 러너", () => {
-  it("UI 생성 버튼의 중복 방지 메타데이터가 붙어도 공용 러너가 곡을 만든다", async () => {
-    const { bgm, q } = await prepare();
-    const run = await import("./bgmRun");
-    const input = { projectId: "b", projectName: "영화 음악", trackId: "t", trackName: "시작", engine: "acestep" as const, prompt: "strings", lyrics: "", seconds: 30 };
-    expect(run.startBgmTrack(input)).toBe(true);
-    expect(run.startBgmTrack(input)).toBe(false);
-    const job = q.listTasks()[0];
-    expect(job.payload).toMatchObject({ dedupe: "bgm:t" });
-    expect((await finish(q, job.id)).status).toBe("done");
-    expect(state.run).toHaveBeenCalledTimes(1);
-    expect(bgm.loadBgmProjects()[0].tracks[0].resultPaths).toHaveLength(1);
+describe("Comfy 전환 후 이전 BGM 실행 요청",()=>{
+  it("UI와 조종기는 직접 엔진 실행을 접수하지 않고 곡 편집과 파일을 보존합니다",async()=>{
+    const {bgm,q,control}=await prepare();const run=await import("./bgmRun");
+    const before=JSON.stringify(bgm.loadBgmProjects());
+    expect(run.startBgmTrack({...generation,engine:"acestep"})).toBe(false);
+    for(const engine of ["acestep","minimaxmusic"])await expect(control.enqueueControlBgm({...generation,engine})).rejects.toThrow("legacy_generation_disabled");
+    expect(q.listTasks()).toHaveLength(0);expect(state.run).not.toHaveBeenCalled();expect(JSON.stringify(bgm.loadBgmProjects())).toBe(before);
   });
-
-  it("프롬프트와 가사를 로컬 모델에 직접 전달하고 재요청은 같은 작업을 돌려준다", async () => {
-    const { bgm, q, control } = await prepare();
-    const accepted = await control.enqueueControlBgm(generation);
-    const result = await finish(q, accepted.jobId);
-    expect(state.run).toHaveBeenCalledWith(expect.objectContaining({ engine: "acestep", projectName: "BGM", ownerName: "영화 음악", opts: expect.objectContaining({ prompt: generation.prompt, lyrics: generation.lyrics, seconds: 30 }) }));
-    expect(result.status).toBe("done");
-    expect(result.result).toMatchObject({ paths: ["BGM/곡/영화 음악/시작.wav"], data: { attached: true, projectId: "b", trackId: "t" } });
-    expect(bgm.loadBgmProjects()[0].tracks[0].resultPaths).toEqual(["BGM/곡/영화 음악/시작.wav"]);
-    expect(await control.enqueueControlBgm(generation)).toEqual({ jobId: accepted.jobId, reused: true });
-    expect(state.run).toHaveBeenCalledTimes(1);
-    await expect(control.enqueueControlBgm({ ...generation, prompt: "다른 프롬프트" })).rejects.toThrow("다른 내용");
+  it("Comfy Music3 요청 본문·응답 metadata·stale는 명시 역할을 사용한다",async()=>{
+    const {control,bgm}=await prepare();
+    const target={kind:"workflow" as const,workflowId:"music-test",workflowSha256:"a".repeat(64),roleId:"primary",modelRuleId:"minimaxmusic3"};
+    const candidate=await import("./workflowEvidence/music3-instrumental-smoke.candidate.json");
+    localStorage.setItem("ai-video-storage.comfy-workflow-library.v1",JSON.stringify([{source:{...candidate.default.source,workflowId:target.workflowId},selection:candidate.default.selection,workflowSha256:target.workflowSha256,issues:[],checkedAtUtc:"2026-10-06T18:00:00.000Z"}]));
+    const helpers=await import("./bgmPromptRequest");
+    bgm.updateBgmProjects(projects=>projects.map(project=>({...project,tracks:project.tracks.map(track=>({...track,targetTool:"comfy",promptWorkflow:target,promptKo:"수동",promptModelStamp:helpers.bgmPromptStamp({...track,targetTool:"comfy",promptWorkflow:target})}))})));
+    const before=await control.getBgmSnapshot("b"),request=await control.prepareBgmPrompt({projectId:"b",trackId:"t",expectedRevision:before.revision});
+    expect(request).toMatchObject({modelId:"minimaxmusic3",generationTarget:{route:"comfy",workflowTarget:target},stale:""});expect(request.request).toContain("MiniMaxMusic3TextEncode");
+    bgm.updateBgmProjects(projects=>projects.map(project=>({...project,tracks:project.tracks.map(track=>({...track,promptWorkflow:{...target,workflowSha256:"b".repeat(64)}}))})));
+    const changed=await control.getBgmSnapshot("b");await expect(control.prepareBgmPrompt({projectId:"b",trackId:"t",expectedRevision:changed.revision})).rejects.toThrow("stale");expect(bgm.loadBgmProjects()[0].tracks[0].promptKo).toBe("수동");
   });
-
-  it("생성 중 사람이 고친 곡과 추가한 다른 곡을 보존한다", async () => {
-    const { bgm, q, control } = await prepare();
-    const wait = gate(); state.run.mockImplementation(async () => { await wait.promise; return { path: "완성.wav" }; });
-    const accepted = await control.enqueueControlBgm(generation); await tick();
-    bgm.updateBgmProjects((current) => current.map((project) => ({ ...project, tracks: [...project.tracks.map((track) => bgm.patchBgmTrack(track, { lyrics: "사람이 쓴 새 가사" })), { ...bgm.createBgmTrack(), id: "other" }] })));
-    wait.resolve(); await finish(q, accepted.jobId);
-    expect(bgm.loadBgmProjects()[0].tracks).toMatchObject([{ lyrics: "사람이 쓴 새 가사", resultPaths: ["완성.wav"] }, { id: "other" }]);
-  });
-
-  it("생성 중 취소는 파일 위치를 보존하고 곡에 붙이지 않는다", async () => {
-    const { bgm, q, control } = await prepare();
-    const wait = gate(); state.run.mockImplementation(async () => { await wait.promise; return { path: "취소.wav" }; });
-    const accepted = await control.enqueueControlBgm(generation); await tick();
-    q.stopTask(accepted.jobId); wait.resolve();
-    const stopped = await finish(q, accepted.jobId);
-    expect(stopped.status).toBe("stopped");
-    expect(stopped.result).toMatchObject({ paths: ["취소.wav"], data: { attached: false, cancelled: true } });
-    expect(bgm.loadBgmProjects()[0].tracks[0].resultPaths).toEqual([]);
-  });
-
-  it("곡이 삭제되거나 저장이 실패해도 생성 파일 위치는 작업 결과에 남긴다", async () => {
-    const { bgm, q, control } = await prepare();
-    const wait = gate(); state.run.mockImplementation(async () => { await wait.promise; return { path: "고아.wav" }; });
-    const accepted = await control.enqueueControlBgm(generation); await tick();
-    bgm.updateBgmProjects((current) => current.map((project) => ({ ...project, tracks: [] })));
-    wait.resolve();
-    const failed = await finish(q, accepted.jobId);
-    expect(failed.status).toBe("failed");
-    expect(failed.error).toContain("곡을 찾지 못했습니다");
-    expect(failed.result?.paths).toEqual(["고아.wav"]);
-  });
-
-  it("결과 부착의 파일 저장 오류를 성공으로 숨기지 않는다", async () => {
-    const { q, control } = await prepare();
-    state.save.mockRejectedValue(new Error("설정 파일 쓰기 실패"));
-    const accepted = await control.enqueueControlBgm(generation);
-    const failed = await finish(q, accepted.jobId);
-    expect(failed.status).toBe("failed");
-    expect(failed.error).toContain("설정 파일 쓰기 실패");
-    expect(failed.result?.paths).toHaveLength(1);
-  });
-
-  it("음악 아닌 엔진·임의 파일 경로·없어진 곡을 새 요청과 재개 작업 양쪽에서 막는다", async () => {
-    const { q, control } = await prepare();
-    await expect(control.enqueueControlBgm({ ...generation, engine: "wanvideo" })).rejects.toThrow();
-    await expect(control.enqueueControlBgm({ ...generation, outputPath: "C:/덮어쓰기.wav" })).rejects.toThrow();
-    await expect(control.enqueueControlBgm({ ...generation, trackId: "missing" })).rejects.toThrow("곡을 찾지 못했습니다");
-    const accepted = await q.enqueueTaskOperation({ lane: "media", kind: "bgmTrack", operationId: "resume-invalid", projectId: "bgm:b", projectTitle: "음악", label: "재개", payload: { projectId: "b", trackId: "t", engine: "wanvideo", prompt: "잘못된 엔진", lyrics: "", seconds: 30 } });
-    expect((await finish(q, accepted.jobId)).status).toBe("failed");
-    expect(state.run).not.toHaveBeenCalled();
-  });
-});
-
-describe("ACE-Step 생성 설정", () => {
-  it("명시한 0값과 설정을 전달하고 작업자 실제값을 결과와 저널에 보존한다", async () => {
-    const { control, q } = await prepare();
-    const meta = { seed: 0, steps: 24, guidance: 0, seconds_audio: 30, precision: "bf16", precision_requested: "auto", output: "private", memory: {} };
-    state.run.mockResolvedValue({ path: "설정.wav", meta });
-    const request = { ...generation, seed: 0, steps: 24, guidance: 0 };
-    const accepted = await control.enqueueControlBgm(request);
-    const job = await finish(q, accepted.jobId);
-    expect(state.run.mock.calls[0][0].opts).toMatchObject({ seed: 0, steps: 24, guidance: 0 });
-    expect(job.result?.data?.generation).toEqual({ seed: 0, steps: 24, guidance: 0, seconds_audio: 30, precision: "bf16", precision_requested: "auto" });
-    expect((await q.getPersistedTask(accepted.jobId))?.result).toEqual(job.result);
-    expect(await control.enqueueControlBgm(request)).toMatchObject({ reused: true });
-    for (const change of [{ seed: 1 }, { steps: 25 }, { guidance: 1 }])
-      await expect(control.enqueueControlBgm({ ...request, ...change })).rejects.toThrow();
-    expect(state.run).toHaveBeenCalledTimes(1);
-  });
-  it("생략된 설정을 만들지 않으며 작업자의 무작위 실제 seed를 기록한다", async () => {
-    const { control, q } = await prepare();
-    state.run.mockResolvedValue({ path: "기본.wav", meta: { seed: 987, steps: 60, guidance: 15 } });
-    const accepted = await control.enqueueControlBgm(generation);
-    const job = await finish(q, accepted.jobId);
-    const opts = state.run.mock.calls[0][0].opts;
-    for (const key of ["seed", "steps", "guidance"]) expect(opts).not.toHaveProperty(key);
-    expect(job.result?.data?.generation).toEqual({ seed: 987, steps: 60, guidance: 15 });
-  });
-  it("범위 밖/잘못된 타입/다른 음악 모델의 옵션을 생성 전에 거절한다", async () => {
-    const { control } = await prepare();
-    for (const change of [{ seed: -2 }, { seed: 2147483648 }, { seed: 1.2 }, { seed: "1" }, { steps: 0 }, { steps: 201 }, { steps: 2.5 }, { steps: true }, { guidance: -1 }, { guidance: 31 }, { guidance: NaN }, { guidance: Infinity }, { guidance: null }])
-      await expect(control.enqueueControlBgm({ ...generation, ...change })).rejects.toThrow();
-    for (const change of [{ seed: -1 }, { steps: 60 }, { guidance: 15 }])
-      await expect(control.enqueueControlBgm({ ...generation, engine: "minimaxmusic", ...change })).rejects.toThrow("ACE-Step");
-    expect(state.run).not.toHaveBeenCalled();
-  });
-  it("곡 저장이 실패해도 만들어진 파일의 실제 설정은 남긴다", async () => {
-    const { control, q } = await prepare();
-    state.run.mockResolvedValue({ path: "실제.wav", meta: { seed: 77, steps: 60, guidance: 15 } });
-    state.save.mockRejectedValue(new Error("save failed"));
-    const accepted = await control.enqueueControlBgm({ ...generation, seed: -1 });
-    const job = await finish(q, accepted.jobId);
-    expect(job.status).toBe("failed");
-    expect(job.result?.data?.generation).toEqual({ seed: 77, steps: 60, guidance: 15 });
+  it("잘못된 엔진·외부 경로·없는 곡은 접수 전에 거절합니다",async()=>{
+    const {q,control}=await prepare();for(const change of [{engine:"wanvideo"},{outputPath:"C:/overwrite.wav"},{trackId:"missing"}])await expect(control.enqueueControlBgm({...generation,...change})).rejects.toThrow();
+    expect(q.listTasks()).toHaveLength(0);expect(state.run).not.toHaveBeenCalled();
   });
 });

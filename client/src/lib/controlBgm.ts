@@ -1,14 +1,17 @@
+import { bgmPromptSelection,bgmPromptStamp } from "./bgmPromptRequest";
+import { workflowInputSelectionSchema,workflowTargetSchema } from "./workflowRunContract";
 import { z } from "zod";
-import { bgmSamplingFields } from "./bgmSampling";
+import { workflowGenerateControlSchema,enqueueControlRegisteredWorkflow } from "./controlComfyWorkflow";
+import { workflowEntryForTarget } from "./comfyWorkflowLibrary";
 import { createBgmProject, createBgmTrack, loadBgmProjects, patchBgmTrack, saveBgmProjectsAndConfirm, updateBgmProjectsAndConfirm, type BgmProject, type BgmTrack } from "./bgmProjects";
 import { appendPromptHistory } from "./promptHistory";
 import { bgmRequestData } from "./bgmPromptRequest";
 import { buildPromptRequestText } from "./promptRequest";
-import { BGM_TASK, validateBgmPayload } from "./bgmRun";
 import { whenAppSettingsReady } from "./mediaLibrary";
-import { enqueueTaskOperation } from "./taskQueue";
 import { diffControlValues } from "./controlChanges";
 import { uid } from "./projectTypes";
+import { musicLyricsResult } from "./musicPromptPolicy";
+import { assertDirectGenerationEnabled } from "./generationRoutingPolicy";
 
 const id = z.string().min(1).max(200);
 const text = z.string().max(32000);
@@ -16,13 +19,16 @@ const name = z.string().trim().min(1).max(300);
 const tags = z.array(z.string().max(300)).max(100);
 const projectFields = z.object({ name: name.optional(), description: text.optional(), linkedProject: text.optional() }).strict();
 const trackFields = z.object({
+  singers: z.array(z.object({ id, name: text, timbre: text, range: text, diction: text, vibrato: text, delivery: text, parts: text }).strict()).max(100).optional(),
+  leadMode: z.enum(["single", "group"]).optional(),
   name: z.string().max(300).optional(), usage: text.optional(), mood: tags.optional(), genre: tags.optional(),
   instruments: tags.optional(), tempo: z.string().max(30).optional(), durationSeconds: z.string().max(30).optional(),
   lyrics: z.string().max(16000).optional(), lyricsKo: z.string().max(16000).optional(), lyricsEn: z.string().max(16000).optional(),
   styleKo: text.optional(), styleEn: text.optional(), promptKo: text.optional(), promptEn: text.optional(),
   excludeStyles: text.optional(), vocals: tags.optional(), era: tags.optional(), production: tags.optional(),
   structure: tags.optional(), instrumental: z.boolean().optional(), reference: text.optional(), notes: text.optional(),
-  targetTool: z.enum(["suno", "local-minimax", "local-acestep"]).optional(),
+  targetTool: z.enum(["suno", "local-minimax", "local-acestep","comfy"]).optional(),
+  promptWorkflow:workflowTargetSchema.optional(),promptWorkflowInputs:workflowInputSelectionSchema.optional(),
 }).strict();
 export const bgmReadSchema = z.object({ projectId: id }).strict();
 export const bgmPromptPrepareSchema = bgmReadSchema.extend({ trackId: id, expectedRevision: id });
@@ -33,11 +39,7 @@ export const bgmUpdateSchema = bgmReadSchema.extend({ expectedRevision: id, comm
   z.object({ type: z.literal("track.add"), id: id.optional(), fields: trackFields }).strict(),
   z.object({ type: z.literal("track.update"), id, fields: trackFields }).strict(),
 ])).min(1).max(100) });
-export const bgmGenerateSchema = bgmReadSchema.extend({
-  ...bgmSamplingFields,
-  trackId: id, operationId: id, engine: z.enum(["minimaxmusic", "acestep"]),
-  prompt: z.string().trim().min(1).max(32000), lyrics: z.string().max(16000), seconds: z.number().finite().min(1).max(300),
-});
+export const bgmGenerateSchema=workflowGenerateControlSchema.omit({target:true,prompt:true}).extend({trackId:id,prompt:z.string().trim().min(1).max(32000).optional(),lyrics:z.string().max(16000).optional(),seconds:z.number().finite().positive().max(300).optional()});
 
 export class BgmControlError extends Error {
   constructor(public code: string, message: string, public details?: unknown) { super(message); this.name = "BgmControlError"; }
@@ -65,13 +67,15 @@ function observe(project: BgmProject, source: "app" | "controller" = "app"): Obs
 }
 const snapshot = (state: Observation) => ({ projectId: state.project.id, revision: state.revision, project: clone(state.project) });
 function patchTrackWithHistory(current: BgmTrack, fields: z.infer<typeof trackFields>): BgmTrack {
-  const next = patchBgmTrack(current, fields);
+  const rewriting = ["styleKo", "styleEn", "promptKo", "promptEn"].some(key => key in fields);
+  const normalized = rewriting ? musicLyricsResult({ ...fields, lyricsKo: fields.lyricsKo ?? fields.lyrics ?? current.lyricsKo ?? current.lyrics, lyricsEn: fields.lyricsEn ?? current.lyricsEn }, fields.instrumental ?? current.instrumental) : fields;
+  const next = patchBgmTrack(current, normalized);
   if (!["styleKo", "styleEn", "promptKo", "promptEn"].some((key) => key in fields)) return next;
   let history = current.promptHistory;
   if (current.promptKo?.trim() || current.promptEn?.trim()) history = appendPromptHistory(history, {
     ko: current.promptKo || "", en: current.promptEn || "", negativeKo: "", negativeEn: "", note: "덮어쓰기 전",
   });
-  return { ...next, promptHistory: appendPromptHistory(history, {
+  return { ...next, promptModelStamp: bgmPromptStamp(next), promptHistory: appendPromptHistory(history, {
     ko: next.promptKo || "", en: next.promptEn || "", negativeKo: "", negativeEn: "", note: "대화 조종기",
   }) };
 }
@@ -96,6 +100,9 @@ export async function prepareBgmPrompt(raw: unknown) {
   const latest = observe(requireProject(input.projectId));
   if (latest.revision !== state.revision) throw revisionConflict(latest);
   return { projectId: input.projectId, trackId: input.trackId, revision: latest.revision,
+    modelId: bgmPromptSelection(track).modelId,
+    generationTarget:bgmPromptSelection(track),
+    stale: track.promptKo || track.promptEn ? track.promptModelStamp !== bgmPromptStamp(track) ? "현재 선택과 작성 모델이 다르거나 작성 기록이 없습니다. 기존 문장을 보존하고 재작성 시 새 모델을 반영합니다." : "" : "",
     request: [parts.fixed, parts.fresh].filter(Boolean).join("\n\n---\n\n"),
     apply: "bgm_update track.update에 styleKo/styleEn과 필요한 lyricsKo/lyricsEn을 함께 넣으세요. 판이 바뀌면 다시 준비하세요." };
 }
@@ -176,9 +183,18 @@ export async function createBgmControl(raw: unknown) {
   } finally { working.delete(projectId); }
 }
 export async function enqueueControlBgm(raw: unknown) {
-  const request = bgmGenerateSchema.parse(raw);
+  if(raw&&typeof raw==="object"&&"engine" in raw)assertDirectGenerationEnabled(String(raw.engine));
+  const {trackId,prompt,lyrics,seconds,...input}=bgmGenerateSchema.parse(raw);
   await whenAppSettingsReady();
-  const { operationId, ...payload } = request;
-  const { project, track } = validateBgmPayload(payload);
-  return enqueueTaskOperation({ lane: "media", kind: BGM_TASK, projectId: `bgm:${project.id}`, projectTitle: `BGM · ${project.name}`, label: `${track.name || "곡"} 뽑기`, operationId, payload });
+  const project=requireProject(input.projectId),track=project.tracks.find(item=>item.id===trackId);
+  if(!track)throw new BgmControlError("target_not_found","BGM 곡을 찾지 못했습니다.");
+  const entry=workflowEntryForTarget(input.workflowTarget),values={...input.values};
+  if(entry.source.operation!=="music-generation")throw new Error("workflow_bgm_target_required");
+  for(const [semantic,value] of [["lyrics",lyrics],["durationSeconds",seconds]] as const){
+    if(value===undefined)continue;
+    const slots=entry.selection.slots.filter(slot=>slot.semantic===semantic);
+    if(!slots.length)throw new Error(`workflow_music_option_unsupported: ${semantic}`);
+    for(const slot of slots){if(values[slot.id]!==undefined&&values[slot.id]!==value)throw new Error(`workflow_option_conflict: ${slot.id}`);values[slot.id]=value;}
+  }
+  return enqueueControlRegisteredWorkflow({...input,target:{kind:"bgm",id:trackId},prompt:prompt??(track.styleEn||track.styleKo||track.promptEn||track.promptKo),values});
 }

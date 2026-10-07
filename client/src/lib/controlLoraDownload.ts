@@ -13,6 +13,7 @@ export const controlLoraDownloadSchema = z.object({
   expectedSha256: z.string().regex(/^[0-9a-fA-F]{64}$/).optional(),
 }).strict();
 export async function enqueueControlLoraDownload(raw: unknown) {
+  throw new Error("legacy_lora_disabled: Comfy에 설치된 LoRA만 사용합니다. 앱 전용 LoRA 받기는 종료되었고 기존 파일은 보존됩니다.");
   const input = controlLoraDownloadSchema.parse(raw);
   if (!LOCAL_ENGINE_IDS.includes(input.engine)) throw new Error("이 빌드에서 사용할 수 없는 엔진입니다.");
   return enqueueTaskOperation({ lane: "media", kind: "control.lora.download", projectId: "settings",

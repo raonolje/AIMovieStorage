@@ -437,7 +437,7 @@ ${text}` : text })
             <p className="text-[11px] font-semibold" style={{ color: "oklch(0.72 0.01 265)" }}>
               무엇으로 뽑을까 <span style={{ color: "oklch(0.42 0.01 265)" }}>· 아래 «바로 뽑기» 를 켰을 때</span>
             </p>
-            <BatchToolsField draft={draft} onChange={onChange} disabled={running} />
+            <BatchToolsField draft={draft} projectId={projectKey} onChange={onChange} disabled={running} />
           </div>
 
           {/* 미리보기 — 무엇이 몇 개 들어갔는지 보여 줍니다. */}

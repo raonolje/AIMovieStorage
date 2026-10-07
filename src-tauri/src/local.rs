@@ -29,6 +29,13 @@ use crate::{err, Res};
 /// 로컬 생성은 오래 걸립니다 — 영상 한 편이 수 분입니다. 업스케일보다 넉넉히.
 const DEFAULT_TIMEOUT_SECS: u64 = 3600;
 
+fn require_direct_generation(engine: &str) -> Res<()> {
+    if ["qwenimage","zimage","krea2","anima","minimaxh3","wanvideo","ltx25","minimaxmusic","acestep","qwentts"].contains(&engine) {
+        return Err(format!("legacy_generation_disabled: {engine} 직접 생성과 설치는 Comfy workflow로 전환되었습니다. 기존 파일은 보존됩니다."));
+    }
+    Ok(())
+}
+
 #[tauri::command(async)]
 pub fn local_engines_status(app: AppHandle) -> Res<Vec<EngineStatus>> {
     engines_status(app, &LOCAL)
@@ -43,6 +50,7 @@ pub async fn local_install_engine(
     if !cfg!(target_os = "windows") {
         return Err("내장 로컬 모델은 현재 Windows/NVIDIA CUDA 전용입니다. Mac에서는 원격 API 또는 ComfyUI 서버를 사용해 주세요.".into());
     }
+    require_direct_generation(&id)?;
     install_engine_command(app, id, extra_models).await
 }
 
@@ -61,6 +69,7 @@ pub async fn local_prefetch_weights(app: AppHandle, engine: String) -> Res<()> {
     if !cfg!(target_os = "windows") {
         return Err("내장 로컬 모델 가중치 받기는 현재 Windows/NVIDIA CUDA 전용입니다.".into());
     }
+    require_direct_generation(&engine)?;
     prefetch_weights_command(app, engine).await
 }
 
@@ -95,6 +104,7 @@ pub async fn local_run(
     if !cfg!(target_os = "windows") {
         return Err("내장 로컬 모델 생성은 현재 Windows/NVIDIA CUDA 전용입니다. Mac에서는 원격 API 또는 ComfyUI 서버를 사용해 주세요.".into());
     }
+    require_direct_generation(&engine)?;
     let engine = known_engine(&engine)?.to_string();
     let opts = opts.unwrap_or_else(|| json!({}));
     if opts.get("ltx_a2v").is_some() {

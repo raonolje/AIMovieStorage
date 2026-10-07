@@ -72,7 +72,7 @@ export default defineConfig({
     확장 프로그램 `*.spec.js` 여든 개를 vitest 가 주워 `jest is not defined` 로 전부 실패했습니다
     (2026-09-22 실측). 저장소 밖 파일이 우리 시험을 빨갛게 만들면 안 됩니다.
   */
-  test: { include: ["client/src/**/*.test.ts"] },
+  test: { include: ["client/src/**/*.test.ts"],globalSetup:["./scripts/comfy-workflow-test-fixtures.mjs"] },
   plugins: [react(), tailwindcss(), pdfjsAssets()],
   root: fileURLToPath(new URL("./client", import.meta.url)),
   resolve: {

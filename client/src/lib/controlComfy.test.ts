@@ -1,179 +1,190 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
-import { newProjectDraft, newScene, newCut, type ProjectDraft } from "./projectTypes";
-const state = vi.hoisted(() => ({ draft: null as ProjectDraft | null, revision: "rev-1", run: vi.fn(), inspect: vi.fn(), writes: 0,
-  baseDirectory:"D:/projects", projectFolder:"작품", attachError:false,
-  settings: { baseUrl: "http://127.0.0.1:8188", image: { workflowPath: "image.json", mappings: [{nodeId:"1",input:"text",source:"prompt"}], outputNodeIds:["2"] },
-    video: { workflowPath: "video.json", mappings: [{nodeId:"1",input:"text",source:"prompt"}], outputNodeIds:["2"] } } }));
-vi.mock("./comfyGeneration", () => ({
-  getComfyGenerationSettings: () => structuredClone(state.settings),
-  inspectComfyGenerationWorkflow: state.inspect,
-  prepareComfyBindings: (_config: unknown, _info: unknown, input: {values:Record<string,unknown>}) => {
-    if (Object.keys(input.values).length) throw new Error("등록되지 않은 입력"); return [];
-  },
-  runComfyToProject: state.run,
-}));
-vi.mock("./projectWrite", () => ({ readProject: () => state.draft }));
-vi.mock("./projectControl", () => ({ getProjectSnapshot: async () => ({revision:state.revision}),
-  ProjectControlError: class extends Error { constructor(public code:string, message:string, public details:unknown) {super(message);} } }));
-vi.mock("./localProjectStore", () => ({ projectFolderName: () => state.projectFolder }));
-vi.mock("./mediaLibrary", () => ({getMediaLibrarySettings:() => ({baseDirectory:state.baseDirectory})}));
-vi.mock("./upscale", () => ({checkComfy: async () => "ComfyUI 연결됨"}));
-vi.mock("./llmActivity", () => ({abandonLlmResumes:vi.fn()}));
-vi.mock("./controlMedia", () => ({
-  mediaTargetSchema:z.object({kind:z.enum(["cut","character","background"]),id:z.string()}).strict(),
-  controlMediaTarget: () => ({ownerName:"장면",stem:"컷_1",assetType:"scene-cut"}),
-  listControlAssets: () => [{id:"ref",path:"작품/ref.png",kind:"image"}],
-  attachControlMediaResult: async () => { if(state.attachError) throw new Error("프로젝트 등록 실패"); state.writes++; return `asset-${state.writes}`; },
-}));
-const request = { projectId:"p", target:{kind:"cut",id:"cut"}, expectedRevision:"rev-1", operationId:"comfy-1", kind:"video", prompt:"춤과 카메라", referenceAssetIds:["ref"] };
-const files = [{path:"작품/완성.mp4", name:"완성", kind:"video", nodeId:"2"}];
-const tick = () => new Promise(resolve => setTimeout(resolve,0));
-beforeEach(() => {
-  vi.resetModules(); vi.clearAllMocks(); state.revision="rev-1"; state.writes=0;
-  state.baseDirectory="D:/projects";state.projectFolder="작품";state.attachError=false;
-  vi.stubGlobal("window", {});
-  const data = new Map<string,string>();
-  vi.stubGlobal("localStorage", {getItem:(k:string)=>data.get(k)??null,setItem:(k:string,v:string)=>data.set(k,v)});
-  state.draft = {...newProjectDraft(),title:"작품",scenes:[{...newScene(),id:"scene",cuts:[{...newCut(1),id:"cut"}]}]};
-  state.inspect.mockResolvedValue({sha256:"hash",nodes:[{id:"1",classType:"Text",inputs:[{name:"text",value:"PRIVATE"}]}]});
-  state.run.mockImplementation(async (input) => {
-    if (!input.existingPromptId) { await input.onSubmitting(); await input.onSubmitted("server-1"); }
-    await input.onCollected(files); return {promptId:"server-1",files};
-  });
+import {readFileSync} from "node:fs";
+import {resolve} from "node:path";
+import {beforeEach,describe,expect,it,vi} from "vitest";
+import {newCharacter,newProjectDraft,newScene,newCut,type ProjectDraft} from "./projectTypes";
+import type {WorkflowGraph,WorkflowSelection,WorkflowSource,WorkflowEnvironment} from "./comfyWorkflowContract";
+import type {BgmProject} from "./bgmProjects";
+const state=vi.hoisted(()=>({draft:null as ProjectDraft|null,revision:"r1",native:vi.fn(),writes:0,attachError:false,assetSha:"a".repeat(64),baseDirectory:"D:/cpu-projects",folder:"CPU",environment:undefined as unknown as WorkflowEnvironment,graphs:new Map<string,WorkflowGraph>(),hashes:new Map<string,string>(),bgm:[] as BgmProject[],collectError:false,submitError:false,statusError:false}));
+vi.mock("@tauri-apps/api/core",()=>({invoke:state.native}));
+vi.mock("./llm",()=>({isDesktopApp:()=>true}));
+vi.mock("./llmActivity",()=>({abandonLlmResumes:vi.fn()}));
+vi.mock("./localOutput",()=>({runLocalToProject:vi.fn()}));
+vi.mock("./mediaLibrary",()=>({registerMirrorSection:vi.fn(),queueMirrorWrite:vi.fn(),queueMirrorWriteAndConfirm:async()=>{},whenAppSettingsReady:async()=>{},getMediaLibrarySettings:()=>({baseDirectory:state.baseDirectory}),safeFileName:(v:string)=>v,assetSrc:(v:string)=>v,isVideoFile:(value:string)=>/\.(mp4|webm|mov)$/i.test(value)}));
+vi.mock("./projectWrite",()=>({readProject:()=>state.draft,writeProject:async(_id:string,update:Function)=>{state.draft={...state.draft!,...update(state.draft!)};return{draft:state.draft};},writeProjectAndConfirm:async(_id:string,update:Function)=>{if(state.attachError)throw new Error("CPU disk full");state.draft={...state.draft!,...update(state.draft!)};state.writes++;return{persisted:true,draft:state.draft};}}));
+vi.mock("./projectControl",async(importOriginal)=>({...await importOriginal<typeof import("./projectControl")>(),getProjectSnapshot:async()=>({revision:state.revision})}));
+vi.mock("./localProjectStore",()=>({projectFolderName:()=>state.folder,listLocalProjects:()=>[]}));
+vi.mock("./bgmProjects",async(importOriginal)=>({...await importOriginal<typeof import("./bgmProjects")>(),loadBgmProjects:()=>state.bgm,updateBgmProjectsAndConfirm:async(update:Function)=>{if(state.attachError)throw new Error("CPU disk full");state.bgm=update(state.bgm);}}));
+// 환경 취득만 합성 CPU 사실로 대체합니다. production allowlist나 라이브 검증을 확장하지 않습니다.
+vi.mock("./comfyWorkflowLibrary",async(importOriginal)=>({...await importOriginal<typeof import("./comfyWorkflowLibrary")>(),environmentFromPreflight:()=>state.environment}));
+const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
+beforeEach(async()=>{
+ vi.resetModules();vi.clearAllMocks();state.revision="r1";state.writes=0;state.attachError=false;state.assetSha="a".repeat(64);state.collectError=false;state.submitError=false;state.statusError=false;state.baseDirectory="D:/cpu-projects";state.folder="CPU";state.graphs.clear();state.hashes.clear();state.bgm=[];
+ const data=new Map<string,string>(),storage={getItem:(key:string)=>data.get(key)??null,setItem:(key:string,value:string)=>data.set(key,value),removeItem:(key:string)=>data.delete(key)};
+ vi.stubGlobal("window",{localStorage:storage});vi.stubGlobal("localStorage",storage);
+ state.draft={...newProjectDraft(),title:"CPU",characters:[{...newCharacter(),id:"actor",name:"인물"}],scenes:[{...newScene(),id:"scene",cuts:[{...newCut(1),id:"cut",promptEn:"수동 문장",useComposition:false,images:[...['base','replacement','mask'].map(id=>({id,filePath:`D:/cpu-projects/CPU/${id}.png`,name:id,thumb:"",file:null}))]}]}]};
+ const {STANDARD_WORKFLOW_SOURCE_PINS,STANDARD_WORKFLOW_NODE_REVIEWS,WORKFLOW_POLICY_VERSION}=await import("./comfyWorkflowInspection");
+ const catalog=JSON.parse(readFileSync(resolve("client/src/lib/__fixtures__/workflow-node-schemas.json"),"utf8"));
+ catalog.UNETLoader.input.required.unet_name=[["cpu-model.safetensors"]];catalog.CLIPLoader.input.required.clip_name=[["cpu-clip.safetensors"]];catalog.VAELoader.input.required.vae_name=[["cpu-vae.safetensors"]];
+ state.environment={comfyVersion:"0.36.0",coreCommit:"ee71d5c4993f29086b27fde1629a945ae48425bf",pythonVersion:"3.13.12",torchVersion:"2.12.1+cu130",reviewVersion:WORKFLOW_POLICY_VERSION,customNodeVersions:{},nodeSourceHashes:{...STANDARD_WORKFLOW_SOURCE_PINS},catalog,reviewedNodes:structuredClone(STANDARD_WORKFLOW_NODE_REVIEWS),weights:[{category:"diffusion_models",name:"cpu-model.safetensors",license:"allowed"},{category:"text_encoders",name:"cpu-clip.safetensors",license:"allowed"},{category:"vae",name:"cpu-vae.safetensors",license:"allowed"}]};
+ state.native.mockImplementation(async(command:string,args:any)=>{
+  if(command==="comfy_workflow_preflight")return{text:JSON.stringify(state.graphs.get(args.workflowPath)),sha256:state.hashes.get(args.workflowPath),systemStats:{system:{comfyui_version:"0.36.0",python_version:state.environment.pythonVersion,pytorch_version:state.environment.torchVersion}},catalog:state.environment.catalog,supportedWorkflowContractVersions:[1,2],coreCommit:state.environment.coreCommit,nodeSourceHashes:state.environment.nodeSourceHashes,sourceEvidence:"reported-commit-matches-disk",verifiedWeights:state.environment.weights};
+  if(command==="comfy_workflow_store_revision"){const snapshotPath=`C:/cpu-snapshots/${args.revisionId}.api.json`;state.graphs.set(snapshotPath,structuredClone(state.graphs.get(args.workflowPath)!));state.hashes.set(snapshotPath,state.hashes.get(args.workflowPath)!);return{snapshotPath,sha256:args.expectedSha256,revisionId:args.revisionId};}
+  if(command==="comfy_inspect_generation_workflow")return{sha256:state.hashes.get(args.workflowPath),nodes:[]};
+  if(command==="comfy_workflow_asset_fact")return{assetId:args.assetId,projectId:args.projectId,path:args.path,kind:args.kind,sha256:state.assetSha,bytes:100,decodable:true,width:256,height:256,maskConvention:args.assetId==="mask"?"white-edit":undefined};
+  if(command==="comfy_admit_generation")return{admissionToken:"CPU-TRANSPORT-STUB"};
+  if(command==="comfy_submit_generation"){if(state.submitError)throw new Error("CPU lost submit response");return{promptId:"cpu-prompt"};}
+  if(command==="comfy_generation_status"){if(state.statusError)throw new Error("CPU status disconnected");return{state:"completed",promptId:args.promptId};}
+  if(command==="comfy_collect_generation"){if(state.collectError)throw new Error("CPU result changed");return[{path:`D:/cpu-projects/CPU/result.${args.request.kind==="audio"?"flac":args.request.kind==="video"?"mp4":"png"}`,name:"CPU result",kind:args.request.kind,nodeId:args.request.outputNodeIds[0],bytes:100,sha256:"b".repeat(64),mediaFacts:{decodable:true,fullDecode:true,width:256,height:256,durationSeconds:12,fps:24,frameCount:288,audioTracks:1}}];}
+  throw new Error(`CPU unexpected native command ${command}`);
+ });
 });
-async function prepare() {
-  const queue = await import("./taskQueue");
-  await queue.registerTaskJournal({read:async()=>null,write:async()=>{}});
-  const api = await import("./controlComfy");
-  return {queue,api};
+async function setup(){const queue=await import("./taskQueue");await queue.registerTaskJournal({read:async()=>null,write:async()=>{}});const api=await import("./controlComfy");return{queue,api};}
+async function finish(queue:Awaited<ReturnType<typeof setup>>['queue'],id:string){for(let i=0;i<100;i++){await tick();const task=queue.getTask(id)!;if(!['waiting','running'].includes(task.status))return task;}throw new Error("CPU task did not finish");}
+async function imageWorkflow(id="image",mask=false){
+ const graph:WorkflowGraph={
+  '1':{class_type:"UNETLoader",inputs:{unet_name:"cpu-model.safetensors",weight_dtype:"default"}},'2':{class_type:"CLIPLoader",inputs:{clip_name:"cpu-clip.safetensors",type:"wan"}},'3':{class_type:"VAELoader",inputs:{vae_name:"cpu-vae.safetensors"}},
+  '4':{class_type:"CLIPTextEncode",inputs:{clip:['2',0],text:"placeholder"}},'5':{class_type:"CLIPTextEncode",inputs:{clip:['2',0],text:""}},
+  '6':{class_type:"EmptyLatentImage",inputs:{width:256,height:256,batch_size:1}},'7':{class_type:"KSampler",inputs:{model:['1',0],positive:['4',0],negative:['5',0],latent_image:['6',0],seed:1,steps:2,cfg:4,sampler_name:"euler",scheduler:"normal",denoise:1}},
+  '8':{class_type:"VAEDecode",inputs:{samples:['7',0],vae:['3',0]}},'9':{class_type:"SaveImage",inputs:{images:['8',0],filename_prefix:"cpu/test"}}};
+ const selection:WorkflowSelection={slots:[{id:"positive",semantic:"positive",nodeId:'4',input:"text",required:true},{id:"negative",semantic:"negative",nodeId:'5',input:"text",required:true}],promptRoles:[{id:"main",modelRuleId:id==="image"?"flux2":"qwen-image",loaderNodeIds:['1'],positiveSlotIds:['positive'],negativeSlotIds:['negative'],negativeSupport:"supported"}],selectedPromptRoleId:"main",outputNodeIds:['9'],referenceGroups:[]};
+ if(mask){for(const [index,semantic] of ['sourceImage','sourceImage','maskImage'].entries()){const nodeId=String(20+index),slotId=['base','replacement','mask'][index];graph[nodeId]={class_type:"LoadImage",inputs:{image:"cpu.png"}};selection.slots.push({id:slotId,nodeId,input:"image",semantic:semantic as 'sourceImage'|'maskImage',required:true,...(semantic==="maskImage"?{maskConvention:"white-edit" as const}:{})});}}
+ if(mask){graph['23']={class_type:'ImageToMask',inputs:{image:['22',0],channel:'red'}};graph['24']={class_type:'ImageCompositeMasked',inputs:{destination:['8',0],source:['20',0],mask:['23',0],x:0,y:0,resize_source:false}};graph['25']={class_type:'ImageCompositeMasked',inputs:{destination:['24',0],source:['21',0],mask:['23',0],x:0,y:0,resize_source:false}};graph['9'].inputs.images=['25',0];}
+ const source:WorkflowSource={workflowId:id,workflowPath:`C:/cpu-fixture/${id}.json`,title:id,sourceVersion:"CPU fixture only",outputKind:"image",operation:mask?"image-edit":"text-to-image",modelIds:[selection.promptRoles[0].modelRuleId],promptProfile:selection.promptRoles[0].modelRuleId,limitations:["합성 CPU 전송 시험; 실제 모델 생성 품질·native 승인을 증명하지 않습니다."],evidence:[]};
+ return registerFixture(graph,source,selection);
 }
-async function finish(queue:Awaited<ReturnType<typeof prepare>>["queue"], id:string) {
-  for(let i=0;i<60;i++) { await tick(); const job=queue.getTask(id)!; if(!["waiting","running"].includes(job.status)) return job; }
-  throw new Error("작업이 끝나지 않았습니다.");
+async function registerFixture(graph:WorkflowGraph,source:WorkflowSource,selection:WorkflowSelection,voiceOptionBindings?:unknown){
+ state.graphs.set(source.workflowPath,graph);const {buildComfyWorkflowManifest}=await import("./comfyWorkflowInspection");const built=await buildComfyWorkflowManifest({text:JSON.stringify(graph),source,selection,environment:state.environment,checkedAtUtc:"2026-10-07T00:00:00Z"});expect(built.inspection.issues).toEqual([]);state.hashes.set(source.workflowPath,built.manifest!.workflowSha256);
+ const entries=JSON.parse(window.localStorage.getItem("ai-video-storage.comfy-workflow-library.v1")??'[]');window.localStorage.setItem("ai-video-storage.comfy-workflow-library.v1",JSON.stringify([...entries,{source,selection,voiceOptionBindings,manifest:built.manifest,workflowSha256:built.manifest!.workflowSha256,checkedAtUtc:"2026-10-07T00:00:00Z",issues:[]}]));return built.manifest!.promptTarget;
 }
-describe("ComfyUI 조종기 작업 계약", () => {
-  it("수동 편집 충돌·임의 경로·다른 작품 참조·영상 대상 오류는 제출 전에 거절한다", async () => {
-    const {api}=await prepare();
-    await expect(api.enqueueControlComfy({...request,expectedRevision:"old"})).rejects.toMatchObject({code:"revision_conflict"});
-    await expect(api.enqueueControlComfy({...request,workflowPath:"outside.json"})).rejects.toThrow();
-    await expect(api.enqueueControlComfy({...request,referenceAssetIds:["other"]})).rejects.toThrow("레퍼런스");
-    await expect(api.enqueueControlComfy({...request,target:{kind:"character",id:"c"}})).rejects.toThrow("컷");
-    await expect(api.enqueueControlComfy({...request,values:{"secret.api_key":"value"}})).rejects.toThrow("등록되지 않은");
-    expect(state.run).not.toHaveBeenCalled();
-  });
-  it("같은 요청의 재전송은 설정과 리비전이 달라져도 기존 작업을 반환한다", async () => {
-    const {queue,api}=await prepare();
-    const first=await api.enqueueControlComfy(request);
-    const done=await finish(queue,first.jobId);
-    expect(done.status).toBe("done");
-    expect(done.result).toMatchObject({assetIds:["asset-1"],paths:["작품/완성.mp4"],data:{promptId:"server-1",attached:true}});
-    expect(done.externalCheckpoint).toMatchObject({phase:"collected",promptId:"server-1",files});
-    state.revision="manual-edit";
-    expect(await api.enqueueControlComfy(request)).toEqual({jobId:first.jobId,reused:true});
-    await expect(api.enqueueControlComfy({...request,prompt:"다른 요청"})).rejects.toThrow("다른 내용");
-    expect(state.run).toHaveBeenCalledTimes(1);
-    expect(state.run.mock.calls[0][0]).toMatchObject({workflowSha256:"hash",references:[{kind:"image",path:"작품/ref.png"}],baseDirectory:"D:/projects",projectName:"작품",stem:"컷_1"});
-  });
-  it("서버가 받았는지 불명인 제출은 수동 재시도에서도 다시 생성하지 않는다", async () => {
-    const {queue,api}=await prepare();
-    state.run.mockImplementation(async input => { await input.onSubmitting(); throw new Error("연결 끊김"); });
-    const first=await api.enqueueControlComfy(request);
-    expect((await finish(queue,first.jobId)).status).toBe("failed");
-    queue.retryTask(first.jobId);
-    const retried=await finish(queue,first.jobId);
-    expect(retried.error).toContain("중복 생성");
-    expect(state.run).toHaveBeenCalledTimes(1);
-  });
-  it("작업 번호를 받은 뒤 재시도하면 그 번호로 결과를 조회한다", async () => {
-    const {queue,api}=await prepare();
-    state.run.mockImplementationOnce(async input => {await input.onSubmitting();await input.onSubmitted("server-1");throw new Error("조회 오류");});
-    const first=await api.enqueueControlComfy(request);
-    expect((await finish(queue,first.jobId)).status).toBe("failed");
-    queue.retryTask(first.jobId);
-    expect((await finish(queue,first.jobId)).status).toBe("done");
-    expect(state.run.mock.calls[1][0].existingPromptId).toBe("server-1");
-  });
-  it("조회는 전체 그래프의 비밀값이나 파일 경로를 공개하지 않는다", async () => {
-    const {api}=await prepare();
-    const info=await api.getControlComfyWorkflow({kind:"image"});
-    expect(info).toMatchObject({kind:"image",mappings:[{nodeId:"1",input:"text",source:"prompt",valueType:"string",valid:true}]});
-    expect(JSON.stringify(info)).not.toMatch(/PRIVATE|image\.json/);
-  });
-  it("등록 실패 뒤 수집 완료 기록으로 재시도해도 파일 검증을 다시 거친다", async () => {
-    const {queue,api}=await prepare();
-    state.attachError=true;
-    const first=await api.enqueueControlComfy(request);
-    const failed=await finish(queue,first.jobId);
-    expect(failed.status).toBe("failed");
-    expect(failed.externalCheckpoint).toMatchObject({phase:"collected",promptId:"server-1",files});
-    state.attachError=false;
-    state.run.mockImplementationOnce(async input => {
-      expect(input.existingPromptId).toBe("server-1");
-      throw new Error("결과 파일이 변경됐습니다");
-    });
-    queue.retryTask(first.jobId);
-    const rejected=await finish(queue,first.jobId);
-    expect(rejected.status).toBe("failed");
-    expect(rejected.error).toContain("파일이 변경");
-    expect(state.writes).toBe(0);
-    queue.retryTask(first.jobId);
-    expect((await finish(queue,first.jobId)).status).toBe("done");
-    expect(state.run.mock.calls.slice(1).every(call=>call[0].existingPromptId === "server-1")).toBe(true);
-    expect(state.writes).toBe(1);
-  });
-  it.each(["storage", "project"])("접수 뒤 %s 위치 변경은 새 실행과 이어받기에서 차단한다", async change => {
-    const {queue,api}=await prepare();
-    state.run.mockImplementationOnce(async input => {await input.onSubmitting();await input.onSubmitted("server-1");throw new Error("조회 오류");});
-    const first=await api.enqueueControlComfy(request);
-    const failed=await finish(queue,first.jobId);
-    expect(failed.payload).toMatchObject({baseDirectory:"D:/projects",projectFolder:"작품"});
-    if(change === "storage") state.baseDirectory="E:/other"; else state.projectFolder="다른 작품";
-    queue.retryTask(first.jobId);
-    const rejected=await finish(queue,first.jobId);
-    expect(rejected.status).toBe("failed");
-    expect(rejected.error).toContain(change === "storage" ? "저장 폴더" : "프로젝트 위치");
-    expect(state.run).toHaveBeenCalledTimes(1);
-    expect(state.writes).toBe(0);
-  });
-  it.each(["storage", "project"])("큐 대기 중 %s 위치가 바뀌면 첫 제출도 하지 않는다", async change => {
-    const {queue,api}=await prepare();
-    let release!: ()=>void;
-    queue.registerTaskRunner("test-gate",()=>new Promise<void>(resolve=>{release=resolve;}));
-    const gate=await queue.enqueueTaskOperation({lane:"media",kind:"test-gate",projectId:"p",projectTitle:"작품",label:"앞 작업",operationId:"gate",payload:{}});
-    for(let i=0;i<30 && !release;i++) await tick();
-    expect(release).toBeTypeOf("function");
-    const next=await api.enqueueControlComfy(request);
-    expect(queue.getTask(next.jobId)?.status).toBe("waiting");
-    if(change === "storage") state.baseDirectory="E:/other"; else state.projectFolder="다른 작품";
-    release();
-    expect((await finish(queue,gate.jobId)).status).toBe("done");
-    const rejected=await finish(queue,next.jobId);
-    expect(rejected.status).toBe("failed");
-    expect(rejected.error).toContain(change === "storage" ? "저장 폴더" : "프로젝트 위치");
-    expect(state.run).not.toHaveBeenCalled();
-  });
-  it("작업 기록 복원이 끝난 뒤 중복 요청을 확인한다", async () => {
-    const {queue,api}=await prepare();
-    const first=await api.enqueueControlComfy(request);
-    expect((await finish(queue,first.jobId)).status).toBe("done");
-    const snapshot=await queue.readTaskJournal();
-    vi.resetModules();
-    const empty = new Map<string,string>();
-    vi.stubGlobal("localStorage", {getItem:(key:string)=>empty.get(key)??null,setItem:(key:string,value:string)=>empty.set(key,value)});
-    const restarted=await import("./taskQueue");
-    let restore!: (value:typeof snapshot)=>void;
-    const loaded=new Promise<typeof snapshot>(resolve=>{restore=resolve;});
-    const initializing=restarted.registerTaskJournal({read:()=>loaded,write:async()=>{}});
-    const restartedApi=await import("./controlComfy");
-    state.revision="manually-edited";
-    let settled=false;
-    const pending=restartedApi.enqueueControlComfy(request).then(value=>{settled=true;return value;});
-    await tick();
-    expect(settled).toBe(false);
-    restore(snapshot);
-    await initializing;
-    expect(await pending).toEqual({jobId:first.jobId,reused:true});
-    expect(state.run).toHaveBeenCalledTimes(1);
-  });
+const request=(workflowTarget:Awaited<ReturnType<typeof imageWorkflow>>,operationId="cpu-operation")=>({projectId:'p',target:{kind:'cut',id:'cut'},expectedRevision:'r1',operationId,workflowTarget,prompt:"수동 문장",kind:"image"});
+const submits=()=>state.native.mock.calls.filter(([command])=>command==="comfy_submit_generation");
+async function importedImageWorkflow(id:string,v2=false,masked=false){
+ state.environment.projectId="p";
+ const base=await imageWorkflow(`fixture-${id}`,masked),library=await import("./comfyWorkflowLibrary"),entry=library.listWorkflowLibrary().find(e=>e.source.workflowId===base.workflowId)!;
+ const source={...entry.source,workflowId:id,title:"가져온 사용자 workflow"},selection=structuredClone(entry.selection);
+ selection.slots.push({id:"seed",semantic:"seed",nodeId:"7",input:"seed",required:true,defaultValue:1});
+ const envelope=v2?await(await import("./comfyWorkflowInspectionV2")).migrateWorkflowSelectionV1ToV2(selection,{originalV1SelectionJson:JSON.stringify(selection,null,2)}):undefined;
+ const {parseWorkflowRegistrationFile}=await import("./workflowFileImport"),draft=parseWorkflowRegistrationFile(JSON.stringify({source,selection,selectionEnvelope:envelope}),`C:/cpu-fixture/${id}.entry.json`);
+ const result=await(await import("./controlComfyWorkflow")).registerControlWorkflow({...draft,projectId:"p"});expect(result.issues,JSON.stringify(result.issues)).toEqual([]);expect(result.manifest).toBeDefined();return result;
+}
+describe("명시 workflow 진입→공통 adapter→큐→등록 CPU 통합 (실제 생성 없음)",()=>{
+ it("사용자 V2 entry를 실제 라이브러리에 저장하고 scalar·참조·role을 조종기 payload까지 보존합니다",async()=>{
+  const {queue,api}=await setup(),entry=await importedImageWorkflow("user-import-v2",true,true),target=entry.manifest!.promptTarget;
+  state.draft!.scenes[0].cuts[0].promptWorkflow=target;
+  const {saveWorkflowInputs,workflowInputForAppTarget}=await import("./comfyWorkflowRuntime"),inputs={assets:{base:"base",replacement:"replacement",mask:"mask"},referenceGroups:{},values:{seed:37},rolePrompts:{}};
+  await saveWorkflowInputs("p",{kind:"cut",id:"cut"},target,"image",inputs);
+  const appInput=workflowInputForAppTarget(state.draft!,{kind:"cutImage",sceneId:"scene",cutId:"cut"},"p","cpu-import-ui");expect(appInput.workflowTarget).toEqual(target);expect(appInput.assets).toEqual(inputs.assets);expect(appInput.prompt).toBe("수동 문장");
+  const {listControlWorkflowLibrary}=await import("./controlComfyWorkflow"),listed=listControlWorkflowLibrary().find(e=>e.source.workflowId===entry.source.workflowId)!;expect(listed.selectionEnvelope).toEqual(entry.selectionEnvelope);expect(listed.selectionEnvelope!.originalV1SelectionJson).toBe(entry.selectionEnvelope!.originalV1SelectionJson);
+  const queued=await api.enqueueControlComfy({...request(target,"cpu-import-control"),...inputs}),done=await finish(queue,queued.jobId);expect(done.status).toBe("done");
+  const admitted=state.native.mock.calls.find(([command])=>command==="comfy_admit_generation")![1].request;expect(admitted.manifest.schemaVersion).toBe(2);expect(admitted.manifest.selectionEnvelope).toEqual(entry.selectionEnvelope);expect(admitted.manifest.workflowPath).toBe(entry.source.workflowPath);expect(admitted.provenance.promptTarget).toEqual(target);expect(admitted.bindings).toContainEqual({nodeId:"7",input:"seed",value:37});expect(submits()[0][1].request.workflowPath).toBe(entry.source.workflowPath);expect(done.result?.data).toMatchObject({workflowTarget:target,attached:true});
+ });
+ it("가져온 V1/V2 버전과 프로젝트 기본·컷 override를 일괄 payload에서 구분합니다",async()=>{
+  const {queue}=await setup(),one=await importedImageWorkflow("user-v1",false),two=await importedImageWorkflow("user-v2",true),first=state.draft!.scenes[0].cuts[0];
+  state.draft!.workflowTargets={image:one.manifest!.promptTarget};first.promptWorkflow=two.manifest!.promptTarget;first.images=[];state.draft!.scenes[0].cuts.push({...newCut(2),id:"cut2",promptWorkflow:one.manifest!.promptTarget,promptEn:"두 번째 원본 문장",images:[],useComposition:false});state.draft!.batchEngines={image:"comfy"};
+  let release!:()=>void;queue.registerTaskRunner("cpu-import-block",async()=>new Promise<void>(resolve=>{release=resolve;}));queue.enqueueTasks([{kind:"cpu-import-block",lane:"media",projectId:"p",projectTitle:"CPU",label:"CPU block",payload:{}}]);await tick();
+  await(await import("./batchRun")).enqueueProjectGeneration("p",state.draft!,{images:true,videos:false});const tasks=queue.listTasks().filter(t=>t.kind==="cutImage");expect(tasks.map(t=>(t.payload as any).workflowPayload.input.workflowTarget)).toEqual([two.manifest!.promptTarget,one.manifest!.promptTarget]);expect(tasks.every(t=>(t.payload as any).workflowPayload.requestFingerprint)).toBe(true);expect(first.promptEn).toBe("수동 문장");
+  release();expect((await Promise.all(tasks.map(t=>finish(queue,t.id)))).every(t=>t.status==="done")).toBe(true);const versions=state.native.mock.calls.filter(([command])=>command==="comfy_admit_generation").map(([,args])=>args.request.manifest.schemaVersion);expect(versions).toEqual([2,1]);
+ });
+ it("명시 역할·hash·바인딩·출력 선택을 native 전송까지 전달하고 원래 컷에 등록한다",async()=>{const {queue,api}=await setup(),target=await imageWorkflow();const queued=await api.enqueueControlComfy(request(target));const done=await finish(queue,queued.jobId);expect(done.status).toBe("done");expect(done.externalCheckpoint).toMatchObject({phase:"collected",promptId:"cpu-prompt"});expect(done.result).toMatchObject({data:{attached:true,workflowTarget:target}});expect(done.payload).toMatchObject({workflowSha256:target.workflowSha256,requestFingerprint:expect.stringMatching(/^[a-f0-9]{64}$/)});expect(submits()[0][1].request.bindings).toContainEqual({nodeId:'4',input:'text',value:"수동 문장"});expect(state.draft!.scenes[0].cuts[0].images).toHaveLength(4);});
+ it("실제 도구 등록부의 스키마를 통과한 comfy_generate도 같은 runner에 도달한다",async()=>{const {queue}=await setup(),target=await imageWorkflow();const {dispatchAppControl}=await import("./appControlRegistry");const result:any=await dispatchAppControl("tools/call",{name:"comfy_generate",arguments:request(target)});expect(result.isError).not.toBe(true);expect((await finish(queue,result.structuredContent.jobId)).status).toBe("done");expect(submits()).toHaveLength(1);});
+ it("수동 편집 충돌·임의 경로·낡은 hash·잘못된 대상은 접수 전 차단한다",async()=>{const {api}=await setup(),target=await imageWorkflow();await expect(api.enqueueControlComfy({...request(target),expectedRevision:"old"})).rejects.toMatchObject({code:"revision_conflict"});await expect(api.enqueueControlComfy({...request(target),workflowPath:"outside.json"})).rejects.toThrow();await expect(api.enqueueControlComfy(request({...target,workflowSha256:'f'.repeat(64)}))).rejects.toThrow("target_stale");await expect(api.enqueueControlComfy({...request(target),target:{kind:"voice",id:"actor"}})).rejects.toThrow("output_target_mismatch");expect(submits()).toHaveLength(0);});
+ it("동일 요청은 환경·판 변경 후에도 기존 영수증을 반환하고 다른 문장은 거절한다",async()=>{const {queue,api}=await setup(),target=await imageWorkflow(),raw=request(target);const first=await api.enqueueControlComfy(raw);expect((await finish(queue,first.jobId)).status).toBe("done");state.revision="manual-edit";state.baseDirectory="E:/other";expect(await api.enqueueControlComfy(raw)).toEqual({jobId:first.jobId,reused:true});await expect(api.enqueueControlComfy({...raw,prompt:"다른 문장"})).rejects.toThrow("다른 내용");expect(submits()).toHaveLength(1);});
+ it("제출 응답 불명은 재시도에서 재제출하지 않는다",async()=>{const {queue,api}=await setup(),target=await imageWorkflow();state.submitError=true;const job=await api.enqueueControlComfy(request(target));expect((await finish(queue,job.jobId)).status).toBe("failed");state.submitError=false;queue.retryTask(job.jobId);expect((await finish(queue,job.jobId)).error).toContain("중복 생성");expect(submits()).toHaveLength(1);});
+ it("promptId 확인 후 재접속은 기존 작업을 조회하고 새 제출을 하지 않는다",async()=>{const {queue,api}=await setup(),target=await imageWorkflow();state.statusError=true;const job=await api.enqueueControlComfy(request(target));expect((await finish(queue,job.jobId)).externalCheckpoint).toMatchObject({promptId:"cpu-prompt",phase:"submitted"});state.statusError=false;queue.retryTask(job.jobId);expect((await finish(queue,job.jobId)).status).toBe("done");expect(submits()).toHaveLength(1);});
+ it("등록 실패 뒤 같은 결과를 다시 수집·검증하며 파일 변경 실패를 숨기지 않는다",async()=>{const {queue,api}=await setup(),target=await imageWorkflow();state.attachError=true;const job=await api.enqueueControlComfy(request(target));const failed=await finish(queue,job.jobId);expect(failed.result?.paths).toHaveLength(1);expect(failed.externalCheckpoint).toMatchObject({phase:"collected"});state.attachError=false;state.collectError=true;queue.retryTask(job.jobId);expect((await finish(queue,job.jobId)).error).toContain("result changed");state.collectError=false;queue.retryTask(job.jobId);expect((await finish(queue,job.jobId)).status).toBe("done");expect(submits()).toHaveLength(1);expect(state.writes).toBe(1);});
+ it.each(['storage','project','selection'])("접수 뒤 %s 변경은 기존 promptId의 재조회도 원래 조건까지 차단한다",async change=>{const {queue,api}=await setup(),target=await imageWorkflow();state.statusError=true;const job=await api.enqueueControlComfy(request(target));await finish(queue,job.jobId);state.statusError=false;if(change==='storage')state.baseDirectory='E:/other';if(change==='project')state.folder='other';if(change==='selection')state.draft!.scenes[0].cuts[0].promptWorkflow={...target,modelRuleId:'other'};queue.retryTask(job.jobId);const rejected=await finish(queue,job.jobId);expect(rejected.status).toBe('failed');expect(rejected.error).toMatch(/changed/);expect(submits()).toHaveLength(1);expect(state.writes).toBe(0);});
+ it("masked 조종기 입력을 명시 3슬롯으로 바인딩하고 다른 프로젝트 ID를 거절한다",async()=>{const {queue,api}=await setup(),target=await imageWorkflow('mask',true),{kind,...base}=request(target),raw={...base,baseAssetId:'base',replacementAssetId:'replacement',maskAssetId:'mask',baseSlotId:'base',replacementSlotId:'replacement',maskSlotId:'mask'};await expect(api.enqueueControlComfyMasked({...raw,maskAssetId:'foreign'})).rejects.toThrow('registered_reference_missing');const job=await api.enqueueControlComfyMasked(raw);expect((await finish(queue,job.jobId)).status).toBe('done');expect(submits()[0][1].request.bindings.filter((value:any)=>value.filePath).map((value:any)=>value.filePath)).toEqual(['base','replacement','mask'].map(id=>`D:/cpu-projects/CPU/${id}.png`));});
+ it("컷마다 다른 workflow를 고른 일괄 입력을 보존하고 수동 문장 변경을 재발주하지 않는다",async()=>{const {queue}=await setup(),one=await imageWorkflow(),two=await imageWorkflow('second');const first=state.draft!.scenes[0].cuts[0];first.promptWorkflow=one;first.images=[];state.draft!.scenes[0].cuts.push({...newCut(2),id:'cut2',promptWorkflow:two,promptEn:'두번째 수동 문장',useComposition:false});state.draft!.batchEngines={image:'comfy'};const {enqueueProjectGeneration}=await import('./batchRun');let release!:()=>void;queue.registerTaskRunner('cpu-block',async()=>new Promise<void>(resolve=>{release=resolve;}));queue.enqueueTasks([{kind:'cpu-block',lane:'media',projectId:'p',projectTitle:'CPU',label:'CPU block',payload:{}}]);await tick();await enqueueProjectGeneration('p',state.draft!,{images:true,videos:false});const tasks=queue.listTasks().filter(task=>task.kind==='cutImage');expect(tasks.map(task=>(task.payload as any).workflowPayload.input.workflowTarget)).toEqual([one,two]);expect(tasks.every(task=>/^[a-f0-9]{64}$/.test((task.payload as any).workflowPayload.requestFingerprint))).toBe(true);first.promptEn='대기 중 사용자가 편집';release();const done=await Promise.all(tasks.map(task=>finish(queue,task.id)));expect(done[0].error).toContain('queued_inputs_changed');expect(done[1].status).toBe('done');expect(submits()).toHaveLength(1);expect(submits()[0][1].request.bindings).toContainEqual({nodeId:'4',input:'text',value:'두번째 수동 문장'});});
+});
+async function voiceWorkflow(bodySplit=false){
+ const hash='c'.repeat(64);state.environment.nodeSourceHashes['cpu.tts']=hash;state.environment.reviewedNodes.CpuTTS={pythonModule:'cpu.tts',sourceSha256:hash,reviewId:'synthetic-cpu-only'};state.environment.catalog.CpuTTS={python_module:'cpu.tts',input:{required:{model:['MODEL'],text:['STRING'],language:['STRING'],profile:['STRING'],modelOption:[['design','custom-1.7b','custom-0.6b']],speaker:[['Sohee','Vivian']]}},output:['AUDIO']};
+ const graph:WorkflowGraph={'1':{class_type:'UNETLoader',inputs:{unet_name:'cpu-model.safetensors',weight_dtype:'default'}},'2':{class_type:'CpuTTS',inputs:{model:['1',0],text:'CPU dialogue',language:'Korean',profile:'actor',modelOption:'design',speaker:'Sohee'}},'3':{class_type:'SaveAudio',inputs:{audio:['2',0],filename_prefix:'cpu/voice'}}};
+ if(bodySplit){(state.environment.catalog.CpuTTS.input.required!).instruct=['STRING'];graph['2'].inputs.instruct='CPU acting instruction';}
+ const selection:WorkflowSelection={slots:[{id:'dialogue',semantic:bodySplit?'text':'positive',nodeId:'2',input:'text',required:true},{id:'language',semantic:'language',nodeId:'2',input:'language',required:false},{id:'profile',semantic:'voiceProfile',nodeId:'2',input:'profile',required:false},{id:'modelOption',semantic:'value',nodeId:'2',input:'modelOption',required:false},{id:'speaker',semantic:'value',nodeId:'2',input:'speaker',required:false}],promptRoles:[{id:'voice',modelRuleId:'qwentts',loaderNodeIds:['1'],positiveSlotIds:['dialogue'],negativeSlotIds:[],negativeSupport:'unsupported'}],selectedPromptRoleId:'voice',outputNodeIds:['3'],referenceGroups:[]};
+ if(bodySplit){selection.slots.push({id:'acting',semantic:'positive',nodeId:'2',input:'instruct',required:true});selection.promptRoles[0].positiveSlotIds=['acting'];}
+ const source:WorkflowSource={workflowId:'voice-cpu',workflowPath:'C:/cpu-fixture/voice.json',title:'CPU TTS contract fixture',sourceVersion:'synthetic only',outputKind:'audio',operation:'tts',modelIds:['qwentts'],promptProfile:'qwentts',limitations:['실제 Qwen custom 노드 미검토; 이 합성 노드를 production에 허용하지 않습니다.'],evidence:[]};return registerFixture(graph,source,selection,{model:'modelOption',speaker:'speaker',actingProfile:'profile'});
+}
+async function musicWorkflow(instrumental:boolean){
+ const registry=(await import('./workflowEvidence/reviewed-node-registry-v039-minimal.json')).default,facts=(await import('./workflowEvidence/music3-exact-weight-facts.json')).default,candidate=(await import('./workflowEvidence/music3-instrumental-smoke.candidate.json')).default;
+ state.environment={comfyVersion:'0.39.0',coreCommit:registry.diskCoreCommit,pythonVersion:registry.pythonVersion,torchVersion:registry.torchVersion,reviewVersion:registry.reviewVersion,nodeSourceHashes:registry.nodeSourceHashes,customNodeVersions:{},catalog:JSON.parse(readFileSync(resolve('client/src/lib/__fixtures__/workflow-v039-music3-node-schemas.json'),'utf8')),reviewedNodes:registry.reviewedNodes as WorkflowEnvironment['reviewedNodes'],weights:facts.files.map(file=>({category:file.category,name:file.name,license:'unknown',sha256:file.sha256})),projectId:'b',weightAuthorizations:facts.files.map(file=>({kind:'user-reported',projectId:'b',modelRuleId:'minimaxmusic3',category:file.category,name:file.name,sha256:file.sha256,evidence:'synthetic CPU grant',sourceThreadId:'cpu-only',reportedAtUtc:'2026-10-07T00:00:00Z'}))};
+ const target=await registerFixture(JSON.parse(readFileSync(resolve('client/src/lib/workflowEvidence/music3-instrumental-smoke.api.json'),'utf8')),structuredClone(candidate.source) as WorkflowSource,structuredClone(candidate.selection) as WorkflowSelection);
+ state.bgm=[{id:'b',name:'CPU music',description:'',linkedProject:'',createdAt:0,updatedAt:0,tracks:[{...{usage:'',mood:[],genre:[],instruments:[],tempo:'',durationSeconds:'',lyrics:'',reference:'',notes:'',promptKo:'',promptEn:'',resultPaths:[],targetTool:"comfy" as const,updatedAt:0},id:'track',name:'곡',instrumental,durationSeconds:'12',lyricsKo:instrumental?'':'첫 줄\n[end]\n[end]',styleEn:'Soft piano',promptWorkflow:target}]} as BgmProject];return target;
+}
+describe('음악·TTS 조종기 실제 등록부와 일괄 접수 CPU',()=>{
+ it('voice_generate의 모델·화자·언어·연기 옵션이 adapter 입력과 등록 메타에 전달된다',async()=>{const {queue}=await setup(),target=await voiceWorkflow();state.draft!.characters[0].voiceWorkflow=target;const {dispatchAppControl}=await import('./appControlRegistry');const result:any=await dispatchAppControl('tools/call',{name:'voice_generate',arguments:{projectId:'p',expectedRevision:'r1',operationId:'voice-op',characterId:'actor',workflowTarget:target,dialogue:'안녕하세요',model:'design',speaker:'Sohee',language:'Korean',category:'idol',gender:'female',ageRange:'twenties',traits:'낮고 부드러움'}});expect(result.isError).not.toBe(true);const done=await finish(queue,result.structuredContent.jobId);expect(done.status).toBe('done');const bindings=submits()[0][1].request.bindings;expect(bindings).toContainEqual({nodeId:'2',input:'text',value:'안녕하세요'});expect(bindings).toContainEqual({nodeId:'2',input:'modelOption',value:'design'});expect(bindings).toContainEqual({nodeId:'2',input:'speaker',value:'Sohee'});expect(bindings).toContainEqual({nodeId:'2',input:'profile',value:expect.stringContaining('낮고 부드러움')});expect(state.draft!.characters[0].voiceReferences).toMatchObject([{operationId:'voice-op',source:'generated',model:'qwentts',language:'Korean',speaker:'Sohee',category:'idol',isPrimary:true}]);});
+ it('voice_generate가 지원 슬롯 없는 옵션을 조종기 경계에서도 차단한다',async()=>{await setup();const target=await voiceWorkflow();const entries=JSON.parse(window.localStorage.getItem('ai-video-storage.comfy-workflow-library.v1')!);delete entries[0].voiceOptionBindings;window.localStorage.setItem('ai-video-storage.comfy-workflow-library.v1',JSON.stringify(entries));const {dispatchAppControl}=await import('./appControlRegistry');const result:any=await dispatchAppControl('tools/call',{name:'voice_generate',arguments:{projectId:'p',expectedRevision:'r1',operationId:'voice-op',characterId:'actor',workflowTarget:target,dialogue:'대사',speaker:'Sohee'}});expect(result.isError).toBe(true);expect(JSON.stringify(result)).toContain('unsupported');expect(submits()).toHaveLength(0);});
+ it.each([true,false])('bgm_generate 실제 스키마가 workflowTarget을 유지하고 BGM/보컬(%s)을 구별한다',async instrumental=>{const {queue}=await setup(),target=await musicWorkflow(instrumental),{getBgmSnapshot}=await import('./controlBgm'),{dispatchAppControl}=await import('./appControlRegistry');const revision=(await getBgmSnapshot('b')).revision;const result:any=await dispatchAppControl('tools/call',{name:'bgm_generate',arguments:{projectId:'b',trackId:'track',expectedRevision:revision,operationId:'bgm-op',workflowTarget:target,seconds:12,...(instrumental?{}:{lyrics:'첫 줄\n[end]\n[end]'})}});expect(result.isError).not.toBe(true);const done=await finish(queue,result.structuredContent.jobId);expect(done.status).toBe('done');expect((done.payload as any).input.workflowTarget).toEqual(target);expect(submits()[0][1].request.bindings.find((binding:any)=>binding.input==='lyrics').value).toBe(instrumental?'[Instrumental]':'첫 줄\n[end]');expect(state.bgm[0].tracks[0].resultPaths).toHaveLength(1);expect(done.result?.data).toMatchObject({attached:true});});
+ it('BGM 조종기 가사 입력은 불필요한 보컬을 만들기 전에 거절한다',async()=>{await setup();const target=await musicWorkflow(true),{getBgmSnapshot}=await import('./controlBgm'),{dispatchAppControl}=await import('./appControlRegistry');const result:any=await dispatchAppControl('tools/call',{name:'bgm_generate',arguments:{projectId:'b',trackId:'track',expectedRevision:(await getBgmSnapshot('b')).revision,operationId:'bgm-op',workflowTarget:target,lyrics:'불필요한 노래'}});expect(result.isError).toBe(true);expect(JSON.stringify(result)).toContain('instrumental_lyrics_forbidden');expect(submits()).toHaveLength(0);});
+ it('일괄의 마지막 workflow가 낡았으면 앞 작업도 접수하지 않는다',async()=>{const {queue}=await setup(),target=await imageWorkflow();state.draft!.batchEngines={image:'comfy'};const first=state.draft!.scenes[0].cuts[0];first.promptWorkflow=target;first.images=[];state.draft!.scenes[0].cuts.push({...newCut(2),id:'cut2',promptEn:'두번째',promptWorkflow:{...target,workflowSha256:'f'.repeat(64)}});const {enqueueProjectGeneration}=await import('./batchRun');await expect(enqueueProjectGeneration('p',state.draft!,{images:true,videos:false})).rejects.toThrow('target_stale');expect(queue.listTasks()).toEqual([]);expect(submits()).toHaveLength(0);});
+});
+
+it('분리된 TTS 본문은 공백까지 보존하고 positive 역할에 연기 지시만 넣는다',async()=>{const {queue}=await setup(),target=await voiceWorkflow(true),{dispatchAppControl}=await import('./appControlRegistry');const dialogue='  사용자가 쓴 대사\n';const result:any=await dispatchAppControl('tools/call',{name:'voice_generate',arguments:{projectId:'p',expectedRevision:'r1',operationId:'split-body',characterId:'actor',workflowTarget:target,dialogue,language:'Korean',category:'announcer'}});expect(result.isError).not.toBe(true);expect((await finish(queue,result.structuredContent.jobId)).status).toBe('done');const bindings=submits()[0][1].request.bindings;expect(bindings).toContainEqual({nodeId:'2',input:'text',value:dialogue});expect(bindings.find((binding:any)=>binding.input==='instruct').value).toContain('아나운서');expect(bindings.find((binding:any)=>binding.input==='instruct').value).not.toContain('사용자가 쓴 대사');expect(state.draft!.characters[0].voiceReferences![0].dialogue).toBe(dialogue);});
+it("R1 새 장면 영상은 빈 prompt 대신 준비 의존성을 접수합니다",async()=>{const {queue}=await setup(),base=await imageWorkflow(),library=await import("./comfyWorkflowLibrary"),e=library.listWorkflowLibrary()[0];e.source={...e.source,outputKind:"video",operation:"text-to-video"};e.manifest!.outputKind="video";e.manifest!.operation="text-to-video";window.localStorage.setItem("ai-video-storage.comfy-workflow-library.v1",JSON.stringify([e]));state.draft!.workflowTargets={video:base};state.draft!.batchEngines={video:"comfy"};const scene=state.draft!.scenes[0];scene.storyboardPromptEn="";scene.storyboardPromptKo="";scene.storyboardPath="";let release!:()=>void;queue.registerTaskRunner("cpu-review-block",async()=>new Promise<void>(r=>{release=r;}));queue.enqueueTasks([{kind:"cpu-review-block",lane:"media",projectId:"p",projectTitle:"CPU",label:"CPU",payload:{}}]);await tick();const result=await(await import("./batchRun")).enqueueProjectGeneration("p",state.draft!,{images:false,videos:true});expect(result.scenes).toBe(1);const tasks=queue.listTasks();expect(tasks.filter(t=>t.kind==="sceneBoard")).toHaveLength(1);expect((tasks.find(t=>t.kind==="sceneVideo")!.payload as any).workflowPreparation).toBeDefined();expect(submits()).toHaveLength(0);queue.stopTask(tasks.find(t=>t.kind==="sceneBoard")!.id);queue.stopTask(tasks.find(t=>t.kind==="sceneVideo")!.id);release();});
+it("R4 같은 프로젝트 scene.videos의 등록 ID를 참조 목록에서 제공합니다",async()=>{await setup();state.draft!.scenes[0].videos=[{id:"scene-video-1",filePath:"D:/cpu-projects/CPU/result.mp4",name:"결과",thumb:"",file:null} as any];const assets=(await import("./controlMedia")).listControlAssets("p");expect(assets).toContainEqual(expect.objectContaining({id:"scene-video-1",path:"D:/cpu-projects/CPU/result.mp4",target:{kind:"scene",id:"scene"},kind:"video"}));});
+
+async function preparedVideoWorkflow(){
+ await imageWorkflow();const entry=(await import("./comfyWorkflowLibrary")).listWorkflowLibrary()[0],graph=structuredClone(state.graphs.get(entry.source.workflowPath)!);
+ // Narrow synthetic CPU schemas replace transport capabilities only; no production policy or GPU is used.
+ state.environment.catalog.CreateVideo={input:{required:{images:["IMAGE"],fps:["FLOAT"]}},output:["VIDEO"],python_module:"comfy_extras.nodes_video"} as any;
+ state.environment.catalog.SaveVideo={input:{required:{video:["VIDEO"],filename_prefix:["STRING"]}},output:[],output_node:true,python_module:"comfy_extras.nodes_video"} as any;
+ graph['20']={class_type:"LoadImage",inputs:{image:"cpu-first.png"}};graph['21']={class_type:"ImageCompositeMasked",inputs:{destination:['8',0],source:['20',0],x:0,y:0,resize_source:false}};graph['9']={class_type:"CreateVideo",inputs:{images:['21',0],fps:24}};graph['10']={class_type:"SaveVideo",inputs:{video:['9',0],filename_prefix:"cpu/video"}};
+ const selection={...entry.selection,outputNodeIds:['10'],slots:[...entry.selection.slots,{id:"fps",semantic:"fps" as const,nodeId:'9',input:"fps",required:true,defaultValue:24},{id:"firstFrame",semantic:"firstFrame" as const,nodeId:'20',input:"image",required:true}]};
+ const target=await registerFixture(graph,{...entry.source,workflowId:"video-ready",workflowPath:"C:/cpu-fixture/video-ready.json",operation:"image-to-video",outputKind:"video"},selection);state.draft!.workflowTargets={video:target};state.draft!.batchEngines={video:"comfy"};return target;
+}
+async function setupPreparedScene(){
+ const {queue}=await setup();await preparedVideoWorkflow();const batch=await import("./batchRun"),preparation=await import("./workflowScenePreparation");
+ queue.registerTaskRunner("sceneBoard",async(raw,_report,task)=>{const p=raw as any;preparation.assertScenePreparationSource(p.workflowPreparation,state.draft!);if(state.attachError)throw new Error("CPU disk full");const scene=state.draft!.scenes[0];scene.storyboardPath="D:/cpu-projects/CPU/board.png";if(!scene.storyboardPromptEn&&!scene.storyboardPromptKo){scene.storyboardPromptEn="Confirmed board motion";scene.storyboardPromptKo="확인된 보드 동작";}state.writes++;queue.setTaskResult(task.id,{paths:[scene.storyboardPath],data:{scenePreparationReceipt:preparation.scenePreparationReceipt(p.workflowPreparation,scene)}});});
+ return {queue,batch};
+}
+it("R1 확인된 준비 결과로 요청 fingerprint를 한 번 확정하고 같은 영수증으로 재시도합니다",async()=>{
+ const {queue,batch}=await setupPreparedScene();state.statusError=true;await batch.enqueueProjectGeneration("p",state.draft!,{images:false,videos:true});const video=queue.listTasks().find(t=>t.kind==="sceneVideo")!;const failed=await finish(queue,video.id);expect(failed.status).toBe("failed");expect(failed.externalCheckpoint).toMatchObject({phase:"submitted",preparedWorkflowPayload:{input:{prompt:"Confirmed board motion",values:{}}},scenePreparationReceipt:{storyboardPromptEn:"Confirmed board motion"}});const frozen=JSON.stringify(failed.externalCheckpoint!.preparedWorkflowPayload);expect(submits()).toHaveLength(1);
+ state.statusError=false;queue.retryTask(video.id);const done=await finish(queue,video.id);expect(done.status,done.error).toBe("done");expect(JSON.stringify(done.externalCheckpoint!.preparedWorkflowPayload)).toBe(frozen);expect(submits()).toHaveLength(1);expect(state.draft!.scenes[0].videos).toHaveLength(1);
+});
+it.each(["scene-edit","role-edit","scalar-edit","board-edit","save-failed"])("R1 준비 대기 중 %s는 확정·제출을 막고 사용자 입력을 보존합니다",async kind=>{
+ const {queue,batch}=await setupPreparedScene();let release!:()=>void;queue.registerTaskRunner("cpu-preparation-block",async()=>new Promise<void>(r=>{release=r;}));queue.enqueueTasks([{kind:"cpu-preparation-block",lane:"media",projectId:"p",projectTitle:"CPU",label:"CPU",payload:{}}]);await tick();await batch.enqueueProjectGeneration("p",state.draft!,{images:false,videos:true});const video=queue.listTasks().find(t=>t.kind==="sceneVideo")!;
+ if(kind==="scene-edit")state.draft!.scenes[0].summary="사용자 수정";if(kind==="role-edit")state.draft!.workflowTargets!.video!.workflowSha256='f'.repeat(64);if(kind==="scalar-edit")state.draft!.scenes[0].videoWorkflowInputs={assets:{},referenceGroups:{},values:{fps:30},rolePrompts:{}};if(kind==="board-edit")state.draft!.scenes[0].storyboardPath="D:/cpu-projects/CPU/user-board.png";if(kind==="save-failed")state.attachError=true;release();const done=await finish(queue,video.id);expect(done.status).toBe("failed");expect(done.externalCheckpoint?.preparedWorkflowPayload).toBeUndefined();expect(submits()).toHaveLength(0);if(kind==="scene-edit")expect(state.draft!.scenes[0].summary).toBe("사용자 수정");
+});
+it("R1 응답 불명은 확정된 fingerprint를 유지하고 재제출하지 않습니다",async()=>{const {queue,batch}=await setupPreparedScene();state.submitError=true;await batch.enqueueProjectGeneration("p",state.draft!,{images:false,videos:true});const video=queue.listTasks().find(t=>t.kind==="sceneVideo")!;const failed=await finish(queue,video.id);expect(failed.externalCheckpoint?.phase).toBe("submitting");const frozen=JSON.stringify(failed.externalCheckpoint?.preparedWorkflowPayload);state.submitError=false;queue.retryTask(video.id);expect((await finish(queue,video.id)).error).toContain("중복 생성");expect(JSON.stringify(queue.getTask(video.id)!.externalCheckpoint?.preparedWorkflowPayload)).toBe(frozen);expect(submits()).toHaveLength(1);});
+
+it("R1 준비 전에 선택한 참조의 실제 파일 hash가 바뀌면 확정하지 않습니다",async()=>{const {queue,batch}=await setupPreparedScene();state.draft!.scenes[0].videoWorkflowInputs={assets:{firstFrame:"base"},referenceGroups:{},values:{},rolePrompts:{}};let release!:()=>void;queue.registerTaskRunner("cpu-ref-block",async()=>new Promise<void>(r=>{release=r;}));queue.enqueueTasks([{kind:"cpu-ref-block",lane:"media",projectId:"p",projectTitle:"CPU",label:"CPU",payload:{}}]);await tick();await batch.enqueueProjectGeneration("p",state.draft!,{images:false,videos:true});state.assetSha='f'.repeat(64);release();const done=await finish(queue,queue.listTasks().find(t=>t.kind==="sceneVideo")!.id);expect(done.error).toContain("reference_changed");expect(submits()).toHaveLength(0);});
+it("R1 이미 작성한 수동 video·board 문장을 준비 작업이 덮어쓰지 않습니다",async()=>{const {queue,batch}=await setupPreparedScene();const scene=state.draft!.scenes[0] as import("./projectTypes").Scene&{videoPromptEn:string};scene.videoPromptEn="User video prompt";scene.storyboardPromptEn="User board prompt";await batch.enqueueProjectGeneration("p",state.draft!,{images:false,videos:true});const done=await finish(queue,queue.listTasks().find(t=>t.kind==="sceneVideo")!.id);expect(done.status,done.error).toBe("done");expect((done.externalCheckpoint!.preparedWorkflowPayload as any).input.prompt).toBe("User video prompt");expect(state.draft!.scenes[0].storyboardPromptEn).toBe("User board prompt");expect((state.draft!.scenes[0] as any).videoPromptEn).toBe("User video prompt");});
+it.each([false,true])("F2 한국어 수동 board/video(%s) 본문은 영문 강제 guard 없이 그대로 전달합니다",async video=>{const {queue,batch}=await setupPreparedScene();const scene=state.draft!.scenes[0] as import("./projectTypes").Scene&{videoPromptKo?:string};scene.storyboardPromptKo="카메라 인물을 따라간다";scene.storyboardPromptEn="";if(video)scene.videoPromptKo="사용자가 작성한 한국어 영상";await batch.enqueueProjectGeneration("p",state.draft!,{images:false,videos:true});const done=await finish(queue,queue.listTasks().find(t=>t.kind==="sceneVideo")!.id);expect(done.status,done.error).toBe("done");expect((done.externalCheckpoint!.preparedWorkflowPayload as any).input.prompt).toBe(video?scene.videoPromptKo:scene.storyboardPromptKo);expect(scene.storyboardPromptEn).toBe("");expect(scene.storyboardPromptKo).toBe("카메라 인물을 따라간다");});
+it("F1 일반 검토 preset의 사용자 진술 저장 writer가 exact project/model/files 범위를 보존합니다",async()=>{await setup();const library=await import("./comfyWorkflowLibrary");expect(typeof (library as any).recordWorkflowUserAuthorization).toBe("function");const original=state.native.getMockImplementation()!;const option={id:"cpu-image",modelRuleId:"flux2",files:[{category:"diffusion_models",name:"cpu-model.safetensors",sha256:"a".repeat(64)}]};state.native.mockImplementation(async(command,args)=>command==="comfy_workflow_authorization_options"?{registrySha256:"b".repeat(64),presets:[option]}:original(command,args));const raw={projectId:"p",presetId:option.id,modelRuleId:option.modelRuleId,registrySha256:"b".repeat(64),files:option.files,statement:{kind:"user-reported",evidence:"Synthetic CPU statement only; never real authorization",sourceThreadId:"cpu-fixture",reportedAtUtc:"2026-10-07T00:00:00Z"}};const grants=await (library as any).recordWorkflowUserAuthorization(raw);expect(grants).toEqual([expect.objectContaining({projectId:"p",modelRuleId:"flux2",...raw.statement,...option.files[0]})]);expect(submits()).toHaveLength(0);await expect((library as any).recordWorkflowUserAuthorization({...raw,modelRuleId:"wrong"})).rejects.toThrow();await expect((library as any).recordWorkflowUserAuthorization({...raw,files:[{...option.files[0],sha256:"c".repeat(64)}]})).rejects.toThrow();});
+it("F1 실제 controller 등록부의 일반 허가 기록 도구는 사용자 진술과 revision을 검사합니다",async()=>{await setup();const original=state.native.getMockImplementation()!,option={id:"cpu-video",modelRuleId:"flux2",files:[{category:"diffusion_models",name:"cpu-model.safetensors",sha256:"a".repeat(64)}]};state.native.mockImplementation(async(command,args)=>command==="comfy_workflow_authorization_options"?{registrySha256:"b".repeat(64),presets:[option]}:original(command,args));const input={projectId:"p",expectedRevision:"r1",presetId:option.id,modelRuleId:option.modelRuleId,registrySha256:"b".repeat(64),files:option.files,statement:{kind:"user-reported",evidence:"CPU controller statement only",sourceThreadId:"cpu-fixture",reportedAtUtc:"2026-10-07T00:00:00Z"}},api=await import("./appControlRegistry");const result:any=await api.dispatchAppControl("tools/call",{name:"workflow_authorization_record",arguments:input});expect(result.isError).not.toBe(true);expect(result.structuredContent.recorded).toHaveLength(1);expect(result.structuredContent.independentLicenseVerification).toBe(false);const rejected:any=await api.dispatchAppControl("tools/call",{name:"workflow_authorization_record",arguments:{...input,expectedRevision:"stale"}});expect(rejected.isError).toBe(true);expect(submits()).toHaveLength(0);});
+it.each([false,true])("F4 두 활성 역할의 서로 다른 본문·negative와 중복 loader 파일 요구를 adapter/native 요청까지 보존합니다 V2=%s",async v2=>{
+ const {queue,api}=await setup();await imageWorkflow();const entry=(await import("./comfyWorkflowLibrary")).listWorkflowLibrary()[0],graph=structuredClone(state.graphs.get(entry.source.workflowPath)!);
+ for(const[id,node]of Object.entries(structuredClone(graph))){for(const[key,value]of Object.entries(node.inputs))if(Array.isArray(value))node.inputs[key]=[String(Number(value[0])+10),value[1]];graph[String(Number(id)+10)]=node;}
+ const selection=structuredClone(entry.selection);selection.slots.push({id:"secondary-positive",semantic:"positive",nodeId:"14",input:"text",required:true},{id:"secondary-negative",semantic:"negative",nodeId:"15",input:"text",required:true});selection.promptRoles.push({...selection.promptRoles[0],id:"secondary",loaderNodeIds:["11"],positiveSlotIds:["secondary-positive"],negativeSlotIds:["secondary-negative"]});selection.outputNodeIds.push("19");
+ const target=await registerFixture(graph,{...entry.source,workflowId:"multi",workflowPath:"C:/cpu-fixture/multi.json"},selection);if(v2){const library=await import("./comfyWorkflowLibrary"),found=library.listWorkflowLibrary().find(e=>e.source.workflowId===target.workflowId)!;const envelope=await(await import("./comfyWorkflowInspectionV2")).migrateWorkflowSelectionV1ToV2(selection);const rebuilt=await(await import("./comfyWorkflowVersioned")).buildVersionedComfyWorkflowManifest({text:JSON.stringify(graph),source:found.source,selection,selectionEnvelope:envelope,environment:state.environment,checkedAtUtc:"2026-10-07T00:00:00Z"});expect(rebuilt.inspection.issues).toEqual([]);found.selectionEnvelope=envelope;found.manifest=rebuilt.manifest;window.localStorage.setItem("ai-video-storage.comfy-workflow-library.v1",JSON.stringify([found]));}
+ const raw={...request(target,"multi-role"),rolePrompts:{secondary:{positive:"Blue sky",negative:"No clouds"}}};const job=await api.enqueueControlComfy(raw),done=await finish(queue,job.jobId);expect(done.status,done.error).toBe("done");const admitted=state.native.mock.calls.find(([command])=>command==="comfy_admit_generation")![1].request;expect(admitted.provenance.rolePrompts).toEqual(raw.rolePrompts);expect(admitted.bindings).toContainEqual({nodeId:"14",input:"text",value:"Blue sky"});expect(admitted.bindings).toContainEqual({nodeId:"15",input:"text",value:"No clouds"});expect(admitted.manifest.weightRequirements).toHaveLength(6);
+});
+
+it("F1 controller는 일반 허가 범위를 실제 readonly options 도구로 조회한 뒤 진술 writer에 전달합니다",async()=>{
+ await setup();const original=state.native.getMockImplementation()!,options={registrySha256:"b".repeat(64),presets:[{id:"cpu-video",modelRuleId:"flux2",files:[{category:"diffusion_models",name:"cpu-model.safetensors",sha256:"a".repeat(64)}]}]};state.native.mockImplementation(async(command,args)=>command==="comfy_workflow_authorization_options"?options:original(command,args));
+ const {dispatchAppControl,controlTools}=await import("./appControlRegistry");const tool=controlTools.find(t=>t.name==="workflow_authorization_options")!;expect(tool.annotations.readOnlyHint).toBe(true);
+ const read:any=await dispatchAppControl("tools/call",{name:tool.name,arguments:{}});expect(read.isError).not.toBe(true);expect(read.structuredContent).toEqual(options);expect(localStorage.getItem("ai-video-storage.workflow-project-authorizations.v1")).toBeNull();expect(submits()).toHaveLength(0);
+ const preset=read.structuredContent.presets[0];const result:any=await dispatchAppControl("tools/call",{name:"workflow_authorization_record",arguments:{projectId:"p",expectedRevision:"r1",registrySha256:read.structuredContent.registrySha256,presetId:preset.id,modelRuleId:preset.modelRuleId,files:preset.files,statement:{kind:"user-reported",evidence:"Synthetic CPU options-to-writer statement only",sourceThreadId:"cpu-fixture",reportedAtUtc:"2026-10-07T00:00:00Z"}}});expect(result.isError).not.toBe(true);expect(result.structuredContent.recorded[0].name).toBe(preset.files[0].name);expect(submits()).toHaveLength(0);
+});
+
+async function fixedAlignedVideoWorkflow(v2:boolean,conflict=false){
+ const old=await preparedVideoWorkflow(),library=await import("./comfyWorkflowLibrary"),base=library.listWorkflowLibrary().find(entry=>entry.source.workflowId===old.workflowId)!,graph=structuredClone(state.graphs.get(base.source.workflowPath)!);
+ delete graph['20'];graph['21'].inputs.source=['23',0];
+ graph['22']={class_type:"LoadVideo",inputs:{file:"cpu-guide.mp4"}};graph['23']={class_type:"GetVideoComponents",inputs:{video:['22',0]}};
+ graph['9'].inputs.length=36;state.environment.catalog.CreateVideo.input.required!.length=["INT",{min:1,max:1000}];
+ state.environment.catalog.LoadVideo={input:{required:{file:["STRING"]}},output:["VIDEO"],python_module:"comfy_extras.nodes_video"};
+ state.environment.catalog.GetVideoComponents={input:{required:{video:["VIDEO"]}},output:["IMAGE","AUDIO","FLOAT"],python_module:"comfy_extras.nodes_video"};
+ const selection:WorkflowSelection={...structuredClone(base.selection),slots:base.selection.slots.filter(slot=>!["fps","firstFrame"].includes(slot.semantic)),referenceGroups:[{id:"guide",role:"cameraGuide",mediaKind:"video",minItems:1,maxItems:1,slotIds:["guide"],strategy:"fixed-slots",order:"explicit",identity:"none"}]};
+ selection.slots.push({id:"guide",semantic:"cameraGuide",nodeId:'22',input:"file",required:true,alignment:"exact"});
+ if(conflict){graph['9'].inputs.second_fps=30;state.environment.catalog.CreateVideo.input.required!.second_fps=["FLOAT"];selection.slots.push({id:"fps",semantic:"fps",nodeId:'9',input:"fps",required:true,defaultValue:24},{id:"secondFps",semantic:"fps",nodeId:'9',input:"second_fps",required:true,defaultValue:30});}
+ const source={...base.source,workflowId:`fixed-align-${v2}-${conflict}`,workflowPath:`C:/cpu-fixture/fixed-align-${v2}-${conflict}.json`};
+ const v1=await registerFixture(graph,source,selection);let target=v1;
+ if(v2){const envelope=await(await import("./comfyWorkflowInspectionV2")).migrateWorkflowSelectionV1ToV2(selection);const built=await(await import("./comfyWorkflowInspectionV2")).buildComfyWorkflowManifestV2({text:JSON.stringify(graph),source,selectionEnvelope:envelope,environment:state.environment,checkedAtUtc:"2026-10-07T00:00:00Z"});expect(built.inspection.issues).toEqual([]);const entries=library.listWorkflowLibrary();const index=entries.findIndex(entry=>entry.source.workflowId===source.workflowId);entries[index]={...entries[index],selectionEnvelope:envelope,manifest:built.manifest};localStorage.setItem("ai-video-storage.comfy-workflow-library.v1",JSON.stringify(entries));target=built.manifest!.promptTarget;}
+ state.draft!.scenes[0].cuts[0].videoPromptWorkflow=target;state.draft!.scenes[0].cuts[0].videos.push({id:"video-ref",filePath:"D:/cpu-projects/CPU/guide.mp4",name:"CPU guide",thumb:"",file:null} as any);
+ const native=state.native.getMockImplementation()!;state.native.mockImplementation(async(command,args)=>command==="comfy_workflow_asset_fact"&&args.assetId==="video-ref"?{assetId:args.assetId,projectId:args.projectId,path:args.path,kind:"video",sha256:state.assetSha,bytes:100,decodable:true,width:256,height:256,fps:24,frameCount:36,durationSeconds:1.5}:native(command,args));return target;
+}
+it.each([false,true])("V5-F1 고정 fps/length의 V2=%s exact group 참조가 실제 공통 UI/조종기 adapter를 통과합니다",async v2=>{
+ const {queue,api}=await setup(),target=await fixedAlignedVideoWorkflow(v2);const job=await api.enqueueControlComfy({...request(target,`fixed-alignment-${v2}`),kind:"video",referenceGroups:{guide:["video-ref"]}});const done=await finish(queue,job.jobId);expect(done.status,done.error).toBe("done");const admitted=state.native.mock.calls.find(([command])=>command==="comfy_admit_generation")![1].request;expect(admitted.manifest.schemaVersion).toBe(v2?2:1);expect(admitted.bindings.some((b:any)=>b.input==="fps"||b.input==="length")).toBe(false);expect(admitted.provenance.assets).toEqual([{slotId:"guide",assetId:"video-ref",sha256:state.assetSha}]);expect(submits()).toHaveLength(1);
+});
+it.each([false,true])("V5-F1 V2=%s 다중 semantic 시간축 충돌은 UI/조종기 접수 전에 차단합니다",async v2=>{
+ const {api}=await setup(),target=await fixedAlignedVideoWorkflow(v2,true);await expect(api.enqueueControlComfy({...request(target,`conflicting-alignment-${v2}`),kind:"video",referenceGroups:{guide:["video-ref"]}})).rejects.toThrow("reference_timebase_ambiguous");expect(submits()).toHaveLength(0);expect(state.native.mock.calls.some(([command])=>command==="comfy_admit_generation")).toBe(false);
 });

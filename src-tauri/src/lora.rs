@@ -333,6 +333,7 @@ pub async fn lora_download(
     url: String,
     file_name: String,
 ) -> Res<String> {
+    require_comfy_lora_selection()?;
     if !url.starts_with("https://") {
         return Err("https 주소만 받습니다.".into());
     }
@@ -358,6 +359,10 @@ pub async fn lora_download(
             Err(message)
         }
     }
+}
+
+fn require_comfy_lora_selection() -> Res<()> {
+    Err("legacy_lora_download_disabled: 설치된 ComfyUI LoRA 파일과 강도만 선택하세요. 인증 설정은 보존됩니다.".into())
 }
 
 /// 사용자가 브라우저로 직접 받아 둔 파일을 폴더로 들입니다.
@@ -1100,6 +1105,7 @@ pub async fn lora_download_control(
     app: AppHandle, engine: String, repo: String, file: String, transfer_id: String,
     expected_sha256: Option<String>,
 ) -> Res<ControlDownloadResult> {
+    require_comfy_lora_selection()?;
     validate_control_download(&engine, &repo, &file, expected_sha256.as_deref())?;
     if transfer_id.is_empty() || transfer_id.len() > 300 { return Err("다운로드 작업 ID가 올바르지 않습니다.".into()); }
     let dir = lora_dir(&app, &engine)?;

@@ -1,9 +1,12 @@
+import { appPromptSelection } from "./appPromptRequest";
+import { promptStamp, canonicalPromptModel, assertPromptSelection } from "./promptModelSelection";
+import { targetModelOf } from "./modelRules";
+import { assertDirectGenerationEnabled } from "./generationRoutingPolicy";
 import { pickedCharacterRefs } from "@/lib/promptPayloads";
 import { toast } from "sonner";
 import { composeInMagnific } from "@/lib/magnificCompose";
 import { safeFileName, saveProjectMediaAsset, type ProjectAssetType } from "@/lib/mediaLibrary";
 import { loadPrecision, type LocalEngineId } from "@/lib/localEngines";
-import { isEngineIncluded } from "@/lib/edition";
 import { lorasToRun, withLoraTriggers } from "@/lib/localLoras";
 import { runLocalToProject } from "@/lib/localOutput";
 import { generateWithMagnific, uploadToMagnific } from "@/lib/magnificMcp";
@@ -21,14 +24,12 @@ import {
   type StoryboardSwap,
 } from "@/lib/storyboardSheet";
 import { fileStemOf } from "@/components/ReferenceTagBar";
-import { readProject, writeProject } from "@/lib/projectWrite";
+import { readProject, writeProject, writeProjectAndConfirm } from "@/lib/projectWrite";
 import { enqueueTasks, isStopping, registerTaskRunner, setTaskResult, type NewTask } from "@/lib/taskQueue";
 import type { Cut, ProjectDraft, Scene } from "@/lib/projectTypes";
 
 /**
  * **한 번에 뽑기** — 작품 하나를 **순서대로** 끝까지 뽑습니다.
- *
- *
  *
  * # 순서가 곧 품질입니다
  *
@@ -65,10 +66,15 @@ export const SCENE_VIDEO_TASK = "sceneVideo";
  * - `magnific-mcp` — 마그니픽 **MCP** 로 끝까지 뽑기(건당 과금, 손이 안 듦).
  * - 그 밖 — 이 컴퓨터의 로컬 엔진.
  */
-export type BatchEngine = "magnific" | "magnific-mcp" | LocalEngineId;
+export type BatchEngine = "magnific" | "magnific-mcp" | "comfy" | LocalEngineId;
 
 /** 차려 놓기만 하는 길인가 — 화면 문구와 걸음 안내가 이걸로 갈립니다. */
 export const isSetUpOnly = (engine: BatchEngine) => engine === "magnific";
+
+function comfyEndpointSnapshot(): string {
+  try { const raw=JSON.parse(window.localStorage.getItem("ai-video-storage.comfy-generation.v1")??"{}");return typeof raw.baseUrl==="string"?raw.baseUrl.trim():"http://127.0.0.1:8188"; }
+  catch { return "http://127.0.0.1:8188"; }
+}
 
 /**
  * 이 작품이 고른 **모델과 해상도**. 안 고른 칸은 아예 안 보냅니다 —
@@ -79,16 +85,18 @@ export function aspectOf(draft: ProjectDraft | null, kind: "image" | "video"): s
   return (kind === "image" ? draft?.aspect?.image : draft?.aspect?.video) || "16:9";
 }
 
-async function sizeOf(draft: ProjectDraft | null, kind: "image" | "video") {
+async function sizeOf(draft: ProjectDraft | null, kind: "image" | "video", overrideModel?:string) {
   const picked = draft?.magnific ?? {};
-  const model = (kind === "image" ? picked.imageModel : picked.videoModel) || undefined;
+  const selected = overrideModel || (kind === "image" ? picked.imageModel : picked.videoModel) || undefined;
+  if(kind==="image")(await import("./nanoBanana21Profile")).assertNanoBanana21MagnificMapping(canonicalPromptModel(selected));
+  const model = targetModelOf(canonicalPromptModel(selected))?.magnific ?? selected;
   let resolution = (kind === "image" ? picked.imageResolution : picked.videoResolution) || undefined;
   /*
     모델을 골랐는데 해상도를 안 골랐으면 **그 모델의 첫 값**으로 채웁니다.
     마그니픽은 모델을 못 박으면 해상도를 **반드시** 요구합니다(`requiredInputs`) — 빈 채로
     보내면 거절당하는데, 사람은 「모델만 골랐을 뿐」 이라 까닭을 짐작하기 어렵습니다.
   */
-  if (model && !resolution) {
+  if (model && !resolution && !(kind === "image" && canonicalPromptModel(selected) === "nano-banana-2.1")) {
     const models = await loadMagnificModels(kind).catch(() => []);
     resolution = models.find((item) => item.slug === model)?.resolutions[0];
   }
@@ -107,6 +115,10 @@ interface Common {
   owner: string;
   stem: string;
   engine: BatchEngine;
+  selectionStamp?:string;
+  baseUrl?:string;
+  workflowPayload?:import("./comfyWorkflowRuntime").WorkflowQueuePayload;
+  workflowPreparation?:import("./workflowScenePreparation").SceneWorkflowPreparation;
 }
 
 interface CharacterSheetPayload extends Common {
@@ -124,6 +136,7 @@ interface SceneBoardPayload {
   projectName: string;
   sceneId: string;
   owner: string;
+  workflowPreparation?:import("./workflowScenePreparation").SceneWorkflowPreparation;
 }
 
 interface SceneVideoPayload extends Common {
@@ -134,13 +147,12 @@ interface SceneVideoPayload extends Common {
 /**
  * 프로젝트가 고른 생성기. 안 고른 채로 돌리면 마그니픽입니다(여태 기본값).
  *
- * 저장된 값이 **이 판에 없는 엔진**이면(비공개판에서 만든 프로젝트를 공개판에서 열었을 때 `anima`)
- * 마그니픽으로 돌립니다 — 화면 목록에 없는 엔진으로 줄을 세우면 Rust 가 「이 판에는 포함되지 않은
- * 엔진입니다」 로 컷마다 실패합니다.
+ * 저장된 명시 엔진은 그대로 보존합니다. 사용할 수 없으면 접수 전에 오류를 보이며,
+ * 다른 생성기로 자동 전환하지 않습니다.
  */
 export function enginesOf(draft: ProjectDraft): { image: BatchEngine; video: BatchEngine } {
   const pick = (value: string | undefined): BatchEngine =>
-    value && (value.startsWith("magnific") || isEngineIncluded(value)) ? (value as BatchEngine) : "magnific";
+    value ? (value as BatchEngine) : "magnific";
   return {
     image: pick(draft.batchEngines?.image),
     video: pick(draft.batchEngines?.video),
@@ -201,15 +213,16 @@ export function scenesToGenerate(draft: ProjectDraft, redo = false) {
  * 여기서는 **차례만** 정합니다. 「어떤 그림을 레퍼런스로 올릴까」 는 각자 돌아가는
  * 순간에 정합니다 — 줄에 세울 때는 아직 뽑히지 않은 그림들이니까요.
  */
-export function enqueueProjectGeneration(
+export async function enqueueProjectGeneration(
   projectId: string,
   draft: ProjectDraft,
   what: { images?: boolean; videos?: boolean; redo?: boolean } = { images: true, videos: true },
-): { characters: number; cuts: number; scenes: number } {
+): Promise<{ characters: number; cuts: number; scenes: number }> {
   const projectName = projectFolderName(projectId, draft.title);
   const engines = enginesOf(draft);
   const title = draft.title || "이름 없는 작품";
   const jobs: NewTask[] = [];
+  const picked=(target:import("./appPromptRequest").AppPromptTarget)=>{const selection=appPromptSelection(draft,target);assertPromptSelection(selection);if(!["magnific","magnific-mcp","comfy"].includes(selection.route))assertDirectGenerationEnabled(selection.route);if(selection.route==="comfy"&&!selection.workflowTarget)throw new Error("workflow_role_required: 일괄 실행 전에 역할을 선택하세요.");return {engine:selection.route as BatchEngine,selectionStamp:promptStamp(selection),...(selection.route==="comfy"?{baseUrl:comfyEndpointSnapshot()}: {})};};
   const setUp = isSetUpOnly(engines.image);
 
   let characters = 0;
@@ -234,7 +247,7 @@ export function enqueueProjectGeneration(
           name: person.name || "인물",
           owner: person.name || "인물",
           stem: person.name || "인물",
-          engine: engines.image,
+          ...picked({kind:"character",id:person.id}),
         } satisfies CharacterSheetPayload,
       });
     });
@@ -260,7 +273,7 @@ export function enqueueProjectGeneration(
           cutOrder: cut.order,
           owner,
           stem: `${owner}_컷${cut.order}`,
-          engine: engines.image,
+          ...picked({kind:"cutImage",sceneId:scene.id,cutId:cut.id}),
         } satisfies CutImagePayload,
       });
     });
@@ -303,12 +316,27 @@ export function enqueueProjectGeneration(
           sceneTitle: scene.title || `장면 ${index + 1}`,
           owner,
           stem: `${owner}_씬영상`,
-          engine: engines.video,
+          ...picked({kind:"sceneVideo",sceneId:scene.id}),
         } satisfies SceneVideoPayload,
       });
     });
   }
 
+  // 입력 전체를 접수 때 고정해야 대기 중 편집을 새 생성으로 몰래 반영하지 않습니다.
+  for(const job of jobs){
+    const payload=job.payload as Common & {characterId?:string;cutId?:string;sceneId?:string};
+    if(payload.engine!=="comfy")continue;
+    if(job.kind===SCENE_VIDEO_TASK){
+      const scene=draft.scenes.find(item=>item.id===payload.sceneId);if(!scene)throw new Error("workflow_batch_target_missing");
+      const preparation=await(await import("./workflowScenePreparation")).freezeSceneWorkflowPreparation(draft,scene,projectId,projectName,payload.baseUrl!);
+      payload.workflowPreparation=preparation;
+      const board=jobs.find(item=>item.kind===SCENE_BOARD_TASK&&(item.payload as SceneBoardPayload).sceneId===scene.id);if(!board)throw new Error("workflow_preparation_task_missing");(board.payload as SceneBoardPayload).workflowPreparation=preparation;continue;
+    }
+    const {prepareWorkflowQueuePayload,workflowInputForAppTarget}=await import("./comfyWorkflowRuntime");
+    const scene=draft.scenes.find(item=>item.id===payload.sceneId||item.cuts.some(cut=>cut.id===payload.cutId));
+    const target:import("./appPromptRequest").AppPromptTarget=payload.characterId?{kind:"character",id:payload.characterId}:payload.cutId&&scene?{kind:"cutImage",sceneId:scene.id,cutId:payload.cutId}:payload.sceneId?{kind:"sceneVideo",sceneId:payload.sceneId}:(()=>{throw new Error("workflow_batch_target_missing");})();
+    payload.workflowPayload=await prepareWorkflowQueuePayload(workflowInputForAppTarget(draft,target,projectId,`batch-${crypto.randomUUID()}`));
+  }
   const made = enqueueTasks(jobs);
   return made ? { characters, cuts, scenes } : { characters: 0, cuts: 0, scenes: 0 };
 }
@@ -471,6 +499,11 @@ async function magnificMake(
   taskId: string,
 ) {
   const ids: string[] = [];
+  if (input.kind === "image") {
+    const { assertMagnificMcpImageReferenceCount, assertMagnificMcpImageInputs } = await import("./magnificImageInputs");
+    assertMagnificMcpImageReferenceCount(input.references.length);
+    assertMagnificMcpImageInputs({mode:input.model,resolution:input.resolution,aspectRatio:input.aspect || "16:9",quality:input.quality,count:1});
+  }
   if (input.kind === "video") {
     const model = findMagnificVideoModel(await loadMagnificModels("video"), input.model);
     assertMagnificVideoInputs(model, {
@@ -552,6 +585,10 @@ registerTaskRunner(CHARACTER_SHEET_TASK, async (raw, report, task) => {
   const draft = readProject(payload.projectId);
   const person = draft?.characters.find((item) => item.id === payload.characterId);
   if (!person) throw new Error("그 인물 카드를 찾지 못했습니다.");
+  const selection=appPromptSelection(draft!,{kind:"character",id:person.id});
+  if(payload.selectionStamp&&payload.selectionStamp!==promptStamp(selection))throw new Error("batch_model_changed: 대기 중 인물 모델이 바뀌었습니다. 다시 요청하세요.");
+  if(payload.engine==="comfy"){const {executeRegisteredWorkflow,workflowInputForAppTarget}=await import("./comfyWorkflowRuntime");if(!payload.workflowPayload)throw new Error("workflow_batch_snapshot_missing: 이전 작업은 새로 접수하세요.");return executeRegisteredWorkflow(workflowInputForAppTarget(draft!,{kind:"character",id:person.id},payload.projectId,payload.workflowPayload.input.operationId),report,{...task,payload:payload.workflowPayload});}
+  if(!payload.engine.startsWith("magnific"))assertDirectGenerationEnabled(payload.engine);
   const prompt = (person.promptEn || person.promptKo || "").trim();
   if (!prompt) throw new Error("이 인물에 프롬프트가 없습니다.");
 
@@ -559,6 +596,8 @@ registerTaskRunner(CHARACTER_SHEET_TASK, async (raw, report, task) => {
     report({ step: "마그니픽에 차려 놓는 중" });
     await composeInMagnific({
       kind: "image",
+      requestedImageModel: selection.modelId,
+      model: targetModelOf(selection.modelId)?.magnific,
       prompt,
       referencePaths: (person.references ?? [])
         .map((item) => item.filePath)
@@ -576,7 +615,7 @@ registerTaskRunner(CHARACTER_SHEET_TASK, async (raw, report, task) => {
     payload.engine === "magnific-mcp"
       ? await magnificMake(
           payload,
-          { kind: "image", prompt, references: refs, assetType: "character-generated", ...(await sizeOf(draft, "image")) },
+          { kind: "image", prompt, references: refs, assetType: "character-generated", ...(await sizeOf(draft, "image", person.promptModel)) },
           report,
           () => isStopping(task.id),
           task.id,
@@ -599,7 +638,11 @@ registerTaskRunner(CUT_IMAGE_TASK, async (raw, report, task) => {
     }),
   );
   if (!found || !draft) throw new Error("그 컷을 찾지 못했습니다.");
-  const { cut } = found;
+  const { cut,scene } = found;
+  const selection=appPromptSelection(draft,{kind:"cutImage",sceneId:scene.id,cutId:cut.id});
+  if(payload.selectionStamp&&payload.selectionStamp!==promptStamp(selection))throw new Error("batch_model_changed: 대기 중 컷 모델이 바뀌었습니다. 다시 요청하세요.");
+  if(payload.engine==="comfy"){const {executeRegisteredWorkflow,workflowInputForAppTarget}=await import("./comfyWorkflowRuntime");if(!payload.workflowPayload)throw new Error("workflow_batch_snapshot_missing: 이전 작업은 새로 접수하세요.");return executeRegisteredWorkflow(workflowInputForAppTarget(draft,{kind:"cutImage",sceneId:scene.id,cutId:cut.id},payload.projectId,payload.workflowPayload.input.operationId),report,{...task,payload:payload.workflowPayload});}
+  if(!payload.engine.startsWith("magnific"))assertDirectGenerationEnabled(payload.engine);
 
   /*
     ── 레퍼런스는 **지금** 정합니다 ──────────────────────────────────────
@@ -639,6 +682,8 @@ registerTaskRunner(CUT_IMAGE_TASK, async (raw, report, task) => {
     report({ step: `레퍼런스 ${references.length}장을 올리는 중` });
     await composeInMagnific({
       kind: "image",
+      requestedImageModel: selection.modelId,
+      model: targetModelOf(selection.modelId)?.magnific,
       prompt,
       referencePaths: references,
       owner: { kind: "cut", name: `컷 ${payload.cutOrder}`, cutId: payload.cutId },
@@ -659,7 +704,7 @@ registerTaskRunner(CUT_IMAGE_TASK, async (raw, report, task) => {
             MCP 쪽은 `@파일이름` 이 아니라 creation id 로 겁니다. 그래서 글에는 맨
             프롬프트만 보냅니다 — 칩을 글로 적으면 생성기가 그 글자를 그립니다.
           */
-          { kind: "image", prompt: base, references, assetType: "scene-cut", ...(await sizeOf(draft, "image")) },
+          { kind: "image", prompt: base, references, assetType: "scene-cut", ...(await sizeOf(draft, "image", cut.promptModel)) },
           report,
           () => isStopping(task.id),
           task.id,
@@ -677,6 +722,8 @@ registerTaskRunner(SCENE_BOARD_TASK, async (raw, report, task) => {
   const draft = readProject(payload.projectId);
   const scene = draft?.scenes.find((item) => item.id === payload.sceneId);
   if (!scene || !draft) throw new Error("그 장면을 찾지 못했습니다.");
+
+  if(payload.workflowPreparation)(await import("./workflowScenePreparation")).assertScenePreparationSource(payload.workflowPreparation,draft);
 
   const cells = storyboardCells(scene, draft.imageMarks);
   if (!cells.length)
@@ -740,20 +787,24 @@ registerTaskRunner(SCENE_BOARD_TASK, async (raw, report, task) => {
       .filter((name): name is string => Boolean(name)),
   });
   // 다시 돌려도 되는 갱신 함수입니다 — `saved.path`·`prompt` 는 닫힌 값이라 시도마다 같습니다.
-  const wrote = await writeProject(payload.projectId, (current) => ({
+  const update=(current:ProjectDraft)=> {
+    if(payload.workflowPreparation){(awaitPreparationAssert)(payload.workflowPreparation,current);}
+    return {
     scenes: current.scenes.map((item) =>
       item.id === payload.sceneId
         ? {
             ...item,
             storyboardPath: saved.path,
             storyboardAt: new Date().toISOString(),
-            storyboardPromptKo: prompt.ko,
-            storyboardPromptEn: prompt.en,
+            ...(item.storyboardPromptKo||item.storyboardPromptEn?{}:{storyboardPromptKo:prompt.ko,storyboardPromptEn:prompt.en}),
           }
         : item,
     ),
-  }));
-  if (!wrote.draft) throw notAttached("장면", saved.path, wrote.why);
+  };};
+  const awaitPreparationAssert=payload.workflowPreparation?(await import("./workflowScenePreparation")).assertScenePreparationSource:()=>{};
+  const wrote = payload.workflowPreparation?await writeProjectAndConfirm(payload.projectId,update):await writeProject(payload.projectId,update);
+  if (!wrote.draft) throw notAttached("장면", saved.path, wrote.why??"저장 확인 실패");
+  if(payload.workflowPreparation){if(!("persisted" in wrote)||!wrote.persisted)throw new Error("workflow_preparation_save_not_confirmed");const savedScene=wrote.draft.scenes.find(item=>item.id===payload.sceneId)!;const receipt=(await import("./workflowScenePreparation")).scenePreparationReceipt(payload.workflowPreparation,savedScene);setTaskResult(task.id,{paths:[saved.path],data:{scenePreparationReceipt:receipt}});}
   report({ step: `컷 ${cells.length}칸 · ${prompt.seconds.toFixed(1)}초` });
 });
 
@@ -809,8 +860,9 @@ registerTaskRunner(SCENE_VIDEO_TASK, async (raw, report, task) => {
   const draft = readProject(payload.projectId);
   const scene = draft?.scenes.find((item) => item.id === payload.sceneId);
   if (!scene) throw new Error("그 장면을 찾지 못했습니다.");
-  if (!scene.storyboardPath || !scene.storyboardPromptEn)
+  if (!scene.storyboardPath)
     throw new Error("스토리보드가 아직 없습니다 — 앞 걸음(스토리보드 굽기)이 끝나야 합니다.");
+  if(payload.engine!=="comfy"&&!scene.storyboardPromptEn)throw new Error("scene_video_prompt_language_conflict: 이 실행 경로의 영문 입력이 없습니다. 기존 한국어 수동 문장을 보존했습니다. 사용할 본문을 명시적으로 작성하거나 재작성을 요청하세요.");
 
   /*
     ── 러닝타임은 **씬이 정합니다** ──────────────────────────────────────
@@ -831,12 +883,18 @@ registerTaskRunner(SCENE_VIDEO_TASK, async (raw, report, task) => {
       ) * 2,
     ) / 2,
   );
-  const prompt = scene.storyboardPromptEn.trim();
+  const selection=appPromptSelection(draft!,{kind:"sceneVideo",sceneId:scene.id});
+  if(payload.selectionStamp&&payload.selectionStamp!==promptStamp(selection))throw new Error("batch_model_changed: 대기 중 영상 모델이 바뀌었습니다. 다시 요청하세요.");
+  if(payload.engine==="comfy"){const {executeRegisteredWorkflow,workflowInputForAppTarget}=await import("./comfyWorkflowRuntime");const prepared=payload.workflowPreparation?await(await import("./workflowScenePreparation")).finalizeSceneWorkflowPreparation(payload.workflowPreparation,draft!,task):payload.workflowPayload;if(!prepared)throw new Error("workflow_batch_snapshot_missing: 이전 작업은 새로 접수하세요.");const current=workflowInputForAppTarget(draft!,{kind:"sceneVideo",sceneId:scene.id},payload.projectId,prepared.input.operationId);if(payload.workflowPreparation){current.assets=prepared.input.assets;current.referenceGroups=prepared.input.referenceGroups;}return executeRegisteredWorkflow(current,report,{...task,payload:prepared});}
+  if(!payload.engine.startsWith("magnific"))assertDirectGenerationEnabled(payload.engine);
+  const prompt = scene.storyboardPromptEn!.trim();
 
   if (payload.engine === "magnific") {
     report({ step: "마그니픽에 스토리보드를 올리는 중" });
     await composeInMagnific({
       kind: "video",
+      requestedVideoModel:selection.modelId,
+      model:targetModelOf(selection.modelId)?.magnific??selection.selectedId,
       seconds: Math.min(MAX_GENERATOR_SECONDS, wanted),
       prompt,
       referencePaths: [firstFrameOf(scene), scene.storyboardPath].filter(
@@ -855,7 +913,7 @@ registerTaskRunner(SCENE_VIDEO_TASK, async (raw, report, task) => {
       거절은 작업 줄에 까닭과 함께 남고, 자르기는 아무 말 없이 이야기를 끊습니다.
     */
     const models = await loadMagnificModels("video").catch(() => []);
-    const seconds = fitDuration(models, draft?.magnific?.videoModel, wanted);
+    const seconds = fitDuration(models, (await sizeOf(draft,"video",scene.videoPromptModel)).model, wanted);
     report({ step: `러닝타임 ${seconds}초 · 컷 길이의 합 ${wanted}초` });
     const made = await magnificMake(
       payload,
@@ -866,7 +924,7 @@ registerTaskRunner(SCENE_VIDEO_TASK, async (raw, report, task) => {
         assetType: "scene-video",
         firstFrame: firstFrameOf(scene),
         seconds,
-        ...(await sizeOf(draft, "video")),
+        ...(await sizeOf(draft, "video", scene.videoPromptModel)),
       },
       report,
       () => isStopping(task.id),
@@ -912,12 +970,13 @@ registerTaskRunner(SCENE_VIDEO_TASK, async (raw, report, task) => {
 });
 
 /** 줄에 세우고 사람에게 알립니다. 판과 일괄 생성이 같이 씁니다(공통 규칙 1). */
-export function startProjectGeneration(
+export async function startProjectGeneration(
   projectId: string,
   draft: ProjectDraft,
   what?: { images?: boolean; videos?: boolean; redo?: boolean },
 ) {
-  const made = enqueueProjectGeneration(projectId, draft, what);
+  let made:{characters:number;cuts:number;scenes:number};
+  try{made=await enqueueProjectGeneration(projectId, draft, what);}catch(error){toast.error(String(error));return 0;}
   const total = made.characters + made.cuts + made.scenes * 2;
   if (!total) {
     toast.error("돌릴 것이 없습니다.", {

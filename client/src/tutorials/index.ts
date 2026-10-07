@@ -1,3 +1,4 @@
+import { COMFY_WORKFLOW_TUTORIAL } from "./comfy";
 /*
   튜토리얼 목록의 입구.
 
@@ -18,7 +19,7 @@ export { PAGE_TUTORIALS } from "./pages";
 export { PLANNER_TUTORIALS } from "./planner";
 
 /** 전부 — 한 바퀴 하나, 페이지별, 구도잡기 갈래 순서입니다. */
-export const TUTORIALS: Tutorial[] = [FULL_TUTORIAL, ...PAGE_TUTORIALS, ...PLANNER_TUTORIALS];
+export const TUTORIALS: Tutorial[] = [FULL_TUTORIAL, ...PAGE_TUTORIALS, COMFY_WORKFLOW_TUTORIAL, ...PLANNER_TUTORIALS];
 
 /**
  * 이 화면에서 «막혔을 때» 보여 줄 것.

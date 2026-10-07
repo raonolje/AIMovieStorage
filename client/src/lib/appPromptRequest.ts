@@ -1,3 +1,4 @@
+import { resolvePromptSelection, promptStamp, promptResultForModel, assertPromptSelection } from "./promptModelSelection";
 import { getTargetPlatform } from "@/components/PlatformSelect";
 import { blueprintForSpace } from "@/lib/blueprint";
 import { summarizeCompositionCamera } from "@/lib/composition";
@@ -38,7 +39,7 @@ const usesComposition = (cut: Cut) =>
   cut.useComposition !== false && Boolean(cut.composition || cut.guideImage || cut.guideImagePath);
 
 /** 카드 버튼·일괄 생성과 같은 payload 함수에 현재 프로젝트의 실제 값을 넣습니다. */
-export function appPromptRequest(draft: ProjectDraft, target: AppPromptTarget): LlmRequestOptions {
+function rawAppPromptRequest(draft: ProjectDraft, target: AppPromptTarget): LlmRequestOptions {
   const platformId = getTargetPlatform();
   const context = projectContextOf(draft);
   if (target.kind === "character" || target.kind === "background") {
@@ -115,7 +116,7 @@ export function appPromptRequest(draft: ProjectDraft, target: AppPromptTarget): 
     cut, scenes: draft.scenes, characters: draft.characters, cutCharacters, background, context,
     continuity: resolveCutContinuity(scene, cut),
     useComposition, useRefVideo, aspect: draft.aspect?.video || draft.aspect?.image,
-    videoModel: draft.magnific?.videoModel,
+    videoModel: appPromptSelection(draft, target).modelId,
   });
   return {
     task: "cutVideoPrompt",
@@ -132,7 +133,7 @@ export function appPromptRequest(draft: ProjectDraft, target: AppPromptTarget): 
 }
 
 /** Codex·Claude가 쓴 JSON을 카드 버튼과 같은 이력·@태그·전개도 틀 처리로 적용합니다. */
-export function applyAppPromptResult(draft: ProjectDraft, target: AppPromptTarget, result: AppPromptResult): ProjectDraft {
+function rawApplyAppPromptResult(draft: ProjectDraft, target: AppPromptTarget, result: AppPromptResult): ProjectDraft {
   const platform = getTargetPlatform();
   if (target.kind === "character") return {
     ...draft,
@@ -187,4 +188,31 @@ export function applyAppPromptResult(draft: ProjectDraft, target: AppPromptTarge
       }),
     }),
   };
+}
+
+export function appPromptSelection(draft: ProjectDraft, target: AppPromptTarget, platform?: string) {
+ const kind = target.kind === "cutVideo" || target.kind === "sceneVideo" ? "video" : "image";
+ const owner = target.kind === "character" ? draft.characters.find(item => item.id === target.id)
+  : target.kind === "background" ? draft.backgrounds.find(item => item.id === target.id)
+  : target.kind === "sceneVideo" ? draft.scenes.find(item => item.id === target.sceneId)
+  : draft.scenes.find(item => item.id === target.sceneId)?.cuts.find(item => item.id === target.cutId);
+ if (!owner) throw new Error("작성 대상이 없습니다.");
+ const fields = owner as { promptModel?: string; promptEngine?: string; videoPromptModel?: string; videoPromptEngine?: string; promptWorkflow?: import("./promptModelSelection").WorkflowPromptTarget; videoPromptWorkflow?: import("./promptModelSelection").WorkflowPromptTarget };
+ return resolvePromptSelection(kind, { model: kind === "image" ? fields.promptModel : fields.videoPromptModel,
+  workflowTarget: kind === "image" ? fields.promptWorkflow : fields.videoPromptWorkflow, engine: kind === "image" ? fields.promptEngine : fields.videoPromptEngine, project: draft, platform: platform ?? getTargetPlatform() });
+}
+export function appPromptRequest(draft: ProjectDraft, target: AppPromptTarget): LlmRequestOptions {
+ const selection = appPromptSelection(draft, target), request = rawAppPromptRequest(draft, target);
+ assertPromptSelection(selection);
+ return { ...request, modelId: selection.modelId, platformId: selection.platformId,
+  data: { ...(request.data as object), generationTarget: selection } };
+}
+export function applyAppPromptResult(draft: ProjectDraft, target: AppPromptTarget, result: AppPromptResult): ProjectDraft {
+ const selection = appPromptSelection(draft, target);
+ const next = rawApplyAppPromptResult(draft, target, promptResultForModel(result, selection.modelId)), stamp = promptStamp(selection);
+ if (target.kind === "character") return { ...next, characters: next.characters.map(item => item.id === target.id ? { ...item, promptModelStamp: stamp } : item) };
+ if (target.kind === "background") return { ...next, backgrounds: next.backgrounds.map(item => item.id === target.id ? { ...item, promptModelStamp: stamp } : item) };
+ return { ...next, scenes: next.scenes.map(scene => scene.id !== target.sceneId ? scene : target.kind === "sceneVideo"
+  ? { ...scene, storyboardPromptModelStamp: stamp }
+  : { ...scene, cuts: scene.cuts.map(cut => cut.id !== target.cutId ? cut : { ...cut, [target.kind === "cutVideo" ? "videoPromptModelStamp" : "promptModelStamp"]: stamp }) }) };
 }

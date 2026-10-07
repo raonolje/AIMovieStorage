@@ -23,6 +23,22 @@ use serde::{Deserialize, Serialize};
 mod comfy;
 mod codex_skill;
 mod comfy_generation;
+mod comfy_asset_probe;
+mod comfy_registered_assets;
+mod comfy_owned_backend;
+#[path="comfy_admission_v2.rs"]
+mod comfy_admission;
+mod comfy_preset_policy;
+mod comfy_reviewed_registry;
+mod comfy_prompt_roles;
+mod comfy_reference_contract;
+mod comfy_contract_v2_guard;
+mod comfy_local_only_guard;
+mod comfy_workflow_library_store;
+#[cfg(test)]
+mod comfy_preset_test_fixture;
+#[cfg(test)]
+mod comfy_actual_probe;
 mod asset_upload;
 mod control;
 mod control_lifecycle;
@@ -1551,6 +1567,20 @@ pub fn run() {
             comfy::comfy_check_connection,
             comfy::comfy_upscale_image,
             comfy_generation::comfy_inspect_generation_workflow,
+            comfy_generation::comfy_workflow_preflight,
+            comfy_owned_backend::comfy_owned_backend_start,
+            comfy_owned_backend::comfy_owned_backend_status,
+            comfy_owned_backend::comfy_owned_backend_stop,
+            comfy_owned_backend::comfy_owned_backend_defaults,
+            comfy_owned_backend::comfy_owned_music3_candidate,
+            comfy_admission::comfy_admit_generation,
+            comfy_admission::comfy_revoke_generation_admission,
+            comfy_contract_v2_guard::comfy_workflow_contract_capabilities,
+            comfy_reviewed_registry::comfy_workflow_authorization_options,
+            comfy_local_only_guard::comfy_inspect_native_local_only,
+            comfy_workflow_library_store::comfy_workflow_store_revision,
+            comfy_workflow_library_store::comfy_workflow_read_library_entry,
+            comfy_asset_probe::comfy_workflow_asset_fact,
             comfy_generation::comfy_submit_generation,
             comfy_generation::comfy_generation_status,
             comfy_generation::comfy_collect_generation,
@@ -1616,6 +1646,9 @@ pub fn run() {
             local::probe_hardware,
             maintenance::maintenance_comfy_queue,
             maintenance::maintenance_status,
+            maintenance::maintenance_worker_status,
+            maintenance::maintenance_release_idle_workers,
+            maintenance::maintenance_cancel_idle_workers,
             maintenance::maintenance_request_quit,
             private_update::private_update_token,
             ];

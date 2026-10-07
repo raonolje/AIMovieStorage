@@ -14,6 +14,9 @@ import type { ProjectDraft } from "@/lib/projectTypes";
  * `buildProjectMedia` 는 이 꼴만 받으므로 여기 없는 것은 읽을 수도 없습니다.
  */
 export interface ProjectMediaInput extends ProjectContext {
+  workflowTargets?: ProjectDraft["workflowTargets"];
+  batchEngines?: ProjectDraft["batchEngines"];
+  magnific?: ProjectDraft["magnific"];
   title: string;
   savedId: string | null;
   sharedAssets: ProjectDraft["sharedAssets"];
@@ -28,6 +31,9 @@ export interface ProjectMediaInput extends ProjectContext {
  * 의존성은 이 순서대로 뽑으므로 길이가 늘 같고, 빠뜨릴 수가 없습니다.
  */
 const PROJECT_MEDIA_INPUT_KEYS: Record<keyof ProjectMediaInput, true> = {
+  workflowTargets: true,
+  batchEngines: true,
+  magnific: true,
   genres: true,
   styles: true,
   eras: true,
@@ -42,6 +48,9 @@ const PROJECT_MEDIA_INPUT_KEYS: Record<keyof ProjectMediaInput, true> = {
 /** 초안에서 읽을 것만 뽑습니다. 객체 리터럴이라 필수 필드가 늘면 여기서도 오류가 납니다. */
 export function pickProjectMediaInput(draft: ProjectDraft, savedId: string | null): ProjectMediaInput {
   return {
+    workflowTargets: draft.workflowTargets,
+    batchEngines: draft.batchEngines,
+    magnific: draft.magnific,
     genres: draft.genres,
     styles: draft.styles,
     eras: draft.eras,
@@ -72,6 +81,7 @@ export function buildProjectMedia(
   actions: Pick<ProjectMedia, "commitProject" | "commitProjectChange" | "setImageMarks" | "renamePaths">,
 ): ProjectMedia {
   return {
+    promptProject: { batchEngines: input.batchEngines, magnific: input.magnific, workflowTargets: input.workflowTargets },
     // 제목이 아니라 **프로젝트 폴더 이름**입니다.
     // 제목으로 갈라 두었더니, 제목을 한 번 고치면 project.json 은 옛 폴더에,
     // 새로 뽑은 그림은 새 폴더에 남아 「프로젝트 하나 = 폴더 하나」가 깨졌습니다.

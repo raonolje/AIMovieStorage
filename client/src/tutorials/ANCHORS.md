@@ -1,3 +1,7 @@
+# V6 Comfy 전환 안내
+
+`card-local-generate`, `bgm-local-generate`는 보존된 legacy UI 소스의 앵커입니다. 현재 튜토리얼은 이 자리를 가리키지 않고 `card-comfy-generate`와 `bgm-tool`을 사용합니다. Comfy 안내는 기존 `settings-comfy-generation`에서 제공합니다.
+
 # 튜토리얼 앵커 — `data-tour="…"` 를 어디에 다는가
 
 튜토리얼 걸음(`full.ts` · `pages.ts` · `planner.ts`)의 `anchor` 값과 화면 요소를 잇는 표입니다.

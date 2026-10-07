@@ -53,13 +53,14 @@ vi.mock("@/lib/projectWrite", () => ({
 const cleanups: (() => void)[] = [];
 const current = () => state.projects.get("p")!.draft;
 
-it("공식 음악 도구 스키마가 ACE-Step 설정의 범위를 광고한다", async () => {
+it("음악 도구가 명시 workflow와 슬롯 값만 받으며 작업 영수증의 사적 입력은 숨긴다", async () => {
   const { dispatchAppControl } = await import("./appControlRegistry");
   const listed = await dispatchAppControl("tools/list", {}) as { tools: Array<{ name: string; inputSchema: { properties: Record<string, Record<string, unknown>> } }> };
   const tool = listed.tools.find(entry => entry.name === "bgm_generate")!;
-  expect(tool.inputSchema.properties.seed).toMatchObject({ type: "integer", minimum: -1, maximum: 2147483647 });
-  expect(tool.inputSchema.properties.steps).toMatchObject({ type: "integer", minimum: 1, maximum: 200 });
-  expect(tool.inputSchema.properties.guidance).toMatchObject({ type: "number", minimum: 0, maximum: 30 });
+  expect(tool.inputSchema.properties.workflowTarget).toMatchObject({ type: "object" });
+  expect(tool.inputSchema.properties.values).toMatchObject({ type: "object" });
+  expect(tool.inputSchema.properties.seconds).toMatchObject({ type: "number", exclusiveMinimum: 0, maximum: 300 });
+  expect(tool.inputSchema.properties).not.toHaveProperty("engine");
   const generation = { seed: 123, steps: 60, guidance: 15 };
   state.tasks.push({ id: "music-settings", status: "done", payload: { prompt: "private" }, requestFingerprint: "private", result: { paths: ["music.wav"], data: { generation } } });
   const result = await dispatchAppControl("tools/call", { name: "job_get", arguments: { jobId: "music-settings" } }) as ControlToolResult;
@@ -344,6 +345,6 @@ it("로라 다운로드 도구가 승인된 공식 파일만 받고 인증값 �
     expectFailure(await call("lora_download", { ...input, ...bad }), "invalid_request");
   expect(state.enqueue).not.toHaveBeenCalled();
   state.enqueue.mockResolvedValue({ jobId: "download-qa" });
-  expect((await call("lora_download", input)).structuredContent).toEqual({ jobId: "download-qa" });
-  expect(state.enqueue).toHaveBeenCalledWith(expect.objectContaining({ kind: "control.lora.download", operationId: input.operationId }));
+  expectFailure(await call("lora_download",input),"operation_failed");
+  expect(state.enqueue).not.toHaveBeenCalled();
 });

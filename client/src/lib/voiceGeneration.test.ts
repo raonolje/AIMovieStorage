@@ -7,11 +7,13 @@ const run = vi.hoisted(() => vi.fn());
 vi.mock("./localOutput", () => ({ runLocalToProject: run }));
 
 describe("첫 영상 전 로컬 캐릭터 목소리", () => {
-  it("조종기에서 가수·아이돌과 성별·나이대를 받고, 이전 요청의 생략값도 유지한다", async () => {
+  it("조종기가 명시 workflow를 요구하고 미지정 옵션은 모델에 몰래 추가하지 않는다", async () => {
     const { voiceGenerateSchema } = await import("./controlVoice");
     const base = { projectId: "project", expectedRevision: "revision", operationId: "voice-1",
-      characterId: "character", dialogue: "안녕하세요.", traits: "밝은 목소리", category: "singer", model: "design" };
-    expect(voiceGenerateSchema.parse(base)).toMatchObject({ gender: "unspecified", ageRange: "unspecified" });
+      characterId: "character", dialogue: "안녕하세요.", traits: "밝은 목소리", category: "singer", model: "design",workflowTarget:{kind:"workflow",workflowId:"voice",workflowSha256:"a".repeat(64),roleId:"speech",modelRuleId:"qwentts"} };
+    expect(voiceGenerateSchema.parse(base)).not.toHaveProperty("gender");
+    expect(voiceGenerateSchema.parse(base)).not.toHaveProperty("ageRange");
+    const {workflowTarget:_,...legacy}=base;expect(voiceGenerateSchema.safeParse(legacy).success).toBe(false);
     expect(voiceGenerateSchema.parse({ ...base, category: "idol", gender: "female", ageRange: "twenties" }))
       .toMatchObject({ category: "idol", gender: "female", ageRange: "twenties" });
     expect(voiceGenerateSchema.safeParse({ ...base, ageRange: "child" }).success).toBe(false);

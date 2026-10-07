@@ -1,3 +1,4 @@
+import WorkflowPromptSelect from "@/components/WorkflowPromptSelect";
 import { Loader2, RefreshCw } from "lucide-react";
 import { availableLocalEngines, useLocalEngines, type LocalEngineId } from "@/lib/localEngines";
 import { useMagnificStatus } from "@/lib/magnificMcp";
@@ -11,8 +12,6 @@ import { videoCapabilityLabel } from "@/lib/magnificVideoInputs";
 /**
  * **무엇으로 뽑을까** — 생성기·모델·해상도. 이미지와 영상을 따로 고릅니다.
  *
- *
- *
  * 그래서 이 부품이 **일괄 생성 창**(주제 설정)에 삽니다. 「넣고 이미지·영상까지 바로 뽑기」
  * 를 켜는 자리와 **무엇으로 뽑을지 고르는 자리**가 같아야, 켜 놓고 확인 탭까지 갔다 올
  * 일이 없습니다.
@@ -24,11 +23,13 @@ export default function BatchToolsField({
   draft,
   onChange,
   disabled,
+  projectId,
 }: {
   draft: ProjectDraft;
   /** 초안을 고칩니다. **지금 값을 받아 다음 값을 만드는 함수** 여야 합니다. */
   onChange: (updater: (current: ProjectDraft) => Partial<ProjectDraft>) => void;
   disabled?: boolean;
+  projectId?: string;
 }) {
   useLocalEngines(); // 설치 상태를 구독해야 목록이 제때 살아납니다.
   const imageEngines = availableLocalEngines("image");
@@ -115,6 +116,8 @@ export default function BatchToolsField({
         className="rounded-md px-2 py-1 text-[10px] outline-none disabled:opacity-40"
         style={box}
       >
+        <option value="comfy">Comfy · 명시 workflow 실행</option>
+        {!["magnific","magnific-mcp","comfy",...locals.map(engine=>engine.id)].includes(value)&&<option value={value}>{value} · 이전 선택/실행 종료</option>}
         <option value="magnific">마그니픽 — 생성기를 차려 놓기(무제한)</option>
         {magnific.connected && <option value="magnific-mcp">마그니픽 — 끝까지 뽑기(건당 과금)</option>}
         {locals.map((engine) => (
@@ -262,6 +265,7 @@ export default function BatchToolsField({
         </span>
       </div>
 
+      {(["image","video"] as const).map(kind=>engines[kind]==="comfy"&&<WorkflowPromptSelect key={kind} kind={kind} projectId={projectId} value={draft.workflowTargets?.[kind]} disabled={disabled} onChange={target=>onChange(current=>({workflowTargets:{...current.workflowTargets,[kind]:target}}))}/>)}
       {/*
         ── 이 작품을 **무슨 모델로 뽑는가** ──────────────────────────────
         
@@ -307,7 +311,7 @@ export default function BatchToolsField({
         로컬 엔진을 골랐으면 **이번 작품에 쓸 로라**도 여기서 고릅니다.
          받아 둔 로라가 없으면 줄 자체가 안 보입니다.
       */}
-      {!engines.image.startsWith("magnific") && (
+      {!engines.image.startsWith("magnific") && engines.image !== "comfy" && (
         <LoraPicker
           engine={engines.image as LocalEngineId}
           picked={draft.localLoras?.[engines.image] ?? []}
@@ -319,7 +323,7 @@ export default function BatchToolsField({
           disabled={disabled}
         />
       )}
-      {!engines.video.startsWith("magnific") && engines.video !== engines.image && (
+      {!engines.video.startsWith("magnific") && engines.video !== "comfy" && engines.video !== engines.image && (
         <LoraPicker
           engine={engines.video as LocalEngineId}
           picked={draft.localLoras?.[engines.video] ?? []}

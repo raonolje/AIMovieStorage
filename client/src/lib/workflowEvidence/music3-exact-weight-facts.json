@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "readOnly": true,
+  "fullFileSha256": true,
+  "files": [
+    {
+      "category": "diffusion_models",
+      "name": "minimax_music3_dit_fp16.safetensors",
+      "bytes": 4914197682,
+      "sha256": "45494a2b6b69af115902ff28eaf54118d19067aa54da01000f3e3efce7ba0e34",
+      "license": "unknown",
+      "actualGeneration": "not-run",
+      "upstream": {
+        "repository": "Comfy-Org/MiniMax-Music-3",
+        "revision": "144ba815fc44437b87fe526e0470fdaf6f3c6978",
+        "sha256": "45494a2b6b69af115902ff28eaf54118d19067aa54da01000f3e3efce7ba0e34",
+        "url": "https://huggingface.co/Comfy-Org/MiniMax-Music-3/blob/144ba815fc44437b87fe526e0470fdaf6f3c6978/diffusion_models/minimax_music3_dit_fp16.safetensors",
+        "exactSha256Match": true
+      }
+    },
+    {
+      "category": "text_encoders",
+      "name": "minimax_music3_text_encoder_pruned_int8_convrot.safetensors",
+      "bytes": 9196611886,
+      "sha256": "010b7416d2336a08c711bc22ee65849c9623069ddb7d89bec011a75699e52014",
+      "license": "unknown",
+      "actualGeneration": "not-run",
+      "upstream": {
+        "repository": "Comfy-Org/MiniMax-Music-3",
+        "revision": "6d4a482293fab6eb06d7da8eb05cc3352448d238",
+        "sha256": "010b7416d2336a08c711bc22ee65849c9623069ddb7d89bec011a75699e52014",
+        "url": "https://huggingface.co/Comfy-Org/MiniMax-Music-3/blob/6d4a482293fab6eb06d7da8eb05cc3352448d238/text_encoders/minimax_music3_text_encoder_pruned_int8_convrot.safetensors",
+        "exactSha256Match": true
+      }
+    },
+    {
+      "category": "vae",
+      "name": "minimax_music3_dav.safetensors",
+      "bytes": 216696128,
+      "sha256": "2a32155b769be01445fcc2a8663b910fc9e1751e18dc1c3ec528064512d9ef0c",
+      "license": "unknown",
+      "actualGeneration": "not-run",
+      "upstream": {
+        "repository": "Comfy-Org/MiniMax-Music-3",
+        "revision": "b9d2bc903eac865528e44cafd13a38228bd3e471",
+        "sha256": "2a32155b769be01445fcc2a8663b910fc9e1751e18dc1c3ec528064512d9ef0c",
+        "url": "https://huggingface.co/Comfy-Org/MiniMax-Music-3/blob/b9d2bc903eac865528e44cafd13a38228bd3e471/vae/minimax_music3_dav.safetensors",
+        "exactSha256Match": true
+      }
+    }
+  ],
+  "publicLicenseEvidence": {
+    "status": "unknown",
+    "reason": "Repack repository metadata says Apache-2.0 while original Music3 LICENSE is Community License. Do not infer an unconditional project grant from the metadata field.",
+    "repackUrl": "https://huggingface.co/Comfy-Org/MiniMax-Music-3",
+    "upstreamLicenseUrl": "https://huggingface.co/MiniMaxAI/MiniMax-Music3/blob/9c47cc42eb579455170bd868a600ac7096d7e5e0/LICENSE",
+    "upstreamLicenseRevision": "9c47cc42eb579455170bd868a600ac7096d7e5e0"
+  }
+}

@@ -3,6 +3,7 @@ import type { ImageMark } from "@/components/ImageMarkupEditor";
 import type { VisualAsset } from "@/lib/visualAsset";
 import type { ProjectContextSummary } from "@/lib/projectContext";
 import type { ProjectChangeCommit } from "@/lib/projectCommit";
+import type { ProjectDraft } from "@/lib/projectTypes";
 
 /**
  * 프로젝트 편집 화면 어디서나 꺼내 쓰는 것들.
@@ -13,6 +14,7 @@ import type { ProjectChangeCommit } from "@/lib/projectCommit";
  * 안쪽에서 조용히 «저장 폴더 없음» 이 됩니다.
  */
 export interface ProjectMedia {
+  promptProject?: Pick<ProjectDraft, "batchEngines" | "magnific" | "workflowTargets">;
   /** 외부 조종기 저장도 현재 프로젝트의 같은 저장 경로를 사용합니다. */
   projectId?: string;
   /** 저장 폴더 안의 프로젝트 폴더 이름이 되는 값 */

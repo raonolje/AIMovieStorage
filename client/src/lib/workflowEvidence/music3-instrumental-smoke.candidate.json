@@ -1,0 +1,345 @@
+{
+  "schemaVersion": 1,
+  "status": "experimental-not-admitted",
+  "authoredHere": true,
+  "workflowSha256": "305409054b67e11de5de8c91c3ea09865d062e496dfd919244f6f0209fb5d57d",
+  "source": {
+    "workflowId": "music3-instrumental-smoke",
+    "workflowPath": "C:/workflow-drafts/music3-instrumental-smoke.api.json",
+    "title": "music3-instrumental-smoke",
+    "sourceVersion": "local-draft-v1-core-0.39.0",
+    "modelIds": [
+      "minimaxmusic3"
+    ],
+    "promptProfile": "minimaxmusic3",
+    "evidence": [],
+    "outputKind": "audio",
+    "operation": "music-generation",
+    "sourceUrl": "https://docs.comfy.org/tutorials/audio/minimax/minimax-music-3",
+    "limitations": [
+      "Local draft from source/schema review; sampler settings and output quality have not been validated by generation.",
+      "Caption and [Instrumental] are generative conditioning, not a hard no-vocal guarantee.",
+      "Maximum duration can terminate earlier; preserve actual decoded duration.",
+      "Negative text is unsupported in this draft; ConditioningZeroOut is not negative text support."
+    ]
+  },
+  "selection": {
+    "slots": [
+      {
+        "id": "positive",
+        "nodeId": "4",
+        "input": "caption",
+        "semantic": "positive",
+        "required": true,
+        "defaultValue": "Global Metadata: cinematic ambient instrumental, 80 BPM. Vocal Details: no vocals. Arrangement: warm piano and soft strings."
+      },
+      {
+        "id": "lyrics",
+        "nodeId": "4",
+        "input": "lyrics",
+        "semantic": "lyrics",
+        "required": true,
+        "defaultValue": "[Instrumental]"
+      },
+      {
+        "id": "duration",
+        "nodeId": "4",
+        "input": "max_duration",
+        "semantic": "durationSeconds",
+        "required": true,
+        "defaultValue": 12
+      },
+      {
+        "id": "encodeSeed",
+        "nodeId": "4",
+        "input": "seed",
+        "semantic": "seed",
+        "required": true,
+        "defaultValue": 7
+      },
+      {
+        "id": "sampleSeed",
+        "nodeId": "7",
+        "input": "seed",
+        "semantic": "seed",
+        "required": true,
+        "defaultValue": 7
+      }
+    ],
+    "promptRoles": [
+      {
+        "id": "primary",
+        "modelRuleId": "minimaxmusic3",
+        "loaderNodeIds": [
+          "1"
+        ],
+        "positiveSlotIds": [
+          "positive"
+        ],
+        "negativeSlotIds": [],
+        "negativeSupport": "unsupported"
+      }
+    ],
+    "selectedPromptRoleId": "primary",
+    "outputNodeIds": [
+      "9"
+    ],
+    "referenceGroups": []
+  },
+  "inspection": {
+    "format": "api",
+    "issues": [
+      {
+        "code": "environment_version_missing",
+        "message": "코어 commit·Python·Torch·검토 정책 버전이 필요합니다."
+      },
+      {
+        "code": "weight_license_unverified",
+        "message": "가중치의 사용 허가가 확인되지 않았습니다.",
+        "nodeId": "1",
+        "input": "unet_name"
+      },
+      {
+        "code": "weight_license_unverified",
+        "message": "가중치의 사용 허가가 확인되지 않았습니다.",
+        "nodeId": "2",
+        "input": "clip_name"
+      },
+      {
+        "code": "weight_license_unverified",
+        "message": "가중치의 사용 허가가 확인되지 않았습니다.",
+        "nodeId": "3",
+        "input": "vae_name"
+      }
+    ],
+    "requiredNodes": [
+      {
+        "nodeId": "1",
+        "classType": "UNETLoader",
+        "installed": true,
+        "reviewed": true,
+        "pythonModule": "nodes",
+        "reviewId": "core-0.39.0-minimal-local-review-v1"
+      },
+      {
+        "nodeId": "2",
+        "classType": "CLIPLoader",
+        "installed": true,
+        "reviewed": true,
+        "pythonModule": "nodes",
+        "reviewId": "core-0.39.0-minimal-local-review-v1"
+      },
+      {
+        "nodeId": "3",
+        "classType": "VAELoader",
+        "installed": true,
+        "reviewed": true,
+        "pythonModule": "nodes",
+        "reviewId": "core-0.39.0-minimal-local-review-v1"
+      },
+      {
+        "nodeId": "4",
+        "classType": "MiniMaxMusic3TextEncode",
+        "installed": true,
+        "reviewed": true,
+        "pythonModule": "comfy_extras.nodes_minimax_music",
+        "reviewId": "core-0.39.0-minimal-local-review-v1"
+      },
+      {
+        "nodeId": "5",
+        "classType": "ConditioningZeroOut",
+        "installed": true,
+        "reviewed": true,
+        "pythonModule": "nodes",
+        "reviewId": "core-0.39.0-minimal-local-review-v1"
+      },
+      {
+        "nodeId": "6",
+        "classType": "EmptyMiniMaxMusic3LatentAudio",
+        "installed": true,
+        "reviewed": true,
+        "pythonModule": "comfy_extras.nodes_minimax_music",
+        "reviewId": "core-0.39.0-minimal-local-review-v1"
+      },
+      {
+        "nodeId": "7",
+        "classType": "KSampler",
+        "installed": true,
+        "reviewed": true,
+        "pythonModule": "nodes",
+        "reviewId": "core-0.39.0-minimal-local-review-v1"
+      },
+      {
+        "nodeId": "8",
+        "classType": "VAEDecodeAudio",
+        "installed": true,
+        "reviewed": true,
+        "pythonModule": "comfy_extras.nodes_audio",
+        "reviewId": "core-0.39.0-minimal-local-review-v1"
+      },
+      {
+        "nodeId": "9",
+        "classType": "SaveAudioAdvanced",
+        "installed": true,
+        "reviewed": true,
+        "pythonModule": "comfy_extras.nodes_audio",
+        "reviewId": "core-0.39.0-minimal-local-review-v1"
+      }
+    ],
+    "requiredWeights": [
+      {
+        "nodeId": "1",
+        "input": "unet_name",
+        "category": "diffusion_models",
+        "kind": "model",
+        "promptModel": true,
+        "name": "minimax_music3_dit_fp16.safetensors",
+        "installed": true,
+        "license": "unknown",
+        "publicLicense": "unknown",
+        "sha256": "45494a2b6b69af115902ff28eaf54118d19067aa54da01000f3e3efce7ba0e34"
+      },
+      {
+        "nodeId": "2",
+        "input": "clip_name",
+        "category": "text_encoders",
+        "kind": "model",
+        "name": "minimax_music3_text_encoder_pruned_int8_convrot.safetensors",
+        "installed": true,
+        "license": "unknown",
+        "publicLicense": "unknown",
+        "sha256": "010b7416d2336a08c711bc22ee65849c9623069ddb7d89bec011a75699e52014"
+      },
+      {
+        "nodeId": "3",
+        "input": "vae_name",
+        "category": "vae",
+        "kind": "model",
+        "name": "minimax_music3_dav.safetensors",
+        "installed": true,
+        "license": "unknown",
+        "publicLicense": "unknown",
+        "sha256": "2a32155b769be01445fcc2a8663b910fc9e1751e18dc1c3ec528064512d9ef0c"
+      }
+    ],
+    "graph": {
+      "1": {
+        "class_type": "UNETLoader",
+        "inputs": {
+          "unet_name": "minimax_music3_dit_fp16.safetensors",
+          "weight_dtype": "default"
+        }
+      },
+      "2": {
+        "class_type": "CLIPLoader",
+        "inputs": {
+          "clip_name": "minimax_music3_text_encoder_pruned_int8_convrot.safetensors",
+          "type": "minimax",
+          "device": "default"
+        }
+      },
+      "3": {
+        "class_type": "VAELoader",
+        "inputs": {
+          "vae_name": "minimax_music3_dav.safetensors"
+        }
+      },
+      "4": {
+        "class_type": "MiniMaxMusic3TextEncode",
+        "inputs": {
+          "clip": [
+            "2",
+            0
+          ],
+          "caption": "Global Metadata: cinematic ambient instrumental, 80 BPM. Vocal Details: no vocals. Arrangement: warm piano and soft strings.",
+          "lyrics": "[Instrumental]",
+          "seed": 7,
+          "max_duration": 12,
+          "cfg_scale": 1.5,
+          "top_k": 50
+        }
+      },
+      "5": {
+        "class_type": "ConditioningZeroOut",
+        "inputs": {
+          "conditioning": [
+            "4",
+            0
+          ]
+        }
+      },
+      "6": {
+        "class_type": "EmptyMiniMaxMusic3LatentAudio",
+        "inputs": {
+          "seconds": [
+            "4",
+            1
+          ],
+          "batch_size": 1
+        }
+      },
+      "7": {
+        "class_type": "KSampler",
+        "inputs": {
+          "model": [
+            "1",
+            0
+          ],
+          "seed": 7,
+          "steps": 20,
+          "cfg": 1,
+          "sampler_name": "euler",
+          "scheduler": "simple",
+          "positive": [
+            "4",
+            0
+          ],
+          "negative": [
+            "5",
+            0
+          ],
+          "latent_image": [
+            "6",
+            0
+          ],
+          "denoise": 1
+        }
+      },
+      "8": {
+        "class_type": "VAEDecodeAudio",
+        "inputs": {
+          "samples": [
+            "7",
+            0
+          ],
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "9": {
+        "class_type": "SaveAudioAdvanced",
+        "inputs": {
+          "audio": [
+            "8",
+            0
+          ],
+          "filename_prefix": "audio/aimoviestorage_music3_smoke",
+          "format": "flac"
+        }
+      }
+    }
+  },
+  "verification": {
+    "actualGenerationRegistration": "not-run",
+    "installedRequirements": "blocked",
+    "gpuCalls": 0,
+    "mutatingHttpCalls": 0
+  },
+  "smokeQA": [
+    "32kHz/stereo audio decode and non-silent waveform",
+    "listen/check for unintended vocals before BGM approval",
+    "register exact job output in same project with hash/provenance"
+  ]
+}

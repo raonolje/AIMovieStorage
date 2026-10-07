@@ -1,3 +1,5 @@
+import WorkflowPromptSelect from "@/components/WorkflowPromptSelect";
+import { promptStaleMessage, type PromptSelection } from "@/lib/promptModelSelection";
 import { Film, Loader2, Sparkles } from "lucide-react";
 import LocalGenerateButton from "@/components/LocalGenerateButton";
 import MagnificVideoCapability from "@/components/MagnificVideoCapability";
@@ -27,6 +29,7 @@ export default function CutVideoSection({
   continuity,
   continuityError,
   videoModel,
+  selection,
   magnificVideoResolution,
   onMagnificVideoResolutionChange,
   magnificMusicEnabled,
@@ -52,6 +55,7 @@ export default function CutVideoSection({
   continuity: CutContinuity | null;
   continuityError: string;
   videoModel?: string;
+  selection: PromptSelection;
   magnificVideoResolution: MagnificVideoResolution;
   onMagnificVideoResolutionChange: (value: MagnificVideoResolution) => void;
   magnificMusicEnabled: boolean;
@@ -83,6 +87,7 @@ export default function CutVideoSection({
   sendCutVideoToMagnific: (text: string, lang: "ko" | "en") => Promise<void>;
 }) {
   const t = useT();
+  const stale = promptStaleMessage(cut.videoPromptModelStamp, selection, Boolean(cut.videoPromptKo || cut.videoPromptEn));
   return (
       <section
         className="space-y-2 rounded-md p-3"
@@ -97,6 +102,7 @@ export default function CutVideoSection({
           로라 / 자세» 를 세로로 쌓아 두 줄이 단추 아래로 매달렸던 것은 `LocalGenerateButton` 과
           `LoraPicker` 를 가로 한 줄로 펴서 풀었습니다. 여기서는 정렬만 맡습니다.
         */}
+        {stale && <p className="text-[10px] text-amber-300">{stale}</p>}
         <div className="flex flex-wrap items-center gap-2" data-tour="cut-video-section">
           <p className="text-[11px] font-semibold text-white">
             영상 프롬프트
@@ -166,8 +172,13 @@ export default function CutVideoSection({
             로라는 설정의 목록에서 켜 둔 것이 전부 함께 들어갑니다(멀티 로라).
           */}
           <fieldset disabled={Boolean(continuityError)} title={continuityError || undefined} className="contents">
+          <WorkflowPromptSelect projectName={projectName} kind="video" value={selection.workflowTarget} onChange={target=>patchCut(()=>({videoPromptWorkflow:target,videoPromptEngine:target?"comfy":undefined}))} />
           <LocalGenerateButton
             kind="video"
+            workflowTarget={selection.workflowTarget}
+            target={{kind:"cut",id:cut.id}}
+            selectedEngine={selection.route}
+            onEngineChange={engine => patchCut(() => ({ videoPromptEngine: engine }))}
             label="로컬 영상"
             seconds={videoSeconds}
             firstFrame={continuity?.mode === "continue" ? continuity.endFramePath : heroImage?.filePath}

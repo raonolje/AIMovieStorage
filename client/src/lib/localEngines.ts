@@ -1,3 +1,4 @@
+import { assertDirectGenerationEnabled, isLegacyGenerationEngine } from "./generationRoutingPolicy";
 import { useEffect, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -699,7 +700,7 @@ export function useLocalEngines(): LocalSnapshot {
 /** 설치돼 있어 지금 쓸 수 있는 엔진. 갈래를 주면 그 갈래만. */
 export function availableLocalEngines(kind?: LocalEngineKind): LocalEngineStatus[] {
   return snapshot.engines
-    .filter((engine) => engine.installed && (!kind || engine.kind === kind))
+    .filter((engine) => !isLegacyGenerationEngine(engine.id) && engine.installed && (!kind || engine.kind === kind))
     .sort((a, b) => a.priority - b.priority);
 }
 
@@ -814,6 +815,7 @@ export async function installLocalEngine(
   id: LocalEngineId,
   onProgress?: (event: LocalProgressEvent) => void,
 ): Promise<void> {
+  assertDirectGenerationEnabled(id);
   assertDesktop("엔진을 설치");
   await ensureProgressHook();
   const off = onProgress ? onLocalProgress(onProgress, id) : () => {};
@@ -848,6 +850,7 @@ export async function cancelLocalInstall(id: LocalEngineId): Promise<void> {
  * «가중치 받기(models)» 막대로 오고, 멈추기도 `cancelLocalInstall` 이 그대로 듣습니다.
  */
 export async function prefetchLocalWeights(id: LocalEngineId): Promise<void> {
+  assertDirectGenerationEnabled(id);
   assertDesktop("가중치 미리 받기를 시작");
   await ensureProgressHook();
   publish({
@@ -1234,6 +1237,7 @@ export async function runLocal(
     timeoutSecs?: number;
   },
 ): Promise<LocalRunResult> {
+  assertDirectGenerationEnabled(engine);
   assertDesktop("로컬 모델로 생성");
   await whenAppSettingsReady();
   await ensureProgressHook();

@@ -1,3 +1,4 @@
+import { resolvePromptSelection, promptStamp, assertPromptSnapshot } from "@/lib/promptModelSelection";
 import { gatherStoredCutMagnificRefs, buildCutVideoMagnificPrompt, buildCutImageMagnificPrompt } from "@/lib/cutMagnificCompose";
 import { composeInMagnific, type MagnificVideoResolution } from "@/lib/magnificCompose";
 import { musicOf } from "@/lib/compositionEdit";
@@ -135,7 +136,6 @@ const PICK_ACCENT = {
 /**
  * 인물·장소를 «그림으로» 고르는 타일 한 장.
  *
- *
  * 배경만 드롭다운(«고르지 않음»)이었는데, 이름만으로는 «어느 골목» 인지 알 수 없어
  * 결국 2단계로 돌아가 확인해야 했습니다.
  *
@@ -270,16 +270,19 @@ export default function CutCard({
   /**
    * 컷 키 이미지 프롬프트를 받을 때 LLM 에 넘기는 **재료 한 벌**.
    *
-   *
-   *
    * 여태 여기로 간 것은 «씬 요약 · 컷 설명 · 연출 토글 · VFX» 뿐이었습니다. 구도는 그림만
    * 올라가고 **글로는 한 마디도 안 갔고**, 고른 시트도, 대사·연기 지시도 안 갔습니다.
    * 그래서 프롬프트가 「그 컷이 무엇인지」 를 반쯤만 알고 쓰였습니다.
    *
    * 몸통은 `lib/promptPayloads.cutRequestPayload` 에 있습니다(2026-09-22) — 일괄 생성 4단계가 같은 것을 보냅니다.
    */
+  const promptProject = useProjectMedia().promptProject;
+  const imageSelection = resolvePromptSelection("image", { workflowTarget: cut.promptWorkflow, model: cut.promptModel || imageModel, engine: cut.promptEngine, project: promptProject, platform: getTargetPlatform() });
+  const videoSelection = resolvePromptSelection("video", { workflowTarget: cut.videoPromptWorkflow, model: cut.videoPromptModel || videoModel, engine: cut.videoPromptEngine, project: promptProject, platform: getTargetPlatform() });
+  const latestPromptSelection = useRef({ cut, imageSelection, videoSelection });
+  latestPromptSelection.current = { cut, imageSelection, videoSelection };
   const cutRequestData = () =>
-    cutRequestPayload({
+    ({ generationTarget: imageSelection, ...cutRequestPayload({
       projectFacts: context?.facts ?? null,
       sceneSummary,
       cut,
@@ -288,7 +291,7 @@ export default function CutCard({
       summary,
       useComposition,
       facts: buildFacts().facts,
-    });
+    }) });
 
   const runCutPrompt = async () => {
     if (cutBusy) return;
@@ -313,12 +316,16 @@ export default function CutCard({
         deliveredTo: `컷 ${cut.order} · 프롬프트 네 칸에 넣음`,
         task: "cutPrompt",
         template: "cut-prompt",
-        platformId: getTargetPlatform(),
+        modelId: imageSelection.modelId,
+        platformId: imageSelection.platformId,
         techniques: cut.techniques || [],
         data: cutRequestData(),
         images: cut.guideImage ? [cut.guideImage] : [],
       });
+      assertPromptSnapshot(promptStamp(imageSelection), promptStamp(latestPromptSelection.current.imageSelection));
+      assertPromptSnapshot([cut.promptKo, cut.promptEn], [latestPromptSelection.current.cut.promptKo, latestPromptSelection.current.cut.promptEn]);
       await keepPrompt(result, "프롬프트 작성");
+      patchCut(() => ({ promptModelStamp: promptStamp(imageSelection) }));
       toast.success("컷 프롬프트를 받았습니다.");
     } catch (error) {
       toast.error(String(error));
@@ -348,8 +355,6 @@ export default function CutCard({
 
   /**
    * 구도를 레퍼런스 삼아 마그니픽에서 뽑기.
-   *
-   *
    *
    * 이 길이 축척 문제를 통째로 비켜 갑니다. 3D 는 **카메라 각도·인물 자리·누가 어디에**
    * 만 말하면 되고, 잔디와 인물의 크기를 픽셀 단위로 맞추는 일은 생성기가 합니다.
@@ -475,6 +480,8 @@ export default function CutCard({
       const composedPrompt = buildCutImageMagnificPrompt(prompt, lang, refs);
       await composeInMagnific({
         prompt: composedPrompt,
+        requestedImageModel: imageSelection.modelId,
+        model: targetModelOf(imageSelection.modelId)?.magnific,
         referencePaths: references,
         owner: { kind: "cut", name: `컷 ${cut.order}`, cutId: cut.id },
         onStatus: (message) => toast.loading(message, { id: `shot:${cut.id}` }),
@@ -693,8 +700,6 @@ export default function CutCard({
   /**
    * 받은 프롬프트를 **칸에 넣고 기록에도 남깁니다.**
    *
-   *
-   *
    * 「무엇이 체크되었나」 는 컷에서 **연출 토글·기법·구도를 쓰는지**입니다. 그 조건이
    * 적혀 있어야 「아까 판이 더 나았다」 를 되짚을 수 있습니다.
    */
@@ -873,7 +878,7 @@ export default function CutCard({
       useRefVideo,
       // 화면비와 «바꾸지 마세요» 에 박을 이름 — 둘 다 없으면 생성기가 제멋대로 정합니다.
       aspect: videoAspect || projectAspect,
-      videoModel,
+      videoModel: videoSelection.modelId,
     });
     return { skeletonInput, skeleton: buildCutVideoPrompt(skeletonInput) };
   };
@@ -934,8 +939,8 @@ export default function CutCard({
         task: "cutVideoPrompt",
         template: "cut-video-prompt",
         // 고른 영상 모델의 가이드가 요청에 붙습니다 — 그 모델의 대사 문법·금지 자리로 쓰이게.
-        modelId: skeletonInput.modelId,
-        platformId: getTargetPlatform(),
+        modelId: videoSelection.modelId,
+        platformId: videoSelection.platformId,
         techniques: cut.techniques || [],
         data: cutVideoRequestPayload({
           skeleton,
@@ -949,7 +954,10 @@ export default function CutCard({
           useComposition,
         }),
       });
+      assertPromptSnapshot(promptStamp(videoSelection), promptStamp(latestPromptSelection.current.videoSelection));
+      assertPromptSnapshot([cut.videoPromptKo, cut.videoPromptEn], [latestPromptSelection.current.cut.videoPromptKo, latestPromptSelection.current.cut.videoPromptEn]);
       await keepVideoPrompt(result);
+      patchCut(() => ({ videoPromptModelStamp: promptStamp(videoSelection) }));
       toast.success(`컷 ${cut.order} 영상 프롬프트를 받았습니다.`, {
         description: `러닝타임 ${skeleton.seconds.toFixed(1)}초 · 규칙 뼈대 위에 상황·환경·동작을 채웠습니다`,
       });
@@ -1074,7 +1082,6 @@ export default function CutCard({
   }, [tabImages]);
   /**
    * ── 인물마다 «이 그림을 레퍼런스로» ────────────────────────────────
-   *
    *
    * 묶음 머리줄이 곧 인물 이름이라 이름으로 인물을 찾습니다(`collectEntityPickerImages` 의 `ownerName`). 변형·시트·보유 에셋도
    * 그 인물 이름으로 묶여 들어와, 한 인물의 어떤 그림이든 고를 수 있습니다. 공용 에셋 묶음은 인물이 없어 고르기가 안 뜹니다.
@@ -1891,7 +1898,8 @@ export default function CutCard({
             cutBusy={cutBusy}
             runCutPrompt={runCutPrompt}
             cutRequestData={cutRequestData}
-            modelId={targetModelOf(imageModel)?.id}
+            modelId={imageSelection.modelId}
+            selection={imageSelection}
             applyRulePrompt={applyRulePrompt}
             relinkTags={relinkTags}
             relinking={relinking}
@@ -1911,7 +1919,8 @@ export default function CutCard({
             firstCut={scene.cuts[0]?.id === cut.id}
             continuity={continuity}
             continuityError={continuityError}
-            videoModel={videoModel}
+            videoModel={videoSelection.modelId}
+            selection={videoSelection}
             magnificVideoResolution={magnificVideoResolution}
             onMagnificVideoResolutionChange={setMagnificVideoResolution}
             magnificMusicEnabled={magnificMusicEnabled}

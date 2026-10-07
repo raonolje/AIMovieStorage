@@ -169,6 +169,11 @@ def main():
         op = request.get("op", "")
         opts = request.get("opts") or {}
 
+        # 유휴 종료는 abort/unload를 호출하지 않고 인터프리터가 스스로 끝나게 합니다.
+        if op == "quit_idle":
+            send({"id": job_id, "event": "done", "graceful_only": True})
+            return 0
+
         if op == "quit":
             try:
                 engine.unload()

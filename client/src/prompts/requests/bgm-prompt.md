@@ -1,80 +1,13 @@
 ---
 id: bgm-prompt
-label: 곡 스타일 · 가사
+title: 선택 음악 모델의 스타일과 가사
 ---
-
-장면에 깔릴 곡의 **스타일 문장**과 **가사**를 만들어 주세요.
-
-음악 모델은 «프롬프트» 를 받지 않습니다. Suno v6·MiniMax-Music3·ACE-Step v1 셋 다
-**스타일 칸**과 **가사 칸** 두 개를 받습니다. 그 두 칸에 그대로 붙여넣을 것을 주세요.
-
-## 무엇보다 먼저 — 노래인가 연주곡인가
-
-`instrumental` 값이 **이 곡이 노래인지 연주곡인지를 정합니다.** 사람이 화면에서 켜고 끈
-스위치이므로, 재료가 부족해 보여도 이 판단을 뒤집지 마세요. `지시` 칸에 같은 말이
-한국어로 한 번 더 적혀 있습니다.
-
-- `instrumental: false` → **노래입니다. 반드시 부를 가사를 쓰세요.**
-  보컬 태그가 비어 있어도 마찬가지입니다 — 그때는 장르에 어울리는 보컬을 골라 적으세요.
-  스타일 문장에 `instrumental`·`no vocals`·`no human voice`·«가사 없음» 을 **쓰지 마세요.**
-- `instrumental: true` → 연주곡입니다. 노랫말을 짓지 말고, 가사 칸에는 구간 태그와
-  그 구간의 연주 지시만 적으세요.
-
-## 재료
-
-- `name` / `usage`: 이 곡의 쓰임과 깔릴 장면
-- `지시`: 위 절의 판단을 한국어로 적어 둔 것. **가장 먼저 따릅니다.**
-- `mood` `genre` `instruments` `vocals` `era` `production`: 사람이 미리 고른 태그.
-  **고른 것이 있으면 반드시 그대로 씁니다.** 마음대로 바꾸지 마세요.
-- `tempo`: BPM. 비어 있으면 장르에 맞게 정해 주세요.
-- `durationSeconds`: 길이. 비어 있으면 모델이 알아서 정하게 두세요.
-- `structure`: 곡 구조 태그. 이것이 **가사의 틀이자 곡의 길이**입니다.
-  노래는 `verse`·`pre-chorus`·`chorus`·`bridge`·`instrumental break` 로,
-  연주곡은 `theme`·`variation`·`build`·`interlude`·`climax` 로 짭니다.
-  **연주곡에 `verse`·`chorus` 를 쓰지 마세요** — 부를 말이 있어야 성립하는 이름입니다.
-- `instrumental`: 참이면 **가사 없는 연주곡**입니다.
-- `excludeStyles`: 빼고 싶은 것. 스타일 문장에는 넣지 말고 그대로 두세요.
-- `reference`: 참고할 느낌. 아티스트·곡 이름을 그대로 베끼지 말고 **특징만** 옮깁니다.
-- `targetTool`: 어느 생성기로 보낼지.
-
-## 스타일 문장 쓰는 법
-
-- 차례가 중요합니다 — **장르 → 분위기 → 악기 → 보컬 → 프로덕션 → 빠르기**.
-  Suno v6 의 *Style Influence* 는 기본값이 50% 라 **뒤에 적은 말은 버려질 수 있습니다.**
-  꼭 살아야 하는 말을 앞에 두세요.
-- **1,000자 안**(Suno v6 의 스타일 칸 한도). 다 채울 필요는 없고 500~800자가 잘 먹습니다.
-- «no drums», «avoid autotune» 같은 **빼는 말을 스타일에 쓰지 마세요.** 그 낱말을 오히려
-  불러옵니다. 뺄 것은 `excludeStyles` 칸의 몫입니다.
-- 화면에 무엇이 보이는지는 쓰지 마세요. 음악 모델은 그림을 모릅니다.
-
-## 가사 쓰는 법
-
-- **구간 머리말을 대괄호로** 답니다: `[Intro]` `[Verse 1]` `[Chorus]` `[Bridge]` `[Outro]`.
-  이 태그가 곡의 길이를 정합니다(로컬 모델은 `seconds` 보다 이쪽을 따릅니다).
-- Suno v6 부터는 **머리말 안에 연출을 적을 수 있습니다.**
-  `[Bridge | Female — Whispered, almost spoken]` 처럼 쓰면 그 구간의 창법·악기가 바뀝니다.
-  분위기가 꺾이는 구간에는 이렇게 적어 주세요.
-- 15줄 미만이면 곡이 짧게 끝나고, 60줄이 넘으면 서두릅니다. **30~40줄**이 알맞습니다.
-  길어도 3,000자 안쪽(한도는 5,000자).
-- `instrumental` 이 참이면 가사 대신 **구간 태그만** 적고, 그 아래에 무슨 악기가 무엇을
-  하는지 한 줄로 적습니다(`[Theme]` / `warm cello states the melody alone`).
-  노랫말을 지어내지 마세요. 구간 이름은 위의 연주곡 어휘를 씁니다.
-- 한글 가사와 영문 가사는 **같은 곡**이어야 합니다. 영문 칸은 번역이 아니라,
-  그 뜻으로 영어로 부를 수 있게 쓴 것입니다. 한국어로 부를 곡이면 영문 칸에도
-  한국어 노랫말을 그대로 두고 구간 태그와 연출만 영어로 적으세요.
-
-## 출력 형식
-
-`ko` 는 사람이 읽고 고치는 칸, `en` 은 **생성기에 그대로 붙여넣는 칸**입니다.
-
-```json
-{
-  "ko": "곡 스타일 (한글 설명)",
-  "en": "style sentence to paste into the generator",
-  "lyricsKo": "[도입]\n...가사 (한글)",
-  "lyricsEn": "[Intro]\n...lyrics to paste into the generator"
-}
-```
-
-연주곡이어도 `lyricsKo`·`lyricsEn` 을 **비우지 마세요** — 구간 태그를 채워 주세요.
-그것이 곡의 길이를 정합니다.
+선택 generationTarget.modelId와 역할의 모델 가이드를 먼저 적용합니다. 임의의 다른 음악 모델이나 영상 MiniMax 가이드로 대체하지 않습니다.
+장르·편성·템포·조성·질감·전개를 ko/en 스타일에 적고 사용자의 곡 목적과 구조를 보존합니다.
+instrumental=true이면 lyricsKo와 lyricsEn은 빈 문자열입니다. 편곡 구간은 스타일에 적습니다. 구간 태그만으로 불필요한 가사 칸을 채우지 않습니다.
+보컬곡은 실제로 부를 가사를 쓰며 마지막 독립 줄에 소문자 literal [end]를 중복 없이 한 번만 둡니다. 이는 사용자 저장 규칙이며 모델 EOS나 오디오 종료 보장이 아닙니다. 모델 고유 종료 규칙이 다르면 원본 가사와 모델 변환 단계를 명시합니다.
+같은 멤버의 안정된 음색·음역·발음·비브라토·창법과 파트 배정을 유지합니다. 6명 이상의 프로필도 개별 ID와 파트를 보존하며 한 구간에 한 리드를 배정합니다. 실험적인 Singer A 표기를 공식 화자 제어로 주장하지 않습니다.
+single lead는 single-tracked, close-miked, dry centered lead, clear diction을 권합니다. chorus effect·겹친 리드·합창·군중 보컬·애드리브·긴 잔향·하울링 억제는 모델의 공식 Exclude 입력이 있으면 그 입력에 권고합니다. [Chorus] 후렴 구조와 chorus effect는 구분합니다. 모델이 제공하지 않는 negative_prompt나 voice_id를 만들어내지 않습니다.
+Suno v6: Variety/Max 모드와 공식 확인된 범위만 적용합니다. 이전 Style Influence/Weirdness 규칙을 v6의 검증된 설정으로 복사하지 않습니다. Personas/Voices 호환성은 현재 UI 확인이 필요합니다.
+MiniMax Music 3: Global Metadata / Vocal Details / Arrangement의 스타일 구조를 사용합니다. 로컬 경로와 유료 API의 is_instrumental 지원은 구분합니다. ACE-Step은 해당 버전/워크플로의 별도 스타일·가사·설정 계약을 따릅니다.
+순수 JSON만 답합니다: {"ko":"한국어 스타일","en":"English style","negativeKo":"","negativeEn":"","lyricsKo":"한국어 가사 또는 빈 문자열","lyricsEn":"English lyrics or empty string"}.

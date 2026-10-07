@@ -1,0 +1,539 @@
+{
+  "schemaVersion": 1,
+  "revision": "builtin-exact-review-registry-v1",
+  "defaultPresetIds": [
+    "music3-instrumental-smoke"
+  ],
+  "presets": [
+    {
+      "schemaVersion": 1,
+      "id": "music3-instrumental-smoke",
+      "reviewRevision": "native-reviewed-preset-v1",
+      "graphSha256": "305409054b67e11de5de8c91c3ea09865d062e496dfd919244f6f0209fb5d57d",
+      "graph": {
+        "1": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "minimax_music3_dit_fp16.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "2": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "minimax_music3_text_encoder_pruned_int8_convrot.safetensors",
+            "type": "minimax",
+            "device": "default"
+          }
+        },
+        "3": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_music3_dav.safetensors"
+          }
+        },
+        "4": {
+          "class_type": "MiniMaxMusic3TextEncode",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "caption": "Global Metadata: cinematic ambient instrumental, 80 BPM. Vocal Details: no vocals. Arrangement: warm piano and soft strings.",
+            "lyrics": "[Instrumental]",
+            "seed": 7,
+            "max_duration": 12,
+            "cfg_scale": 1.5,
+            "top_k": 50
+          }
+        },
+        "5": {
+          "class_type": "ConditioningZeroOut",
+          "inputs": {
+            "conditioning": [
+              "4",
+              0
+            ]
+          }
+        },
+        "6": {
+          "class_type": "EmptyMiniMaxMusic3LatentAudio",
+          "inputs": {
+            "seconds": [
+              "4",
+              1
+            ],
+            "batch_size": 1
+          }
+        },
+        "7": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "seed": 7,
+            "steps": 20,
+            "cfg": 1,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "positive": [
+              "4",
+              0
+            ],
+            "negative": [
+              "5",
+              0
+            ],
+            "latent_image": [
+              "6",
+              0
+            ],
+            "denoise": 1
+          }
+        },
+        "8": {
+          "class_type": "VAEDecodeAudio",
+          "inputs": {
+            "samples": [
+              "7",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ]
+          }
+        },
+        "9": {
+          "class_type": "SaveAudioAdvanced",
+          "inputs": {
+            "audio": [
+              "8",
+              0
+            ],
+            "filename_prefix": "audio/aimoviestorage_music3_smoke",
+            "format": "flac"
+          }
+        }
+      },
+      "selection": {
+        "slots": [
+          {
+            "id": "positive",
+            "nodeId": "4",
+            "input": "caption",
+            "semantic": "positive",
+            "required": true
+          },
+          {
+            "id": "lyrics",
+            "nodeId": "4",
+            "input": "lyrics",
+            "semantic": "lyrics",
+            "required": true
+          },
+          {
+            "id": "duration",
+            "nodeId": "4",
+            "input": "max_duration",
+            "semantic": "durationSeconds",
+            "required": true
+          },
+          {
+            "id": "encodeSeed",
+            "nodeId": "4",
+            "input": "seed",
+            "semantic": "seed",
+            "required": true
+          },
+          {
+            "id": "sampleSeed",
+            "nodeId": "7",
+            "input": "seed",
+            "semantic": "seed",
+            "required": true
+          }
+        ],
+        "promptRoles": [
+          {
+            "id": "primary",
+            "modelRuleId": "minimaxmusic3",
+            "loaderNodeIds": [
+              "1"
+            ],
+            "positiveSlotIds": [
+              "positive"
+            ],
+            "negativeSlotIds": [],
+            "negativeSupport": "unsupported"
+          }
+        ],
+        "selectedPromptRoleId": "primary",
+        "outputNodeIds": [
+          "9"
+        ],
+        "referenceGroups": []
+      },
+      "modelRuleId": "minimaxmusic3",
+      "roleId": "primary",
+      "operation": "music-generation",
+      "outputKind": "audio",
+      "registrationKinds": [
+        "bgm-track"
+      ],
+      "customNodePolicy": "forbidden",
+      "downloadPolicy": "forbidden",
+      "fixedReferenceCount": 0,
+      "review": {
+        "schemaVersion": 1,
+        "reviewVersion": "core-0.39.0-owned-music3-builtin-review-v2",
+        "contractFingerprintRevision": 2,
+        "comfyVersion": "0.39.0",
+        "loadedCoreCommit": "unknown",
+        "diskCoreCommit": "b0b743566f65daafc423b4fea8a2fbda94b3384a",
+        "reviewedNodes": {
+          "UNETLoader": {
+            "pythonModule": "nodes",
+            "reviewId": "core-0.39.0-minimal-local-review-v1",
+            "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+            "assets": {
+              "unet_name": {
+                "category": "diffusion_models",
+                "kind": "model",
+                "promptModel": true
+              }
+            }
+          },
+          "CLIPLoader": {
+            "pythonModule": "nodes",
+            "reviewId": "core-0.39.0-minimal-local-review-v1",
+            "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+            "assets": {
+              "clip_name": {
+                "category": "text_encoders",
+                "kind": "model"
+              }
+            }
+          },
+          "VAELoader": {
+            "pythonModule": "nodes",
+            "reviewId": "core-0.39.0-minimal-local-review-v1",
+            "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+            "assets": {
+              "vae_name": {
+                "category": "vae",
+                "kind": "model"
+              }
+            }
+          },
+          "MiniMaxMusic3TextEncode": {
+            "pythonModule": "comfy_extras.nodes_minimax_music",
+            "reviewId": "core-0.39.0-minimal-local-review-v1",
+            "sourceSha256": "ff0c9d6dfcd63b76fea0bf52026ee408272dc7a1ffc43fa6ced2097608e25af5"
+          },
+          "ConditioningZeroOut": {
+            "pythonModule": "nodes",
+            "reviewId": "core-0.39.0-minimal-local-review-v1",
+            "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38"
+          },
+          "EmptyMiniMaxMusic3LatentAudio": {
+            "pythonModule": "comfy_extras.nodes_minimax_music",
+            "reviewId": "core-0.39.0-minimal-local-review-v1",
+            "sourceSha256": "ff0c9d6dfcd63b76fea0bf52026ee408272dc7a1ffc43fa6ced2097608e25af5"
+          },
+          "KSampler": {
+            "pythonModule": "nodes",
+            "reviewId": "core-0.39.0-minimal-local-review-v1",
+            "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38"
+          },
+          "VAEDecodeAudio": {
+            "pythonModule": "comfy_extras.nodes_audio",
+            "reviewId": "core-0.39.0-minimal-local-review-v1",
+            "sourceSha256": "897429f8a08be406486beceb39a250c5c206a1162dce868003c93df80dd01887"
+          },
+          "SaveAudioAdvanced": {
+            "pythonModule": "comfy_extras.nodes_audio",
+            "reviewId": "core-0.39.0-minimal-local-review-v1",
+            "sourceSha256": "897429f8a08be406486beceb39a250c5c206a1162dce868003c93df80dd01887",
+            "outputKind": "audio"
+          }
+        },
+        "nodeSourceHashes": {
+          "nodes": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "comfy_extras.nodes_audio": "897429f8a08be406486beceb39a250c5c206a1162dce868003c93df80dd01887",
+          "comfy_extras.nodes_minimax_music": "ff0c9d6dfcd63b76fea0bf52026ee408272dc7a1ffc43fa6ced2097608e25af5",
+          "comfy_extras.nodes_wan": "3cd034fb8dbd574033dca6a32c55f6865b57c5ea80014c0198c1b3c7ca66e53e",
+          "comfy_extras.nodes_video": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "comfy_extras.nodes_minimax_h3": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c",
+          "comfy_extras.nodes_lt": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "comfy.text_encoders.minimax_music": "2ae0f72bc064e65aa6cde9fdd8cdbf5179397b167667ff930a720b5d85d285d5",
+          "comfy.ldm.minimax_music.prompt": "4d3d6607d6efb24117c7efc09124b344c5d7b949b7e8f2d5a86eb7efa7dd77a3",
+          "comfy.samplers": "f2c264ca9d394612f828e3ffe167c856a278a10e1711b269f0ba65dccb66393f",
+          "comfy.sample": "d274ed5b6abf83707b52b87d25d1716f072d5444954cf23ac0ed31a3b803ee1c",
+          "comfy.k_diffusion.sampling": "cfc4221ed0bc1f84a6f5689d3ec440cad3008c2541ab8f5e2599d1a73fac74ce"
+        },
+        "schemaFingerprints": {
+          "UNETLoader": "1a6924d2123ea41e99b4dfb086940f8cfa8f8aa97fe41d30fec6d2d35dcc838e",
+          "CLIPLoader": "ddaa7e4572eaa96616e8320d8a09150c80073b84ebc35880cc7a840a32587ccd",
+          "VAELoader": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef",
+          "MiniMaxMusic3TextEncode": "1a3e2f5ece1621823b6f3d9551afde5ec7e096842b1d89034995ef8ff991b493",
+          "ConditioningZeroOut": "56c02806282a044adc5ab28f9967439c053b23032ea964cb3626d5f475ccc496",
+          "EmptyMiniMaxMusic3LatentAudio": "41aa1971a742269944f60d04cf58d84577190f10f999098c534e39c36007d233",
+          "KSampler": "404692e16535b157ab865b3c7bc2a808c8e718e1741a059fcd368c0cbcb6f84d",
+          "VAEDecodeAudio": "f85d29a4831dabf919b9e637d0790bdfcdba4c5563db2b3593ea378f9c93a624",
+          "SaveAudioAdvanced": "3f473898ca98c99c3fad40b645d4795739921c9eff7e833ac2059014ea7e7558"
+        },
+        "sourceFiles": [
+          {
+            "module": "nodes",
+            "sha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38"
+          },
+          {
+            "module": "comfy_extras.nodes_audio",
+            "sha256": "897429f8a08be406486beceb39a250c5c206a1162dce868003c93df80dd01887"
+          },
+          {
+            "module": "comfy_extras.nodes_minimax_music",
+            "sha256": "ff0c9d6dfcd63b76fea0bf52026ee408272dc7a1ffc43fa6ced2097608e25af5"
+          },
+          {
+            "module": "comfy_extras.nodes_wan",
+            "sha256": "3cd034fb8dbd574033dca6a32c55f6865b57c5ea80014c0198c1b3c7ca66e53e"
+          },
+          {
+            "module": "comfy_extras.nodes_video",
+            "sha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c"
+          },
+          {
+            "module": "comfy_extras.nodes_minimax_h3",
+            "sha256": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c"
+          },
+          {
+            "module": "comfy_extras.nodes_lt",
+            "sha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243"
+          },
+          {
+            "module": "comfy.text_encoders.minimax_music",
+            "sha256": "2ae0f72bc064e65aa6cde9fdd8cdbf5179397b167667ff930a720b5d85d285d5"
+          },
+          {
+            "module": "comfy.ldm.minimax_music.prompt",
+            "sha256": "4d3d6607d6efb24117c7efc09124b344c5d7b949b7e8f2d5a86eb7efa7dd77a3"
+          },
+          {
+            "module": "comfy.samplers",
+            "sha256": "f2c264ca9d394612f828e3ffe167c856a278a10e1711b269f0ba65dccb66393f"
+          },
+          {
+            "module": "comfy.sample",
+            "sha256": "d274ed5b6abf83707b52b87d25d1716f072d5444954cf23ac0ed31a3b803ee1c"
+          },
+          {
+            "module": "comfy.k_diffusion.sampling",
+            "sha256": "cfc4221ed0bc1f84a6f5689d3ec440cad3008c2541ab8f5e2599d1a73fac74ce"
+          }
+        ],
+        "pythonVersion": "3.13.12 (main, Feb 12 2026, 00:38:53) [MSC v.1944 64 bit (AMD64)]",
+        "torchVersion": "2.12.1+cu130",
+        "packageVersions": [
+          {
+            "name": "comfyui-frontend-package",
+            "installed": "1.53.10",
+            "required": "1.53.10"
+          },
+          {
+            "name": "comfyui-workflow-templates",
+            "installed": "0.11.76",
+            "required": "0.11.76"
+          },
+          {
+            "name": "comfyui-embedded-docs",
+            "installed": "0.5.13",
+            "required": "0.5.13"
+          },
+          {
+            "name": "comfy-kitchen",
+            "installed": "0.2.37",
+            "required": "0.2.37"
+          },
+          {
+            "name": "comfy-aimdo",
+            "installed": "0.5.5",
+            "required": "0.5.5"
+          }
+        ],
+        "executionAdmission": "requires-fresh-owned-identity-and-native-fixed-music3-admission",
+        "scope": "Only the nine builtin classes in the exact zero-reference Music3 graph, original managed source identity, fixed euler/normal sampler, exact project-authorized three weights. No custom nodes or broader graph execution.",
+        "dependencyRule": "Exact loaded core source attestation must cover the helper dependency files. Disk commit/source hashes alone do not prove the running core.",
+        "excludedCustomNodes": [
+          {
+            "classFamily": "Qwen-TTS",
+            "reason": "Missing-tokenizer/model branches can download automatically; no local-only no-download guard in reviewed path."
+          },
+          {
+            "classFamily": "SDNQSampler",
+            "reason": "Default auto_download=true and arbitrary custom model/LoRA paths require a separately enforced fixed local policy; not a generic review grant."
+          }
+        ],
+        "notes": [
+          "Node presence is not review. Do not auto-refresh source/schema pins.",
+          "Preserve existing HuggingFace/Civitai credentials; never copy secret values into graph, manifest, export or provenance.",
+          "Core version/commit/package/Python/Torch/source/schema mismatch invalidates validation before submit.",
+          "This registry is conditional review evidence, not successful generation or licensing proof."
+        ],
+        "ownedSchemaReview": {
+          "checkedAtUtc": "2026-10-07T02:53:17.808Z",
+          "reason": "Desktop custom nodes extend builtin sampler/scheduler enums; owned no-custom core uses the unmodified source literals.",
+          "removedSamplers": [
+            "legacy_rk",
+            "rk",
+            "rk_beta",
+            "deis_3m_ode",
+            "deis_2m_ode",
+            "deis_3m",
+            "deis_2m",
+            "res_6s_ode",
+            "res_5s_ode",
+            "res_3s_ode",
+            "res_2s_ode",
+            "res_3m_ode",
+            "res_2m_ode",
+            "res_6s",
+            "res_5s",
+            "res_3s",
+            "res_2s",
+            "res_3m",
+            "res_2m"
+          ],
+          "removedSchedulers": [
+            "bong_tangent",
+            "beta57"
+          ],
+          "sourceLiteralsMatched": true,
+          "otherGraphSchemasChanged": 0,
+          "customApprovals": 0,
+          "actualGenerationRegistration": "not-run",
+          "sourceDependencies": [
+            {
+              "module": "comfy.samplers",
+              "sha256": "f2c264ca9d394612f828e3ffe167c856a278a10e1711b269f0ba65dccb66393f"
+            },
+            {
+              "module": "comfy.sample",
+              "sha256": "d274ed5b6abf83707b52b87d25d1716f072d5444954cf23ac0ed31a3b803ee1c"
+            },
+            {
+              "module": "comfy.k_diffusion.sampling",
+              "sha256": "cfc4221ed0bc1f84a6f5689d3ec440cad3008c2541ab8f5e2599d1a73fac74ce"
+            }
+          ]
+        }
+      },
+      "weights": [
+        {
+          "nodeId": "1",
+          "input": "unet_name",
+          "category": "diffusion_models",
+          "name": "minimax_music3_dit_fp16.safetensors",
+          "sha256": "45494a2b6b69af115902ff28eaf54118d19067aa54da01000f3e3efce7ba0e34",
+          "kind": "model",
+          "publicLicense": "unknown"
+        },
+        {
+          "nodeId": "2",
+          "input": "clip_name",
+          "category": "text_encoders",
+          "name": "minimax_music3_text_encoder_pruned_int8_convrot.safetensors",
+          "sha256": "010b7416d2336a08c711bc22ee65849c9623069ddb7d89bec011a75699e52014",
+          "kind": "model",
+          "publicLicense": "unknown"
+        },
+        {
+          "nodeId": "3",
+          "input": "vae_name",
+          "category": "vae",
+          "name": "minimax_music3_dav.safetensors",
+          "sha256": "2a32155b769be01445fcc2a8663b910fc9e1751e18dc1c3ec528064512d9ef0c",
+          "kind": "model",
+          "publicLicense": "unknown"
+        }
+      ],
+      "bindings": [
+        {
+          "slotId": "positive",
+          "nodeId": "4",
+          "input": "caption",
+          "semantic": "positive",
+          "rule": {
+            "type": "text",
+            "min": 1,
+            "max": 32000
+          }
+        },
+        {
+          "slotId": "lyrics",
+          "nodeId": "4",
+          "input": "lyrics",
+          "semantic": "lyrics",
+          "rule": {
+            "type": "lyrics",
+            "max": 16000
+          }
+        },
+        {
+          "slotId": "duration",
+          "nodeId": "4",
+          "input": "max_duration",
+          "semantic": "durationSeconds",
+          "rule": {
+            "type": "number",
+            "min": 0,
+            "max": 30,
+            "minExclusive": true,
+            "integer": false
+          }
+        },
+        {
+          "slotId": "encodeSeed",
+          "nodeId": "4",
+          "input": "seed",
+          "semantic": "seed",
+          "rule": {
+            "type": "unsigned"
+          }
+        },
+        {
+          "slotId": "sampleSeed",
+          "nodeId": "7",
+          "input": "seed",
+          "semantic": "seed",
+          "rule": {
+            "type": "unsigned"
+          }
+        }
+      ]
+    }
+  ],
+  "weightFiles": [
+    {
+      "category": "diffusion_models",
+      "name": "minimax_music3_dit_fp16.safetensors",
+      "sha256": "45494a2b6b69af115902ff28eaf54118d19067aa54da01000f3e3efce7ba0e34",
+      "bytes": 4914197682
+    },
+    {
+      "category": "text_encoders",
+      "name": "minimax_music3_text_encoder_pruned_int8_convrot.safetensors",
+      "sha256": "010b7416d2336a08c711bc22ee65849c9623069ddb7d89bec011a75699e52014",
+      "bytes": 9196611886
+    },
+    {
+      "category": "vae",
+      "name": "minimax_music3_dav.safetensors",
+      "sha256": "2a32155b769be01445fcc2a8663b910fc9e1751e18dc1c3ec528064512d9ef0c",
+      "bytes": 216696128
+    }
+  ]
+}

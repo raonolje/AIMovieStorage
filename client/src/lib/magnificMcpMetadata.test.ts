@@ -24,6 +24,13 @@ beforeEach(() => {
 });
 
 describe("Magnific 접수 메타데이터 전달", () => {
+  it("2.1 exact mode를 그대로 전송하고 schema 위반은 native 호출 전에 멈춘다", async () => {
+    await generateWithMagnific({...input,args:{mode:"imagen-nano-banana-2-1",resolution:"2k",aspectRatio:"16:9"}});
+    expect(mock.invoke.mock.calls.find(call=>call[0]==="magnific_generate_details")?.[1]).toMatchObject({args:{mode:"imagen-nano-banana-2-1",resolution:"2k"}});
+    mock.invoke.mockClear();
+    await expect(generateWithMagnific({...input,args:{mode:"imagen-nano-banana-2-1",references:Array.from({length:13},()=>({type:"image",identifier:"example"}))}})).rejects.toThrow("reference_limit");
+    expect(mock.invoke).not.toHaveBeenCalled();
+  });
   it("한 번만 생성하고 접수 직후·다운로드 후 기록하며 요청값과 파일 실측을 섞지 않는다", async () => {
     const updates: unknown[] = [];
     const result = await generateWithMagnific({ ...input, onMetadata: (metadata, path) => updates.push(JSON.parse(JSON.stringify({ metadata, path }))) });

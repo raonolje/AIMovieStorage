@@ -1,14 +1,12 @@
 /**
  * **모델별·버전별 프롬프트 규칙표.**
  *
- *
- *
  * # 왜 문서가 아니라 표인가
  *
  * 규칙은 이미 `prompts/models/*.md` 에 글로 적혀 있습니다. 그런데 글은 **사람과
  * LLM 만** 읽습니다. 우리 앱이 규칙 없이 조립하는 길(`buildCutVideoPrompt`)과
  * API 로 보내는 길은 그 글을 못 읽습니다. 그래서 «기계가 쓰는 사실»만 여기 표로
- * 두고, 문서는 «왜 그런가» 를 맡습니다. **둘이 어긋나면 이 표가 사실입니다.**
+ * 두고, 문서는 «왜 그런가» 를 맡습니다. 문서의 확인일·endpoint 경계를 함께 검토하며 이 표만으로 실제 지원을 보장하지 않습니다.
  *
  * # 버전을 왜 나누는가
  *
@@ -120,9 +118,9 @@ export const MODEL_RULES: ModelRule[] = [
     version: "3.1",
     kind: "video",
     doc: true,
-    audio: "always",
+    audio: "optional",
     dialogue: {
-      syntax: "colon",
+      syntax: "quoted",
       example: `The detective says: Of all the offices in this town, you had to walk into mine.`,
       korean: "spoken",
       maxSpeakers: 2,
@@ -132,13 +130,10 @@ export const MODEL_RULES: ModelRule[] = [
     bestSeconds: 8,
     camera: "front",
     quirks: [
-      "대사를 **자막으로 태워 넣습니다.** 지워지지 않습니다 — 자막이 프레임에 구워진 영상으로 배웠기 때문입니다.",
-      "오디오를 **끌 수 없습니다.**",
-      "네거티브 칸에 「no」·「don't」 를 쓰면 안 됩니다. 원치 않는 것을 **명사로만** 나열합니다.",
-      "네거티브 칸은 Vertex AI 에만 있습니다. Gemini API 에는 없습니다.",
-      "입력 상한이 약 1,024 토큰이라 **꼬리에 둔 대사가 먼저 잘립니다.**",
-      "타임스탬프로 구간을 나눌 수 있습니다 — 구간마다 `Emotion:` 과 `SFX:` 를 한 줄씩.",
-    ],
+      "공식 Gemini preview와 Vertex 001 endpoint의 기능·참조·길이 제한은 별개입니다. 선택 endpoint에서 확인하세요.",
+      "피사체·행동·카메라·구도·환경·조명·음향을 명확히 쓰며 대사는 따옴표와 화자·언어로 구분합니다.",
+      "자막·음성·참조 일관성은 프롬프트만으로 보장하지 않습니다. generateAudio와 negativePrompt 지원은 endpoint 계약을 따릅니다."
+],
   },
   {
     id: "veo-3",
@@ -146,13 +141,15 @@ export const MODEL_RULES: ModelRule[] = [
     family: "veo",
     version: "3",
     kind: "video",
-    doc: false,
-    audio: "always",
+    doc: true,
+    audio: "optional",
     dialogue: { syntax: "quoted", korean: "spoken", maxSpeakers: 2 },
     negative: "field",
     maxSeconds: 8,
     camera: "front",
-    quirks: ["3.1 과 같은 자막 문제. 타임스탬프 구간 나누기는 3.1 쪽이 낫습니다."],
+    quirks: [
+      "공식 Veo 3는 deprecated 상태입니다. 지원 중인 실제 relay/endpoint를 확인하고 Veo 3.1 기능을 자동 적용하지 마세요."
+],
   },
 
   // ── OpenAI Sora ───────────────────────────────────────────────────────
@@ -175,10 +172,9 @@ export const MODEL_RULES: ModelRule[] = [
     bestSeconds: 4,
     camera: "either",
     quirks: [
-      "공식 권고가 **「8초 한 번보다 4초 두 개를 이어 붙이는 쪽이 낫다」** 입니다.",
-      "한 생성에 인물 **둘 이하**를 권합니다.",
-      "자막을 피하는 법은 공식 문서가 **전혀 다루지 않습니다.**",
-    ],
+      "공식 Sora 2/Videos API는 2026-09-24 종료되었습니다. 보관 가이드이며 현재 사용 가능한 공식 경로로 제안하지 않습니다.",
+      "다른 relay의 지원은 별도 확인이 필요하며 폐지된 공식 endpoint 지원을 보장하지 않습니다."
+],
   },
 
   // ── Kuaishou Kling ────────────────────────────────────────────────────
@@ -201,12 +197,11 @@ export const MODEL_RULES: ModelRule[] = [
     bestSeconds: 10,
     camera: "back",
     quirks: [
-      "**한국어를 한국어로 잘 말합니다**(실사용으로 확인). 2.6 문서의 「중국어·영어만」 제약을 여기 옮기지 마세요.",
-      "**연기가 과장됩니다.** 톤 라벨은 하나만, 강도 말(`slight`·`subtle`)을 앞에 붙이고, 그래도 과하면 감정 이름을 빼세요.",
-      "화자가 바뀌는 자리에 `Immediately, as the speaker switches` 를 안 넣으면 **한 사람이 계속 말합니다.**",
-      "라벨은 고유하게. 대명사나 비슷한 다른 말로 부르면 화자가 섞입니다.",
-      "API 에는 네거티브 칸이 없습니다(옛 판에만 있습니다). 본문에 부정문으로 넣습니다.",
-    ],
+      "공식 native audio 언어에 중국어·영어·일본어·한국어·스페인어가 포함됩니다.",
+      "화자 이름과 음색·말하는 순서를 안정적으로 구분하고 연기 강도를 구체적으로 제한합니다.",
+      "First/last frame·Elements·MultiShot·motion control은 해당 endpoint와 mode의 입력 계약을 따릅니다.",
+      "negative_prompt는 버전과 endpoint에 따라 다릅니다. 실제 연결되지 않은 별도 입력을 만들어내지 마세요."
+],
   },
   {
     id: "kling-2.6",
@@ -214,7 +209,7 @@ export const MODEL_RULES: ModelRule[] = [
     family: "kling",
     version: "2.6",
     kind: "video",
-    doc: false,
+    doc: true,
     audio: "optional",
     dialogue: {
       syntax: "labeled",
@@ -222,14 +217,14 @@ export const MODEL_RULES: ModelRule[] = [
       korean: "translated",
       maxSpeakers: 2,
     },
-    negative: "inline",
-    maxSeconds: 15,
+    negative: "field",
+    maxSeconds: 10,
     bestSeconds: 10,
     camera: "back",
     quirks: [
-      "**한국어를 영어로 번역해서 발음합니다.** 소리로 내는 언어는 중국어·영어뿐입니다(공식).",
-      "3.0 과 대사 문법은 같습니다 — 다른 것은 언어뿐입니다.",
-    ],
+      "공식 native audio 언어는 중국어·영어입니다. 한국어 음성을 보장하지 않습니다.",
+      "Kling 3.0의 다국어/Elements 계약을 자동 적용하지 않습니다."
+],
   },
   {
     id: "kling-2.5",
@@ -256,7 +251,7 @@ export const MODEL_RULES: ModelRule[] = [
     family: "minimax",
     version: "H3",
     kind: "video",
-    doc: false,
+    doc: true,
     audio: "optional",
     dialogue: {
       syntax: "tagged",
@@ -264,17 +259,15 @@ export const MODEL_RULES: ModelRule[] = [
       korean: "spoken",
       maxSpeakers: 2,
     },
-    negative: "inline",
+    negative: "unsupported",
     maxSeconds: 15,
     bestSeconds: 10,
     camera: "either",
     quirks: [
-      "`<d>` 안에는 **언어 태그와 대사 원문만** 넣습니다. 연출·행동·음색은 전부 밖에.",
-      "대사의 단어와 문장부호를 **한 글자도 바꾸지 마세요**(공식).",
-      "**호흡·웃음·헐떡임은 화면 묘사가 아니라 소리 칸**(`overall_soundscape`)에 적습니다.",
-      "입을 안 움직이게 하려면 `while his lips remain completely closed` 를 붙입니다 — 보이스오버의 공식 방법.",
-      "길이는 5~15초 사이로 스냅됩니다(프레임 수가 17n+5).",
-    ],
+      "H3의 대사·오디오 계약과 Hailuo 2.3의 무음 영상 계약은 별개입니다. 선택 모델과 loader를 확인하세요.",
+      "H3 대사 태그와 한국어 원문을 보존하며 음색·행동·음향을 구분합니다.",
+      "별도 negative 입력을 지원한다고 가정하지 않습니다. Comfy graph에 연결된 역할의 negativeSupport를 우선합니다."
+],
   },
   {
     id: "hailuo-2.3",
@@ -282,16 +275,17 @@ export const MODEL_RULES: ModelRule[] = [
     family: "minimax",
     version: "2.3",
     kind: "video",
-    doc: false,
+    doc: true,
     audio: "none",
     dialogue: { syntax: "none", korean: "unsupported" },
-    negative: "inline",
+    negative: "unsupported",
     maxSeconds: 10,
     camera: "bracket",
     quirks: [
-      "**무음입니다.**",
-      "카메라를 대괄호로 적습니다 — `[Push in]`, `[Pan left,Pedestal up]`. 한 괄호에 **최대 세 개**.",
-    ],
+      "무음 모델입니다. positive prompt 최대 2,000자이며 negative_prompt가 없습니다.",
+      "카메라를 대괄호로 적고 한 괄호에 최대 세 움직임을 둡니다.",
+      "First/last frame은 Hailuo 02의 별도 입력이며 Hailuo 2.3 I2V의 first image 지원과 혼동하지 마세요."
+],
   },
 
   // ── Alibaba Wan ───────────────────────────────────────────────────────
@@ -301,7 +295,7 @@ export const MODEL_RULES: ModelRule[] = [
     family: "wan",
     version: "2.5",
     kind: "video",
-    doc: false,
+    doc: true,
     audio: "optional",
     dialogue: {
       syntax: "quoted",
@@ -313,10 +307,9 @@ export const MODEL_RULES: ModelRule[] = [
     maxSeconds: 10,
     camera: "either",
     quirks: [
-      "공식 공식이 있습니다 — **대사 + 감정 + 톤 + 속도 + 음색 + 억양**을 한 문자열로.",
-      "다인물 규칙은 Kling 과 같습니다(라벨 고유·행동 먼저·톤 분리·`Immediately,` 로 순서 고정).",
-      "가중치가 비공개라 **API 로만** 씁니다.",
-    ],
+      "Hosted preview의 positive 최대 1,500자와 negative 입력을 구분하며 5/10초·첫 이미지·audio_url은 해당 endpoint에서 확인합니다.",
+      "R2V·끝 프레임·로컬 Wan 2.2 기능을 이 endpoint에 자동 적용하지 않습니다."
+],
   },
   {
     id: "wan-2.2",
@@ -324,16 +317,16 @@ export const MODEL_RULES: ModelRule[] = [
     family: "wan",
     version: "2.2",
     kind: "video",
-    doc: false,
+    doc: true,
     audio: "none",
     dialogue: { syntax: "none", korean: "unsupported" },
     negative: "field",
     maxSeconds: 5,
     camera: "either",
     quirks: [
-      "**소리를 안 만듭니다.** 우리 앱에 탑재된 로컬 판이 이것입니다.",
-      "립싱크 판(S2V)은 소리를 **입력으로 받습니다** — 음성을 따로 준비해야 합니다.",
-    ],
+      "표준 T2V/I2V는 무음입니다. 로컬 Animate·S2V·hosted KF2V는 별도 graph와 모델입니다.",
+      "Hosted positive 800자와 로컬 Comfy 입력 한도는 별개입니다. negative는 실제 conditioning 역할에 연결된 경우에 적용합니다."
+],
   },
 
   // ── Lightricks LTX ────────────────────────────────────────────────────
@@ -343,7 +336,7 @@ export const MODEL_RULES: ModelRule[] = [
     family: "ltx",
     version: "2.5",
     kind: "video",
-    doc: false,
+    doc: true,
     audio: "optional",
     dialogue: {
       syntax: "segmented",
@@ -351,16 +344,14 @@ export const MODEL_RULES: ModelRule[] = [
       korean: "spoken",
       maxSpeakers: 2,
     },
-    negative: "inline",
+    negative: "unsupported",
     maxSeconds: 10,
     camera: "either",
     quirks: [
-      "**한 문장을 통째로 따옴표에 넣으면 낭독이 됩니다.** 구 → 연기 지시 → 구 로 끊으세요.",
-      "시선을 바꾸는 지시는 **구와 구 사이에만** 먹습니다. 말하는 도중에는 무시됩니다.",
-      "**오디오 지시는 프롬프트 맨 끝에** 둡니다(다른 모델과 반대입니다).",
-      "한 비트에 지시 셋을 넣으면 연기가 경련처럼 됩니다.",
-      "립싱크가 필요하면 **컷을 나누지 말고 단일 연속 테이크**로.",
-    ],
+      "현재 시제의 시간순 4~8문장으로 피사체·동작·카메라·종료 자세를 씁니다.",
+      "Hosted API는 별도 negative 입력이 없지만 local Comfy graph는 negative conditioning을 연결할 수 있습니다.",
+      "First/last·A2V·자동 길이·audio mute는 선택 endpoint/graph의 입력 계약을 따릅니다."
+],
   },
 
   // ── ByteDance Seedance ────────────────────────────────────────────────
@@ -388,14 +379,10 @@ export const MODEL_RULES: ModelRule[] = [
     bestSeconds: 10,
     camera: "either",
     quirks: [
-      "기호로 갈라 적습니다 — 대사 `{}` · 효과음 `<>` · 음악 `（）` · 자막 `【】`.",
-      "컷마다 **정수 초 구간**을 붙입니다 — `Shot 1 (0-3s):`.",
-      "**칸을 빠뜨리면 정해진 방식으로 망가집니다** — 장소가 막연하면 컷마다 딴 곳, 카메라를 안 적으면 그 컷이 실패, 첫 프레임·블로킹이 없으면 동작을 시작하지 못합니다.",
-      "인물 자리를 **화면 백분율**로 못 박을 수 있습니다 — `THE WOMAN 화면 왼쪽, x 42%, y 44%`.",
-      "좌우 방향이 컷마다 뒤집히면 다중 컷이 통째로 흐트러집니다.",
-      "공식이 **「자막을 100% 없애는 것은 불가능」** 이라고 인정합니다.",
-      "중국어와 영어를 섞지 마세요(고유명사 제외).",
-    ],
+      "Shot 번호와 정수 초 구간을 사용합니다. 대사 {}·효과음 <>·음악 ()·자막 〖〗를 구분합니다.",
+      "비중국어 대사의 언어를 명시하고 2~3개 안정된 외형 특징과 참조 역할을 일관되게 유지합니다.",
+      "제공자의 이미지30/영상10/오디오10 입력 지원이 Magnific에서도 지원된다는 뜻은 아닙니다."
+],
   },
   {
     id: "seedance-2.0",
@@ -405,11 +392,14 @@ export const MODEL_RULES: ModelRule[] = [
     kind: "video",
     doc: true,
     audio: "optional",
-    dialogue: { syntax: "braced", korean: "spoken", maxSpeakers: 2 },
+    dialogue: { syntax: "quoted", korean: "spoken", maxSpeakers: 2 },
     negative: "inline",
     maxSeconds: 15,
     camera: "either",
-    quirks: ["2.5 와 같은 기호를 쓰되 **초 구간 표기가 없습니다.**"],
+    quirks: [
+      "Shot 번호를 사용하며 타임스탬프나 2.5의 기호 계약을 자동 적용하지 않습니다.",
+      "참조 역할과 2~3개 안정된 외형 특징을 구분합니다. 제공자 9이미지/3영상/3오디오 한도가 Magnific 한도는 아닙니다."
+],
   },
 
   // ── Runway ────────────────────────────────────────────────────────────
@@ -419,26 +409,21 @@ export const MODEL_RULES: ModelRule[] = [
     family: "runway",
     version: "4.5",
     kind: "video",
-    doc: false,
+    doc: true,
     audio: "none",
     dialogue: { syntax: "none", korean: "unsupported" },
     negative: "unsupported",
     maxSeconds: 10,
     camera: "front",
     quirks: [
-      "**소리를 안 만듭니다.** 대사 문법 자체가 없습니다.",
-      "**부정문이 통하지 않습니다.** `not blurry` 가 아니라 `sharp focus` 로, `No camera movement` 가 아니라 `Locked camera. The camera remains still.` 로 적습니다.",
-      "**JSON 으로 적어도 소용없습니다** — 생성 모델이 형식을 무시합니다(공식 FAQ).",
-      "넣은 그림에 이미 있는 것을 다시 묘사하지 마세요. 인물은 `the subject` 처럼 일반 지칭으로.",
-      "표정 비트를 초로 찍을 수 있습니다 — `[00:03 through 00:04] black eyes squint`.",
-    ],
+      "I2V는 첫 이미지의 외형을 반복하기보다 피사체·환경·카메라의 동작을 긍정으로 적습니다.",
+      "Native 끝 프레임·오디오·negative 입력은 확인되지 않았습니다. 별도 edit/motion 경로와 혼동하지 마세요."
+],
   },
 ];
 
 /**
  * **품질 수식어** — 정보를 주지 않으면서 «예쁜 쪽» 편향만 강화하는 말들.
- *
- *
  *
  * 요즘 상용 모델은 **수천 장의 극히 매력적인 이미지로 추가 미세조정**해서 나옵니다
  * (Meta 의 Emu 논문). 그래서 가만두면 늘 광고 사진이 나옵니다. 여기에 「8k」·
@@ -500,7 +485,7 @@ export function modelRuleOf(id: string | null | undefined): ModelRule | null {
  * 통하는 모양으로 짓습니다(여태 하던 그대로).
  */
 export function matchModelRule(text: string | null | undefined): ModelRule | null {
-  if (!text) return null;
+  if (!text || /music|acestep|suno/i.test(text)) return null;
   /*
     **판 번호의 점과 하이픈을 같게 봅니다.**
 
@@ -591,8 +576,6 @@ export function fitSeconds(
 /**
  * 영문 프롬프트에 **한국어가 섞였는지** 봅니다.
  *
- *
- *
  * 규칙으로 조립하는 길은 **번역을 못 합니다.** 사람이 한국어로 적어 둔 컷 제목·설명·
  * 대사·VFX 가 영문 칸에도 그대로 들어갑니다. 지워 버리면 영문 프롬프트가 알맹이를
  * 잃으므로 **버리지 않고 알려만 줍니다** — 어느 쪽을 고를지는 사람이 정합니다.
@@ -642,6 +625,9 @@ export function koreanInEnglish(en: string): { chunks: string[]; hint: string } 
  * 그쪽이 이깁니다.
  */
 export interface TargetModel {
+  providerModelId?: string;
+  aliases?: readonly string[];
+  guideOnly?: boolean;
   /** `MODEL_RULES` 의 id 이자 `prompts/models/<id>.md` 의 이름. */
   id: string;
   label: string;
@@ -654,6 +640,7 @@ export interface TargetModel {
 
 const IMAGE_TARGETS: TargetModel[] = [
   { id: "nano-banana", label: "Nano Banana Pro", kind: "image", magnific: "imagen-nano-banana-2", guided: true },
+  { id: "nano-banana-2.1", label: "Nano Banana 2.1", aliases: ["Google Nano Banana 2.1"], kind: "image", providerModelId: "gemini-nano-banana-2.1", magnific: "imagen-nano-banana-2-1", guided: true },
   { id: "gpt-image", label: "GPT 2.5 Image", kind: "image", magnific: "gpt-2", guided: true },
   // 미드저니는 디스코드로만 돌아서 «구성» 으로 못 보냅니다 — 프롬프트만 복사해 갑니다.
   { id: "midjourney", label: "Midjourney", kind: "image", guided: true },
@@ -687,8 +674,9 @@ export function targetModelOf(id?: string | null): TargetModel | null {
   */
   return (
     all.find((item) => item.id === id) ??
-    all.find((item) => item.magnific === id) ??
-    (matchModelRule(id) ? all.find((item) => item.id === matchModelRule(id)!.id) ?? null : null)
+      all.find((item) => item.magnific === id) ??
+      all.find((item) => item.providerModelId === id) ??
+    all.find((item) => item.label === id || item.aliases?.includes(id)) ?? null
   );
 }
 
@@ -697,7 +685,8 @@ export function targetModelOf(id?: string | null): TargetModel | null {
  * 예전 작품은 MCP 로 고른 슬러그를 저장하고 있어서요. 되짚는 규칙은 여기 한 벌입니다.
  */
 export function videoRuleIdOf(videoModel?: string | null): string | undefined {
-  return targetModelOf(videoModel ?? undefined)?.id ?? matchModelRule(videoModel)?.id;
+  const local: Record<string, string> = { minimaxh3: "minimax-h3", wanvideo: "wan-2.2", ltx25: "ltx-2.5" };
+  return videoModel && local[videoModel] ? local[videoModel] : targetModelOf(videoModel ?? undefined)?.id ?? videoModel ?? undefined;
 }
 
 /**

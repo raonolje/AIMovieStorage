@@ -1,0 +1,1128 @@
+{
+  "schemaVersion": 2,
+  "status": "offline-design-only-native-execution-blocked",
+  "entries": [
+    {
+      "id": "h3-ref2va-1-identity",
+      "workflowSha256": "cd8df6e990f2630b8ca52f9ab4ac87903a9301d33dffffa76056b7c698545a84",
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "6",
+              "input": "prompt",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience."
+            },
+            {
+              "nodeId": "8",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "6",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 1344
+            },
+            {
+              "nodeId": "6",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "6",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 124
+            },
+            {
+              "nodeId": "12",
+              "input": "fps",
+              "id": "fps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "identity1",
+              "semantic": "identityImage",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "minimaxh3",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "13"
+          ],
+          "referenceGroups": [
+            {
+              "id": "identity",
+              "role": "identityImage",
+              "mediaKind": "image",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "identity1"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "single"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"6\",\"input\":\"prompt\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.\"},{\"id\":\"seed\",\"nodeId\":\"8\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"width\",\"nodeId\":\"6\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":1344},{\"id\":\"height\",\"nodeId\":\"6\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":768},{\"id\":\"frames\",\"nodeId\":\"6\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":124},{\"id\":\"fps\",\"nodeId\":\"12\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"identity1\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"minimaxh3\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"13\"],\"referenceGroups\":[{\"id\":\"identity\",\"role\":\"identityImage\",\"mediaKind\":\"image\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"identity1\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"single\"}]}",
+        "originalV1SelectionSha256": "c383efad7cca614a581743665d40730f25bbcc16dc5bd98afcbe0d04ebf3be3a",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "c383efad7cca614a581743665d40730f25bbcc16dc5bd98afcbe0d04ebf3be3a"
+        },
+        "reviewedVariantId": "h3-ref2va-1-identity",
+        "extensions": [
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_images",
+            "referenceGroupId": "identity",
+            "component": "image",
+            "count": 1
+          }
+        ]
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "h3-ref2va-2-identity",
+      "workflowSha256": "d06a88eb4c0a6c7ce8a753fde332c33b0ebc5f4cdb25d024ba006dc922faa98d",
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "6",
+              "input": "prompt",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience."
+            },
+            {
+              "nodeId": "8",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "6",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 1344
+            },
+            {
+              "nodeId": "6",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "6",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 124
+            },
+            {
+              "nodeId": "12",
+              "input": "fps",
+              "id": "fps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "identity1",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "21",
+              "input": "image",
+              "id": "identity2",
+              "semantic": "identityImage",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "minimaxh3",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "13"
+          ],
+          "referenceGroups": [
+            {
+              "id": "identity",
+              "role": "identityImage",
+              "mediaKind": "image",
+              "minItems": 2,
+              "maxItems": 2,
+              "slotIds": [
+                "identity1",
+                "identity2"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "multiple"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"6\",\"input\":\"prompt\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.\"},{\"id\":\"seed\",\"nodeId\":\"8\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"width\",\"nodeId\":\"6\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":1344},{\"id\":\"height\",\"nodeId\":\"6\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":768},{\"id\":\"frames\",\"nodeId\":\"6\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":124},{\"id\":\"fps\",\"nodeId\":\"12\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"identity1\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"identity2\",\"nodeId\":\"21\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"minimaxh3\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"13\"],\"referenceGroups\":[{\"id\":\"identity\",\"role\":\"identityImage\",\"mediaKind\":\"image\",\"minItems\":2,\"maxItems\":2,\"slotIds\":[\"identity1\",\"identity2\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"multiple\"}]}",
+        "originalV1SelectionSha256": "5e31948ede60da6205bc192c83239070b19fb1f6025e7e4c1b89d859681bd58d",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "5e31948ede60da6205bc192c83239070b19fb1f6025e7e4c1b89d859681bd58d"
+        },
+        "reviewedVariantId": "h3-ref2va-2-identity",
+        "extensions": [
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_images",
+            "referenceGroupId": "identity",
+            "component": "image",
+            "count": 2
+          }
+        ]
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "h3-ref2va-4-identity",
+      "workflowSha256": "29d0b5763bdf7e70cadb949dc826b7fffaae9d05f90f56a5d4b62fe51bf189ae",
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "6",
+              "input": "prompt",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience."
+            },
+            {
+              "nodeId": "8",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "6",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 1344
+            },
+            {
+              "nodeId": "6",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "6",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 124
+            },
+            {
+              "nodeId": "12",
+              "input": "fps",
+              "id": "fps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "identity1",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "21",
+              "input": "image",
+              "id": "identity2",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "22",
+              "input": "image",
+              "id": "identity3",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "23",
+              "input": "image",
+              "id": "identity4",
+              "semantic": "identityImage",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "minimaxh3",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "13"
+          ],
+          "referenceGroups": [
+            {
+              "id": "identity",
+              "role": "identityImage",
+              "mediaKind": "image",
+              "minItems": 4,
+              "maxItems": 4,
+              "slotIds": [
+                "identity1",
+                "identity2",
+                "identity3",
+                "identity4"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "multiple"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"6\",\"input\":\"prompt\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.\"},{\"id\":\"seed\",\"nodeId\":\"8\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"width\",\"nodeId\":\"6\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":1344},{\"id\":\"height\",\"nodeId\":\"6\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":768},{\"id\":\"frames\",\"nodeId\":\"6\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":124},{\"id\":\"fps\",\"nodeId\":\"12\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"identity1\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"identity2\",\"nodeId\":\"21\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"identity3\",\"nodeId\":\"22\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"identity4\",\"nodeId\":\"23\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"minimaxh3\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"13\"],\"referenceGroups\":[{\"id\":\"identity\",\"role\":\"identityImage\",\"mediaKind\":\"image\",\"minItems\":4,\"maxItems\":4,\"slotIds\":[\"identity1\",\"identity2\",\"identity3\",\"identity4\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"multiple\"}]}",
+        "originalV1SelectionSha256": "eb9ee4a17b9795a1a700534f7ca484621a4fa8484bce6985582d416bdd68f81b",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "eb9ee4a17b9795a1a700534f7ca484621a4fa8484bce6985582d416bdd68f81b"
+        },
+        "reviewedVariantId": "h3-ref2va-4-identity",
+        "extensions": [
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_images",
+            "referenceGroupId": "identity",
+            "component": "image",
+            "count": 4
+          }
+        ]
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "h3-ref2va-2-identity-video",
+      "workflowSha256": "8dc372a6e7374276ab9ca47520e98bcf16417cd5f28502114d412da06d4b4570",
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "6",
+              "input": "prompt",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience."
+            },
+            {
+              "nodeId": "8",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "6",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 1344
+            },
+            {
+              "nodeId": "6",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "6",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 124
+            },
+            {
+              "nodeId": "12",
+              "input": "fps",
+              "id": "fps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "identity1",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "21",
+              "input": "image",
+              "id": "identity2",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "40",
+              "input": "file",
+              "id": "referenceVideo",
+              "semantic": "sourceVideo",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "minimaxh3",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "13"
+          ],
+          "referenceGroups": [
+            {
+              "id": "identity",
+              "role": "identityImage",
+              "mediaKind": "image",
+              "minItems": 2,
+              "maxItems": 2,
+              "slotIds": [
+                "identity1",
+                "identity2"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "multiple"
+            },
+            {
+              "id": "referenceVideo",
+              "role": "sourceVideo",
+              "mediaKind": "video",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "referenceVideo"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "none"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"6\",\"input\":\"prompt\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.\"},{\"id\":\"seed\",\"nodeId\":\"8\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"width\",\"nodeId\":\"6\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":1344},{\"id\":\"height\",\"nodeId\":\"6\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":768},{\"id\":\"frames\",\"nodeId\":\"6\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":124},{\"id\":\"fps\",\"nodeId\":\"12\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"identity1\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"identity2\",\"nodeId\":\"21\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"referenceVideo\",\"nodeId\":\"40\",\"input\":\"file\",\"semantic\":\"sourceVideo\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"minimaxh3\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"13\"],\"referenceGroups\":[{\"id\":\"identity\",\"role\":\"identityImage\",\"mediaKind\":\"image\",\"minItems\":2,\"maxItems\":2,\"slotIds\":[\"identity1\",\"identity2\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"multiple\"},{\"id\":\"referenceVideo\",\"role\":\"sourceVideo\",\"mediaKind\":\"video\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"referenceVideo\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"none\"}]}",
+        "originalV1SelectionSha256": "9376ac3e600183551eb75d0db25bc8b896ed67f63a7c779cb5d48fc35a4683b2",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "9376ac3e600183551eb75d0db25bc8b896ed67f63a7c779cb5d48fc35a4683b2"
+        },
+        "reviewedVariantId": "h3-ref2va-2-identity-video",
+        "extensions": [
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_images",
+            "referenceGroupId": "identity",
+            "component": "image",
+            "count": 2
+          },
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_videos",
+            "referenceGroupId": "referenceVideo",
+            "component": "video-frames",
+            "count": 1
+          },
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_video_audios",
+            "referenceGroupId": "referenceVideo",
+            "component": "video-audio",
+            "count": 1
+          }
+        ]
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "h3-ref2va-1-identity-audio",
+      "workflowSha256": "70b14915ee671bea1b760ec232cd1ee21ab22f497c772f70927cdde7eb104fc9",
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "6",
+              "input": "prompt",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience."
+            },
+            {
+              "nodeId": "8",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "6",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 1344
+            },
+            {
+              "nodeId": "6",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "6",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 124
+            },
+            {
+              "nodeId": "12",
+              "input": "fps",
+              "id": "fps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "identity1",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "42",
+              "input": "audio",
+              "id": "referenceAudio",
+              "semantic": "audio",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "minimaxh3",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "13"
+          ],
+          "referenceGroups": [
+            {
+              "id": "identity",
+              "role": "identityImage",
+              "mediaKind": "image",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "identity1"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "single"
+            },
+            {
+              "id": "referenceAudio",
+              "role": "audio",
+              "mediaKind": "audio",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "referenceAudio"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "none"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"6\",\"input\":\"prompt\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.\"},{\"id\":\"seed\",\"nodeId\":\"8\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"width\",\"nodeId\":\"6\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":1344},{\"id\":\"height\",\"nodeId\":\"6\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":768},{\"id\":\"frames\",\"nodeId\":\"6\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":124},{\"id\":\"fps\",\"nodeId\":\"12\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"identity1\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"referenceAudio\",\"nodeId\":\"42\",\"input\":\"audio\",\"semantic\":\"audio\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"minimaxh3\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"13\"],\"referenceGroups\":[{\"id\":\"identity\",\"role\":\"identityImage\",\"mediaKind\":\"image\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"identity1\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"single\"},{\"id\":\"referenceAudio\",\"role\":\"audio\",\"mediaKind\":\"audio\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"referenceAudio\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"none\"}]}",
+        "originalV1SelectionSha256": "6a0c5488123fa8041e2b2c0234c4f257c9981e771ac6677ab94f48e3682b3e4c",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "6a0c5488123fa8041e2b2c0234c4f257c9981e771ac6677ab94f48e3682b3e4c"
+        },
+        "reviewedVariantId": "h3-ref2va-1-identity-audio",
+        "extensions": [
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_images",
+            "referenceGroupId": "identity",
+            "component": "image",
+            "count": 1
+          },
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_audios",
+            "referenceGroupId": "referenceAudio",
+            "component": "audio-reference",
+            "count": 1
+          }
+        ]
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "ltx25-distilled-t2va",
+      "workflowSha256": "c2616a9d694d32feaa2b3d5743e79d0f4e032ca5c0ca761178a5a4f8768f61fe",
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "5",
+              "input": "text",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound."
+            },
+            {
+              "nodeId": "7",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "7",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 512
+            },
+            {
+              "nodeId": "7",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 121
+            },
+            {
+              "nodeId": "8",
+              "input": "frames_number",
+              "id": "audioFrames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 121
+            },
+            {
+              "nodeId": "9",
+              "input": "frame_rate",
+              "id": "conditioningFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "8",
+              "input": "frame_rate",
+              "id": "audioFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "17",
+              "input": "fps",
+              "id": "outputFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "12",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "ltx2.5",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "18"
+          ],
+          "referenceGroups": []
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"5\",\"input\":\"text\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound.\"},{\"id\":\"width\",\"nodeId\":\"7\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":768},{\"id\":\"height\",\"nodeId\":\"7\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":512},{\"id\":\"frames\",\"nodeId\":\"7\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":121},{\"id\":\"audioFrames\",\"nodeId\":\"8\",\"input\":\"frames_number\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":121},{\"id\":\"conditioningFps\",\"nodeId\":\"9\",\"input\":\"frame_rate\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"audioFps\",\"nodeId\":\"8\",\"input\":\"frame_rate\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"outputFps\",\"nodeId\":\"17\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"seed\",\"nodeId\":\"12\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"ltx2.5\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"18\"],\"referenceGroups\":[]}",
+        "originalV1SelectionSha256": "638791106b99104bbeb00ac1716f8b8b1399b4caa2c322a2f363231769e9ea89",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "638791106b99104bbeb00ac1716f8b8b1399b4caa2c322a2f363231769e9ea89"
+        },
+        "reviewedVariantId": "ltx25-distilled-t2va",
+        "extensions": [
+          {
+            "kind": "numeric-union",
+            "nodeId": "8",
+            "input": "frame_rate",
+            "members": [
+              "FLOAT",
+              "INT"
+            ]
+          }
+        ]
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "ltx25-distilled-first-frame",
+      "workflowSha256": "45e593b5fe0b718a740547bc9fab8198f66b2b3c12de75a9af53265ed3116448",
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "5",
+              "input": "text",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound."
+            },
+            {
+              "nodeId": "7",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "7",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 512
+            },
+            {
+              "nodeId": "7",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 121
+            },
+            {
+              "nodeId": "8",
+              "input": "frames_number",
+              "id": "audioFrames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 121
+            },
+            {
+              "nodeId": "9",
+              "input": "frame_rate",
+              "id": "conditioningFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "8",
+              "input": "frame_rate",
+              "id": "audioFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "17",
+              "input": "fps",
+              "id": "outputFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "12",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "firstFrame",
+              "semantic": "firstFrame",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "ltx2.5",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "18"
+          ],
+          "referenceGroups": [
+            {
+              "id": "firstFrame",
+              "role": "firstFrame",
+              "mediaKind": "image",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "firstFrame"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "none"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"5\",\"input\":\"text\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound.\"},{\"id\":\"width\",\"nodeId\":\"7\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":768},{\"id\":\"height\",\"nodeId\":\"7\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":512},{\"id\":\"frames\",\"nodeId\":\"7\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":121},{\"id\":\"audioFrames\",\"nodeId\":\"8\",\"input\":\"frames_number\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":121},{\"id\":\"conditioningFps\",\"nodeId\":\"9\",\"input\":\"frame_rate\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"audioFps\",\"nodeId\":\"8\",\"input\":\"frame_rate\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"outputFps\",\"nodeId\":\"17\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"seed\",\"nodeId\":\"12\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"firstFrame\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"firstFrame\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"ltx2.5\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"18\"],\"referenceGroups\":[{\"id\":\"firstFrame\",\"role\":\"firstFrame\",\"mediaKind\":\"image\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"firstFrame\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"none\"}]}",
+        "originalV1SelectionSha256": "84d2a045b69093bbe43c226347c15f0aa2be3b75b363a2d83a0ed87d261bcc3c",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "84d2a045b69093bbe43c226347c15f0aa2be3b75b363a2d83a0ed87d261bcc3c"
+        },
+        "reviewedVariantId": "ltx25-distilled-first-frame",
+        "extensions": [
+          {
+            "kind": "numeric-union",
+            "nodeId": "8",
+            "input": "frame_rate",
+            "members": [
+              "FLOAT",
+              "INT"
+            ]
+          }
+        ]
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "ltx25-distilled-first-last-frame",
+      "workflowSha256": "d659b63ea409916a3f26726e07605a670468f7d27e82fb7aaad81afb29f43a7d",
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "5",
+              "input": "text",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound."
+            },
+            {
+              "nodeId": "7",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "7",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 512
+            },
+            {
+              "nodeId": "7",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 121
+            },
+            {
+              "nodeId": "8",
+              "input": "frames_number",
+              "id": "audioFrames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 121
+            },
+            {
+              "nodeId": "9",
+              "input": "frame_rate",
+              "id": "conditioningFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "8",
+              "input": "frame_rate",
+              "id": "audioFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "17",
+              "input": "fps",
+              "id": "outputFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "12",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "firstFrame",
+              "semantic": "firstFrame",
+              "required": true
+            },
+            {
+              "nodeId": "21",
+              "input": "image",
+              "id": "endFrame",
+              "semantic": "endFrame",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "ltx2.5",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "18"
+          ],
+          "referenceGroups": [
+            {
+              "id": "firstFrame",
+              "role": "firstFrame",
+              "mediaKind": "image",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "firstFrame"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "none"
+            },
+            {
+              "id": "endFrame",
+              "role": "endFrame",
+              "mediaKind": "image",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "endFrame"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "none"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"5\",\"input\":\"text\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound.\"},{\"id\":\"width\",\"nodeId\":\"7\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":768},{\"id\":\"height\",\"nodeId\":\"7\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":512},{\"id\":\"frames\",\"nodeId\":\"7\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":121},{\"id\":\"audioFrames\",\"nodeId\":\"8\",\"input\":\"frames_number\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":121},{\"id\":\"conditioningFps\",\"nodeId\":\"9\",\"input\":\"frame_rate\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"audioFps\",\"nodeId\":\"8\",\"input\":\"frame_rate\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"outputFps\",\"nodeId\":\"17\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"seed\",\"nodeId\":\"12\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"firstFrame\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"firstFrame\",\"required\":true},{\"id\":\"endFrame\",\"nodeId\":\"21\",\"input\":\"image\",\"semantic\":\"endFrame\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"ltx2.5\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"18\"],\"referenceGroups\":[{\"id\":\"firstFrame\",\"role\":\"firstFrame\",\"mediaKind\":\"image\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"firstFrame\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"none\"},{\"id\":\"endFrame\",\"role\":\"endFrame\",\"mediaKind\":\"image\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"endFrame\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"none\"}]}",
+        "originalV1SelectionSha256": "9b08294d0f1a0df7f9f6d74df93da65978a80a8ff55b026ae487023271284456",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "9b08294d0f1a0df7f9f6d74df93da65978a80a8ff55b026ae487023271284456"
+        },
+        "reviewedVariantId": "ltx25-distilled-first-last-frame",
+        "extensions": [
+          {
+            "kind": "numeric-union",
+            "nodeId": "8",
+            "input": "frame_rate",
+            "members": [
+              "FLOAT",
+              "INT"
+            ]
+          }
+        ]
+      },
+      "executionAdmission": false
+    }
+  ]
+}

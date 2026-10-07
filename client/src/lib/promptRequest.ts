@@ -10,6 +10,8 @@ import {
   startLlmJob,
 } from "@/lib/llmActivity";
 import type { RequestTemplateId } from "@/components/LlmRequestButton";
+import { canonicalPromptModel, promptResultForModel } from "./promptModelSelection";
+import { musicLyricsResult } from "./musicPromptPolicy";
 
 /**
  * 요청문을 만들어 API 로 보내고, 네 칸짜리 프롬프트를 받아 옵니다.
@@ -184,10 +186,19 @@ export async function buildPromptRequestText(
   options: Pick<LlmRequestOptions, "template" | "data" | "modelId" | "platformId" | "techniques">,
   imageCount = 0,
 ): Promise<{ fixed: string; fresh: string }> {
+  const data = options.data as { generationTarget?: import("./promptModelSelection").PromptSelection; targetTool?: string; nanoBanana21?: import("./nanoBanana21Profile").NanoBanana21Options } | null;
+  const target=data?.generationTarget;
+  if(target?.error)throw new Error(target.error);
+  if(target?.route==="comfy"&&!target.workflowTarget)throw new Error("workflow_prompt_role_required: workflow와 프롬프트 역할을 먼저 선택하세요. 다른 모델로 대체하지 않습니다.");
+  const workflow=target?.workflowTarget?(await import("./comfyWorkflowLibrary")).workflowPromptContext(target.workflowTarget):undefined;
+  const modelId = canonicalPromptModel(data?.generationTarget?.modelId ?? options.modelId ?? (options.template === "bgm-prompt" ? data?.targetTool : undefined));
+  const platformId = data?.generationTarget?.platformId ?? options.platformId;
+  const nano21=await import("./nanoBanana21Profile");
+  const nano21Context=nano21.isNanoBanana21(modelId)?{provider:nano21.NANO_BANANA_21,request:nano21.validateNanoBanana21Options(data?.nanoBanana21)}:undefined;
   const [system, modelGuide, platformGuide, techniqueGuides, commonRules] = await Promise.all([
     loadRequestTemplate(options.template),
-    options.modelId ? loadModelGuide(options.modelId) : Promise.resolve(""),
-    options.platformId ? loadPlatformGuide(options.platformId) : Promise.resolve(""),
+    modelId ? loadModelGuide(modelId) : Promise.resolve(""),
+    platformId ? loadPlatformGuide(platformId) : Promise.resolve(""),
     loadTechniqueGuides(options.techniques ?? []),
     // 칩을 고르든 말든 늘 붙습니다.
     loadCommonRules(),
@@ -195,7 +206,8 @@ export async function buildPromptRequestText(
 
   // ::when 문단을 고르는 값. LlmRequestButton 과 같은 규칙이어야 합니다.
   const vars: Record<string, string> = {};
-  if (options.platformId) vars.platform = options.platformId;
+  if (platformId) vars.platform = platformId;
+  if (modelId) vars.modelId = modelId;
   if (options.data && typeof options.data === "object") {
     for (const [key, value] of Object.entries(options.data as Record<string, unknown>)) {
       if (typeof value === "string") vars[key] = value;
@@ -204,10 +216,10 @@ export async function buildPromptRequestText(
 
   return splitRequestText({
     system,
-    modelGuide,
-    platformGuide,
+    modelGuide: modelId ? `선택 생성 모델 ID: ${modelId}\n${modelGuide || "이 ID의 검증된 전용 가이드가 없습니다. 다른 모델 문법으로 대체하지 말고 지원 확인이 필요함을 명시하세요."}${workflow ? `\n\n명시 Comfy 역할/모델/입력 계약:\n${JSON.stringify(workflow,null,2)}\npositive는 선택 역할에 작성합니다. negativeSupport가 supported가 아니면 negativeKo/negativeEn은 빈 문자열로 주세요. 실제 graph에 없는 제어 입력·화자 ID·참조 지원은 만들어내지 마세요. 초안 작성은 생성 승인 또는 모델 제어 보장이 아닙니다.` : ""}` : "생성 모델이 미선택입니다. 특정 모델 제어를 보장하지 마세요.",
+    platformGuide: nano21Context ? `${platformGuide}\n\n선택한 2.1 provider 프로필과 요청 옵션:\n${JSON.stringify(nano21Context,null,2)}\n참조 fidelity 경고를 등장 인원 금지로 바꾸지 마세요. 이 값은 프롬프트 작성 정보이며 Magnific API에 전달되었다는 뜻이 아닙니다.` : platformGuide,
     techniqueGuides,
-    commonRules,
+    commonRules: options.template === "bgm-prompt" ? `${commonRules}\n\n사용자 필수 저장 규칙: instrumental=true이면 lyricsKo/lyricsEn은 빈 문자열입니다. 보컬 가사는 마지막 독립 줄에 소문자 literal [end]를 중복 없이 한 번만 씁니다. 모델의 종료를 보장하는 제어토큰으로 주장하지 않습니다. 모델 고유 종료 표기와 다르면 원본 가사와 모델 변환 단계의 차이를 설명하고 원본 규칙을 유지합니다. 같은 멤버의 음색·음역·발음·창법 프로필과 파트 배정을 유지하고, single lead에는 single-tracked close-miked dry centered lead와 명확한 발음을 권합니다. 후렴 구간 [Chorus]는 chorus effect와 다릅니다. 모델/endpoint가 제공하지 않는 화자 ID/negative_prompt/seed/보컬 고정 기능을 만들지 않습니다.` : commonRules,
     prompt: JSON.stringify(options.data, null, 2),
     vars,
     imageCount,
@@ -258,7 +270,7 @@ export async function requestPromptFromLlm(options: LlmRequestOptions): Promise<
   if (!ko && !en) {
     throw new Error(`답에 프롬프트(ko/en)가 없습니다. 답 앞부분: ${raw.trim().slice(0, 160)}`);
   }
-  return {
+  const result = {
     ko,
     en,
     negativeKo: text(body, ["negativeKo", "negative_ko", "negativeKorean"]),
@@ -269,6 +281,7 @@ export async function requestPromptFromLlm(options: LlmRequestOptions): Promise<
     lyricsEn: text(body, ["lyricsEn", "lyrics_en", "lyricsEnglish", "lyrics"]),
     panels: body.panels as PromptRequestResult["panels"],
   };
+  return options.template === "bgm-prompt" ? musicLyricsResult(result, Boolean((options.data as { instrumental?: boolean })?.instrumental)) : promptResultForModel(result, canonicalPromptModel((options.data as { generationTarget?: { modelId?: string } })?.generationTarget?.modelId ?? options.modelId));
 }
 
 /**

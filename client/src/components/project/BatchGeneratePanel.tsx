@@ -9,6 +9,7 @@ import {
 import { stopProjectTasks, useTaskQueue } from "@/lib/taskQueue";
 import type { ProjectDraft } from "@/lib/projectTypes";
 import { useT } from "@/lib/i18n";
+import {useState} from "react";
 
 /**
  * **한 번에 뽑기 — 진행 상황.**
@@ -41,6 +42,7 @@ export default function BatchGeneratePanel({
   draft: ProjectDraft;
 }) {
   const t = useT();
+  const [accepting,setAccepting]=useState(false);
   const tasks = useTaskQueue();
   const mine = tasks.filter(
     (task) => task.projectId === projectId && (task.status === "running" || task.status === "waiting"),
@@ -56,6 +58,7 @@ export default function BatchGeneratePanel({
     scenesToGenerate(draft).length * 2;
 
   const run = async () => {
+    if(accepting)return;
     const ok = await confirmDialog({
       title: t("아직 안 뽑은 {count}개를 순서대로 뽑을까요?", { count: left }),
       description:
@@ -63,7 +66,7 @@ export default function BatchGeneratePanel({
       confirmLabel: t("줄에 세우기"),
     });
     if (!ok) return;
-    startProjectGeneration(projectId, draft);
+    setAccepting(true);try{await startProjectGeneration(projectId, draft);}finally{setAccepting(false);}
   };
 
   return (
@@ -84,6 +87,7 @@ export default function BatchGeneratePanel({
         {mine.length > 0 && (
           <button
             type="button"
+            disabled={accepting}
             onClick={() => stopProjectTasks(projectId)}
             className="flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10px] font-semibold"
             style={{ background: "oklch(1 0 0 / 6%)", color: "oklch(0.76 0.16 25)" }}

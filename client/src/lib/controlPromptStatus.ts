@@ -1,3 +1,5 @@
+import { appPromptSelection } from "./appPromptRequest";
+import { promptStaleMessage } from "./promptModelSelection";
 import { z } from "zod";
 import { appPromptTargetSchema, getProjectSnapshot, ProjectControlError } from "./projectControl";
 import { readProject } from "./projectWrite";
@@ -85,7 +87,14 @@ export async function getProjectPromptStatus(raw: unknown) {
       ]),
     ]),
   ];
-  const selected = request.missingOnly ? rows.filter((item) => item.ready && (!item.ko || !item.en)) : rows;
+  const annotated = rows.map(row => {
+    const target = row.target;
+    const owner = target.kind === "character" ? draft.characters.find(x=>x.id===target.id) : target.kind === "background" ? draft.backgrounds.find(x=>x.id===target.id) : target.kind === "sceneVideo" ? draft.scenes.find(x=>x.id===target.sceneId) : draft.scenes.find(x=>x.id===target.sceneId)?.cuts.find(x=>x.id===target.cutId);
+    const fields = owner as { promptModelStamp?: string; videoPromptModelStamp?: string; storyboardPromptModelStamp?: string };
+    try { const selection = appPromptSelection(draft, target); return { ...row, selection, stale: promptStaleMessage(target.kind === "sceneVideo" ? fields.storyboardPromptModelStamp : target.kind === "cutVideo" ? fields.videoPromptModelStamp : fields.promptModelStamp, selection, row.ko || row.en) }; }
+    catch(error) { return { ...row, stale: String(error) }; }
+  });
+  const selected = request.missingOnly ? annotated.filter((item) => item.ready && (!item.ko || !item.en)) : annotated;
   return { projectId: request.projectId, revision: snapshot.revision, total: selected.length,
     offset: request.offset, nextOffset: request.offset + request.limit < selected.length ? request.offset + request.limit : null,
     prompts: selected.slice(request.offset, request.offset + request.limit),

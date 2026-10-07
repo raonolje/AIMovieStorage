@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "@/lib/i18n";
+import ComfyTaskReceipt from "./ComfyTaskReceipt";
 import {
   AlertTriangle,
   Check,
@@ -330,6 +331,7 @@ function TaskRow({ task, now }: { task: QueueTask; now: number }) {
           {task.error}
         </p>
       )}
+      <ComfyTaskReceipt task={task}/>
       {task.result?.data?.magnific != null && (
         <details className="text-[10px] leading-relaxed text-muted-foreground">
           <summary className="cursor-pointer">{t("Magnific 요청·접수·파일 실측 보기")}</summary>

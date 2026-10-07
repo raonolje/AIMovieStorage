@@ -1,4 +1,7 @@
-import { useMemo, useState } from "react";
+import WorkflowPromptSelect from "@/components/WorkflowPromptSelect";
+import ComfyGenerateButton from "@/components/ComfyGenerateButton";
+import { resolvePromptSelection, promptStamp, promptStaleMessage, assertPromptSnapshot } from "@/lib/promptModelSelection";
+import { useMemo, useRef, useState } from "react";
 import { Clapperboard, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import PromptResultPanels from "@/components/PromptResultPanels";
@@ -30,8 +33,6 @@ import { withStoryboardPrompt } from "@/lib/storyboardPromptHistory";
 
 /**
  * 장면 **스토리보드** — 컷 대표 그림을 6000×6000 한 장으로 굽고, 그 한 장으로 영상까지.
- *
- *
  *
  * # 왜 장면 화면에 두는가
  *
@@ -68,7 +69,10 @@ export default function SceneStoryboard({
    */
   videoAspect?: string;
 }) {
-  const { projectName, imageMarks } = useProjectMedia();
+  const { projectName, imageMarks, promptProject } = useProjectMedia();
+  const selection = resolvePromptSelection("video", { workflowTarget: scene.videoPromptWorkflow, model: scene.videoPromptModel, engine: scene.videoPromptEngine, project: promptProject });
+  const latest = useRef({ scene, selection }); latest.current = { scene, selection };
+  const stale = promptStaleMessage(scene.storyboardPromptModelStamp, selection, Boolean(scene.storyboardPromptKo || scene.storyboardPromptEn));
   /**
    * 이 장면에 나오는 인물 이름 — 맨 뒤 «바꾸지 마세요» 문장에 박습니다.
    *
@@ -98,7 +102,6 @@ export default function SceneStoryboard({
   /**
    * 시트와 **함께 올리는 것들** — 인물 시트 · 소품 에셋 · 배경.
    *
-   *
    * 시트의 칸은 마네킹과 회색 상자입니다. 누구이고 무엇인지 말해 주지 않으면 생성기가
    * 마네킹을 그대로 그립니다. 칸에서 찾는 길은 **색**이고(캡처에 이름표가 안 나갑니다),
    * 그릴 근거는 **@시트**입니다.
@@ -120,7 +123,7 @@ export default function SceneStoryboard({
   const [writing, setWriting] = useState(false);
 
   /** 요청문과 API 가 **같은 재료**를 봅니다(`promptRequest` 규칙). */
-  const boardRequestData = () => storyboardRequestData({ scene, cells, swaps, videoAspect, lockNames });
+  const boardRequestData = () => ({ generationTarget: selection, ...storyboardRequestData({ scene, cells, swaps, videoAspect, lockNames }) });
 
   const writePrompt = async () => {
     if (writing) return;
@@ -137,9 +140,13 @@ export default function SceneStoryboard({
         deliveredTo: `${scene.title || "장면"} 스토리보드 프롬프트 두 칸에 넣음`,
         task: "cutPrompt",
         template: "storyboard-video",
+        modelId: selection.modelId,
+        platformId: selection.platformId,
         data: boardRequestData(),
       });
-      onPatch((current) => withStoryboardPrompt(current, result, "API · 프롬프트 작성"));
+      assertPromptSnapshot(promptStamp(selection), promptStamp(latest.current.selection));
+      assertPromptSnapshot([scene.storyboardPromptKo, scene.storyboardPromptEn], [latest.current.scene.storyboardPromptKo, latest.current.scene.storyboardPromptEn]);
+      onPatch((current) => ({ ...withStoryboardPrompt(current, result, "API · 프롬프트 작성"), storyboardPromptModelStamp: promptStamp(selection) }));
       toast.success("스토리보드 영상 프롬프트를 받았습니다.");
     } catch (error) {
       toast.error(String(error));
@@ -191,7 +198,7 @@ export default function SceneStoryboard({
       onPatch((current) => ({
         storyboardPath: saved.path,
         storyboardAt: new Date().toISOString(),
-        ...withStoryboardPrompt(current, prompt, "스토리보드 · 규칙 조립"),
+        ...((current.storyboardPromptKo||current.storyboardPromptEn)?{}:withStoryboardPrompt(current, prompt, "스토리보드 · 규칙 조립")),
       }));
       toast.success(
         `스토리보드를 만들었습니다 — 컷 ${cells.length}칸${markedCount ? ` · 표시 ${markedCount}칸` : ""}.`,
@@ -290,14 +297,18 @@ export default function SceneStoryboard({
           시트가 생긴 뒤에만 뜹니다 — 프롬프트가 시트를 `@파일이름` 으로 걸어야 해서,
           시트 없이 받으면 아무 그림도 안 붙은 글이 됩니다.
         */}
+        {stale && <p className="text-[10px] text-amber-300">{stale}</p>}
+        <WorkflowPromptSelect projectName={projectName} kind="video" value={selection.workflowTarget} onChange={target=>onPatch(()=>({videoPromptWorkflow:target,videoPromptEngine:target?"comfy":undefined}))}/>
+        <ComfyGenerateButton kind="video" projectName={projectName} target={{kind:"scene",id:scene.id}} workflowTarget={selection.workflowTarget} prompt={{ko:scene.storyboardPromptKo,en:scene.storyboardPromptEn}} assetType="scene-video" ownerName={sceneFolderName(scene.title,index)} stem="씬영상" onDone={()=>undefined}/>
         {scene.storyboardPath && (
           <>
             <LlmRequestButton
               template="storyboard-video"
+              modelId={selection.modelId}
               title={`스토리보드 → 씬 영상 · ${scene.title || "장면"}`}
               data={() => boardRequestData()}
               onApplyPrompt={(result) =>
-                onPatch((current) => withStoryboardPrompt(current, result, "LLM 요청문 · 결과 넣기"))
+                onPatch((current) => ({ ...withStoryboardPrompt(current, result, "LLM 요청문 · 결과 넣기"), storyboardPromptModelStamp: promptStamp(selection) }))
               }
             />
             <button

@@ -122,7 +122,7 @@ export interface ControlAsset {
   path: string;
   name: string;
   kind: "image" | "video" | "audio" | "other";
-  target?: z.infer<typeof mediaTargetSchema>;
+  target?: z.infer<typeof mediaTargetSchema> | {kind:"scene";id:string};
 }
 function mediaKind(path: string): ControlAsset["kind"] {
   if (/\.(png|jpg|jpeg|webp|bmp|gif)$/i.test(path)) return "image";
@@ -167,6 +167,7 @@ export function listControlAssets(projectId: string): ControlAsset[] {
       "refVideoPath",
       "endFramePath",
       "coverPath",
+      "storyboardPath",
     ]) {
       if (typeof entry[field] === "string") {
         const assetId = `${String(entry.id || key)}:${field}`;
@@ -189,9 +190,11 @@ export function listControlAssets(projectId: string): ControlAsset[] {
   draft.backgrounds.forEach((item) =>
     visit(item, { kind: "background", id: item.id }),
   );
-  draft.scenes.forEach((scene) =>
-    scene.cuts.forEach((cut) => visit(cut, { kind: "cut", id: cut.id }, `cut/${cut.id}`)),
-  );
+  draft.scenes.forEach((scene) => {
+    visit(scene.videos,{kind:"scene",id:scene.id},`scene/${scene.id}/videos`);
+    if(scene.storyboardPath)visit({id:scene.id,storyboardPath:scene.storyboardPath},{kind:"scene",id:scene.id},`scene/${scene.id}`);
+    scene.cuts.forEach((cut) => visit(cut, { kind: "cut", id: cut.id }, `cut/${cut.id}`));
+  });
   visit(draft.sharedAssets);
   return [...assets.values()];
 }
@@ -394,7 +397,7 @@ export async function enqueueControlGeneration(raw: unknown) {
 function validateUpscale(raw: unknown) {
   const input = upscaleMediaSchema.parse(raw);
   const asset = assetOf(input.projectId, input.assetId, "image");
-  if (!asset.target) throw new Error("이 에셋은 결과를 붙일 대상이 없습니다.");
+  if (!asset.target || asset.target.kind==="scene") throw new Error("이 에셋은 업스케일 결과를 붙일 대상이 없습니다.");
   return { input, asset };
 }
 export async function enqueueControlUpscale(raw: unknown) {
@@ -507,7 +510,7 @@ registerTaskRunner("control.generate", async (raw, report, task) => {
 registerTaskRunner("control.upscale", async (raw, report, task) => {
   if (isStopping(task.id)) return;
   const { input, asset } = validateUpscale(raw);
-  if (!asset.target) throw new Error("결과를 붙일 대상이 없습니다.");
+  if (!asset.target || asset.target.kind==="scene") throw new Error("장면 참조 자산의 이 업스케일 등록 경로는 지원하지 않습니다.");
   const result = await upscaleFileToNew(asset.path, `${asset.name}_업스케일`, {
     engine: input.engine,
     targetSize: input.targetSize,

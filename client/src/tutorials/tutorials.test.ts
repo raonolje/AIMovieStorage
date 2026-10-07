@@ -1,3 +1,4 @@
+import { RETIRED_DIRECT_GENERATION_ANCHORS } from "./comfy";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -350,7 +351,7 @@ describe("튜토리얼 자료", () => {
       걸음이 «가리키는» 자리뿐 아니라 «기다리는» 자리(`until`)도 쓰는 것으로 셉니다 — 그리는
       걸음은 누르는 자리와 «그리면 생기는 자리» 가 다릅니다().
     */
-    const used = new Set([...ALL_ANCHORS, ...allSteps().map((step) => step.until).filter(Boolean)]);
+    const used = new Set([...ALL_ANCHORS, ...RETIRED_DIRECT_GENERATION_ANCHORS, ...allSteps().map((step) => step.until).filter(Boolean)]);
     const missing = ALL_ANCHORS.filter((anchor) => !documented.has(anchor));
     const unused = [...documented].filter((anchor) => !used.has(anchor)).sort();
     expect(missing, "표에 없는 앵커").toEqual([]);

@@ -1,3 +1,4 @@
+import { canonicalPromptModel, isLocalPromptModel, LOCAL_PROMPT_MODELS } from "./promptModelSelection";
 import { invoke } from "@tauri-apps/api/core";
 import { isDesktopApp } from "@/lib/llm";
 import { PROMPT_FOLDER, joinPath, resolveUnderBase } from "@/lib/storagePaths";
@@ -347,8 +348,6 @@ export const IMAGE_MODELS: {
   /**
    * **마그니픽으로 바로 돌릴 수 있는가.**
    *
-   *
-   *
    * 미드저니는 디스코드로만 돌아서 우리가 «구성» 으로 보낼 수가 없습니다 — 프롬프트를
    * 복사해 손으로 넣는 자리입니다. 나머지는 마그니픽이 그 모델을 그대로 돌려 주므로
    * «구성» 단추 하나로 끝납니다. 이 표가 그 갈림길을 한곳에서 정합니다.
@@ -373,6 +372,7 @@ export const IMAGE_MODELS: {
     magnific: "imagen-nano-banana-2",
   },
   { id: "midjourney", label: "Midjourney", kind: "image" },
+  { id: "nano-banana-2.1", label: "Nano Banana 2.1", kind: "image", magnific: "imagen-nano-banana-2-1" },
   { id: "gpt-image", label: "GPT 2.5 Image", kind: "image", magnific: "gpt-2" },
   // 마그니픽은 여기 없습니다. **모델이 아니라 플랫폼**입니다 — 그림을 만드는
   // 것이 아니라 남의 모델을 돌려 주는 자리입니다. 플랫폼 고르는 칸으로
@@ -399,6 +399,8 @@ export const IMAGE_ONLY_MODELS = IMAGE_MODELS.filter(
 
 /** 첫 레퍼런스용 모델 값 고르기. 영상 모델이나 빈 값이면 첫 이미지 모델로 떨어집니다. */
 export function normalizeImageModelId(id?: string) {
+  if (isLocalPromptModel(id) && LOCAL_PROMPT_MODELS[id] === "image") return id;
+  if (id && !IMAGE_ONLY_MODELS.some(model => model.id === id) && id !== "nbpro") return id;
   return IMAGE_ONLY_MODELS.some((model) => model.id === id)
     ? (id as string)
     : IMAGE_ONLY_MODELS[0].id;
@@ -406,6 +408,8 @@ export function normalizeImageModelId(id?: string) {
 
 /** 예전에 쓰던 짧은 이름을 지금 id 로 옮깁니다. */
 export function normalizeModelId(id?: string) {
+  if (isLocalPromptModel(id)) return id;
+  if (id && !IMAGE_MODELS.some(model => model.id === id) && id !== "nbpro") return id;
   if (!id) return IMAGE_MODELS[0].id;
   if (id === "nbpro") return "nano-banana";
   /*
@@ -420,7 +424,7 @@ export function normalizeModelId(id?: string) {
 
 /** 이 모델을 마그니픽으로 바로 돌릴 수 있는가. 미드저니만 못 돌립니다. */
 export function magnificModelOf(id?: string) {
-  const normalized = normalizeModelId(id);
+  const normalized = canonicalPromptModel(normalizeModelId(id));
   return IMAGE_MODELS.find((model) => model.id === normalized)?.magnific;
 }
 
@@ -582,13 +586,18 @@ export async function loadRequestTemplate(
 
 /** 모델 가이드를 읽습니다. 없으면 빈 문자열 — 가이드는 선택 사항입니다. */
 export async function loadModelGuide(modelId: string): Promise<string> {
+  modelId = canonicalPromptModel(modelId) ?? modelId;
   try {
     const documents = await listPromptDocuments("models");
     const found = documents.find(
       (document) =>
         document.meta.id === modelId || document.fileName === modelId,
     );
-    if (found) return found.body.trim();
+    if (found) {
+      const packaged = DEFAULT_MODEL_GUIDES[modelId as keyof typeof DEFAULT_MODEL_GUIDES];
+      const verified = packaged ? parsePromptDocument(modelId, packaged).body.trim() : "";
+      return verified && verified !== found.body.trim() ? `${found.body.trim()}\n\n앱 확인 자료 (원본 사용자 문서는 보존됩니다. 모델 사실·지원 경계는 아래 확인 자료로 교차 검사하세요):\n${verified}` : found.body.trim();
+    }
   } catch {
     // 무시
   }

@@ -1,10 +1,14 @@
-import { useState } from "react";
+import WorkflowPromptSelect from "@/components/WorkflowPromptSelect";
+import ComfyGenerateButton from "@/components/ComfyGenerateButton";
+import { useState, useEffect } from "react";
+import {listWorkflowLibrary,subscribeWorkflowLibrary} from "@/lib/comfyWorkflowLibrary";
+import {voiceWorkflowSupport,VOICE_OPTION_LABELS,type WorkflowVoiceOptions} from "@/lib/workflowVoiceOptions";
 import { toast } from "sonner";
 import { assetSrc, deleteProjectMediaFile, fileStem } from "@/lib/mediaLibrary";
 import { useT } from "@/lib/i18n";
 import { extractVoiceFromPrimary, withPrimaryVoice } from "@/lib/characterVoice";
-import { installLocalEngine, useLocalEngines } from "@/lib/localEngines";
-import { generateCharacterVoice, voiceDescription, VOICE_AGE_LABEL, VOICE_AGE_RANGES, VOICE_CATEGORIES, VOICE_CATEGORY_LABEL, VOICE_GENDER_LABEL, VOICE_GENDERS, VOICE_LANGUAGES, VOICE_MODELS, VOICE_SPEAKERS,
+
+import {  VOICE_AGE_LABEL, VOICE_AGE_RANGES, VOICE_CATEGORIES, VOICE_CATEGORY_LABEL, VOICE_GENDER_LABEL, VOICE_GENDERS, VOICE_LANGUAGES, VOICE_MODELS, VOICE_SPEAKERS,
   type VoiceAgeRange, type VoiceCategory, type VoiceGender, type VoiceLanguage, type VoiceModel } from "@/lib/voiceGeneration";
 import type { Character, ProjectDraft } from "@/lib/projectTypes";
 
@@ -31,10 +35,17 @@ export default function CharacterVoicePanel({ character, draft, projectName, onP
   const [gender, setGender] = useState<VoiceGender>(() => VOICE_GENDERS.find((value) => value === primaryGenerated?.gender) ?? "unspecified");
   const [ageRange, setAgeRange] = useState<VoiceAgeRange>(() => VOICE_AGE_RANGES.find((value) => value === primaryGenerated?.ageRange) ?? "unspecified");
   const [model, setModel] = useState<VoiceModel>("design");
-  const [speaker, setSpeaker] = useState("Sohee");
+  const [speaker, setSpeaker] = useState<typeof VOICE_SPEAKERS[number]>("Sohee");
   const [language, setLanguage] = useState<VoiceLanguage>("Korean");
-  const [progress, setProgress] = useState("");
-  const engine = useLocalEngines().engines.find((item) => item.id === "qwentts");
+  const [workflows,setWorkflows]=useState(listWorkflowLibrary);
+  useEffect(()=>subscribeWorkflowLibrary(()=>setWorkflows(listWorkflowLibrary())),[]);
+  const workflowTarget=character.voiceWorkflow??draft.workflowTargets?.voice;
+  const workflow=workflows.find(entry=>entry.source.workflowId===workflowTarget?.workflowId);
+  let supportError="";const supported=(()=>{try{return workflow?voiceWorkflowSupport(workflow):new Set<keyof WorkflowVoiceOptions>();}catch(error){supportError=String(error);return new Set<keyof WorkflowVoiceOptions>();}})();
+  const speechOptions:WorkflowVoiceOptions={category,gender,ageRange,model,speaker:supported.has("speaker")?speaker:undefined,language,traits};
+  const voiceOptions=Object.fromEntries(Object.entries(speechOptions).filter(([key,value])=>value!==undefined&&supported.has(key as keyof WorkflowVoiceOptions))) as WorkflowVoiceOptions;
+
+
   const chosen = options.find(({ video }) => video.id === source) ?? options[0];
   const extract = async () => {
     if (!chosen || busy) return;
@@ -56,23 +67,6 @@ export default function CharacterVoicePanel({ character, draft, projectName, onP
     if (!deleted) { toast.error(t("음성 파일을 지우지 못했습니다.")); return; }
     (onVoicePatch || onPatch)((current) => ({ voiceReferences: (current.voiceReferences || []).filter((item) => item.id !== id) }));
   };
-  const generate = async () => {
-    if (busy) return;
-    setBusy(true);
-    setProgress("");
-    try {
-      const reference = await generateCharacterVoice({
-        projectName, characterName: character.name, dialogue, traits: traits || character.voiceDescription || "자연스럽고 개성 있는 목소리",
-        category, gender, ageRange, model, speaker, language, onProgress: setProgress,
-      });
-      (onVoicePatch || onPatch)((current) => ({
-        ...withPrimaryVoice(current, reference),
-        voiceDescription: current.voiceDescription?.trim() || voiceDescription(category, traits || "자연스럽고 개성 있는 목소리", gender, ageRange),
-      }));
-      toast.success(t("{name} 음성을 캐릭터 폴더에 저장했습니다.", { name: character.name }));
-    } catch (error) { toast.error(String(error)); }
-    finally { setBusy(false); setProgress(""); }
-  };
   return <section className="space-y-2 rounded-lg border border-white/10 p-3 text-xs" data-tour="character-voice">
     <h3 className="font-semibold text-white">{t("목소리 레퍼런스")}</h3>
     <p className="text-white/50">{t("대표 영상에서 이 인물만 말하는 구간을 지정하세요. 추출한 WAV는 캐릭터 폴더에 저장되고 영상 구성에 함께 올라갑니다.")}</p>
@@ -88,42 +82,45 @@ export default function CharacterVoicePanel({ character, draft, projectName, onP
     </label>
     <div className="space-y-2 rounded-lg border border-violet-400/20 bg-violet-400/5 p-3" data-tour="character-voice-generate">
       <h4 className="font-semibold text-violet-200">{t("캐릭터 목소리 생성")}</h4>
-      <p className="text-white/50">{t("첫 영상 전에도 목소리를 만들 수 있습니다. 대사와 연기 톤을 적고 로컬 모델을 선택하세요.")}</p>
+      <p className="text-white/50">{t("음성 workflow를 선택한 뒤 지원하는 옵션을 설정하세요. 연결되지 않은 옵션은 비활성화하며 다른 모델로 자동 전환하지 않습니다.")}</p>
+      <WorkflowPromptSelect projectName={projectName} kind="voice" value={workflowTarget} onChange={target=>onPatch(()=>({voiceWorkflow:target}))}/>
+      {supportError&&<p className="text-red-300">{supportError}</p>}
+      <p className="text-amber-200">{t("이 역할의 미지원 옵션")}: {(Object.keys(VOICE_OPTION_LABELS) as (keyof WorkflowVoiceOptions)[]).filter(key=>!supported.has(key)).map(key=>t(VOICE_OPTION_LABELS[key])).join(", ")||t("없음")}</p>
       <div className="grid gap-2 sm:grid-cols-3">
         <label>{t("분위기")}
-          <select className="mt-1 w-full rounded bg-black/30 p-2 text-white" value={category}
+          <select disabled={!supported.has("category")} className="mt-1 w-full rounded bg-black/30 p-2 text-white disabled:opacity-40" value={category}
             onChange={(event) => setCategory(event.target.value as VoiceCategory)}>
             {Object.entries(VOICE_CATEGORY_LABEL).map(([key, label]) => <option key={key} value={key}>{t(label)}</option>)}
           </select>
         </label>
         <label>{t("목소리 성별")}
-          <select className="mt-1 w-full rounded bg-black/30 p-2 text-white" value={gender}
+          <select disabled={!supported.has("gender")} className="mt-1 w-full rounded bg-black/30 p-2 text-white disabled:opacity-40" value={gender}
             onChange={(event) => setGender(event.target.value as VoiceGender)}>
             {Object.entries(VOICE_GENDER_LABEL).map(([key, label]) => <option key={key} value={key}>{t(label)}</option>)}
           </select>
         </label>
         <label>{t("목소리 나이대")}
-          <select className="mt-1 w-full rounded bg-black/30 p-2 text-white" value={ageRange}
+          <select disabled={!supported.has("ageRange")} className="mt-1 w-full rounded bg-black/30 p-2 text-white disabled:opacity-40" value={ageRange}
             onChange={(event) => setAgeRange(event.target.value as VoiceAgeRange)}>
             {Object.entries(VOICE_AGE_LABEL).map(([key, label]) => <option key={key} value={key}>{t(label)}</option>)}
           </select>
         </label>
         <label>{t("로컬 목소리 모델")}
-          <select className="mt-1 w-full rounded bg-black/30 p-2 text-white" value={model}
+          <select disabled={!supported.has("model")} className="mt-1 w-full rounded bg-black/30 p-2 text-white disabled:opacity-40" value={model}
             onChange={(event) => setModel(event.target.value as VoiceModel)}>
             {VOICE_MODELS.map((value) => <option key={value} value={value}>{value === "design" ? "Qwen3 VoiceDesign 1.7B" : `Qwen3 CustomVoice ${value.slice(7)}`}</option>)}
           </select>
         </label>
         <label>{t("대사 언어")}
-          <select className="mt-1 w-full rounded bg-black/30 p-2 text-white" value={language}
+          <select disabled={!supported.has("language")} className="mt-1 w-full rounded bg-black/30 p-2 text-white disabled:opacity-40" value={language}
             onChange={(event) => setLanguage(event.target.value as VoiceLanguage)}>
             {VOICE_LANGUAGES.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
         </label>
       </div>
-      {model !== "design" && <label className="block">{t("고정 화자")}
-        <select className="mt-1 w-full rounded bg-black/30 p-2 text-white" value={speaker}
-          onChange={(event) => setSpeaker(event.target.value)}>
+      {(supported.has("speaker")||model !== "design") && <label className="block">{t("고정 화자")}
+        <select disabled={!supported.has("speaker")} className="mt-1 w-full rounded bg-black/30 p-2 text-white disabled:opacity-40" value={speaker}
+          onChange={(event) => setSpeaker(event.target.value as typeof VOICE_SPEAKERS[number])}>
           {VOICE_SPEAKERS.map((value) => <option key={value} value={value}>{value}</option>)}
         </select>
       </label>}
@@ -133,14 +130,10 @@ export default function CharacterVoicePanel({ character, draft, projectName, onP
           onChange={(event) => setDialogue(event.target.value)} placeholder={t("예: 정말 여기서 다시 만날 줄은 몰랐어요.")} />
       </label>
       <label className="block">{t("목소리 특징·연기 톤")}
-        <textarea className="mt-1 w-full rounded bg-black/30 p-2 text-white" value={traits} maxLength={500}
+        <textarea disabled={!supported.has("traits")} className="mt-1 w-full rounded bg-black/30 p-2 text-white disabled:opacity-40" value={traits} maxLength={500}
           onChange={(event) => setTraits(event.target.value)} placeholder={character.voiceDescription || t("예: 낮은 중저음, 숨을 고른 뒤 반가움이 묻어나게")} />
       </label>
-      {!engine?.installed ? <button type="button" disabled={busy || engine?.installing} onClick={() => void installLocalEngine("qwentts").catch((error) => toast.error(String(error)))}
-        className="rounded bg-violet-600 px-3 py-2 font-semibold text-white disabled:opacity-50">{engine?.installing ? t("설치 중…") : t("Qwen3-TTS 설치")}</button>
-        : <button type="button" disabled={busy || !dialogue.trim()} onClick={() => void generate()}
-          className="rounded bg-violet-600 px-3 py-2 font-semibold text-white disabled:opacity-50">{busy ? t("목소리 생성 중…") : t("캐릭터 목소리 생성")}</button>}
-      {progress && <p role="status" className="text-violet-200">{progress}</p>}
+      <ComfyGenerateButton kind="audio" projectName={projectName} target={{kind:"voice",id:character.id}} workflowTarget={workflowTarget} voiceOptions={voiceOptions} prompt={{ko:dialogue,en:dialogue}} assetType="character-voice" ownerName={character.name} stem="목소리" onDone={()=>undefined}/>
     </div>
     {options.length > 0 && <div className="flex flex-wrap items-end gap-2">
       <label className="min-w-[220px] flex-1">{t("대표 영상")}

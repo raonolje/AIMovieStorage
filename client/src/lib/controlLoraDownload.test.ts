@@ -18,10 +18,10 @@ describe("공식 로라 다운로드 조종기", () => {
       await expect(api.enqueueControlLoraDownload({ ...input, ...change })).rejects.toThrow();
     expect(state.enqueue).not.toHaveBeenCalled(); expect(state.invoke).not.toHaveBeenCalled();
   });
-  it("같은 operationId와 순수 입력을 기존 작업줄에 보낸다", async () => {
+  it("공식 입력도 Comfy 전환 이후 다운로드를 접수하지 않는다", async () => {
     const api = await import("./controlLoraDownload"); state.enqueue.mockResolvedValue({ jobId: "job-1" });
-    expect(await api.enqueueControlLoraDownload(input)).toEqual({ jobId: "job-1" });
-    expect(state.enqueue).toHaveBeenCalledWith(expect.objectContaining({ operationId: input.operationId, lane: "media", payload: input }));
+    await expect(api.enqueueControlLoraDownload(input)).rejects.toThrow("legacy_lora_disabled");
+    expect(state.enqueue).not.toHaveBeenCalled();expect(state.invoke).not.toHaveBeenCalled();
   });
   it("완료된 파일 정보를 돌려주되 설치·생성 가능으로 판정하지 않는다", async () => {
     await import("./controlLoraDownload");

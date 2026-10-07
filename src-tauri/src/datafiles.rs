@@ -521,12 +521,21 @@ pub fn merge_app_settings(
     saved_at: f64,
     value: serde_json::Value,
 ) -> Res<String> {
+    merge_app_settings_at(app_settings_path(&app)?, section, saved_at, value)
+}
+
+/// Same atomic settings operation with the application's already-resolved store.
+pub(crate) fn merge_app_settings_at(
+    path: PathBuf,
+    section: String,
+    saved_at: f64,
+    value: serde_json::Value,
+) -> Res<String> {
     use serde_json::{json, Value};
 
     if section.trim().is_empty() {
         return Err("칸 이름이 비었습니다.".into());
     }
-    let path = app_settings_path(&app)?;
     let _guard = SAVE_LOCK.lock_safe();
 
     // 파일이 없거나 깨졌으면 빈 것에서 시작합니다 — 처음 켠 것뿐이라 오류가 아닙니다.

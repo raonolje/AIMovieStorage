@@ -131,6 +131,9 @@ const DEFAULT_TIMEOUT_SECS: u64 = 1800;
 /// `quit` 을 보내고 스스로 끝나기를 기다릴 시간. 지나면 자식 핸들로 종료합니다.
 const QUIT_GRACE: Duration = Duration::from_secs(3);
 
+#[path="upscale_graceful.rs"]
+mod graceful;
+
 /// 가중치 미리 받기(`prefetch`)를 기다릴 시간. 190 GB 를 느린 회선으로 받으면 하루가 넘어갑니다 —
 /// 시간 초과로 끊는 것보다 «취소» 단추가 끊게 두는 편이 맞습니다(취소는 깃발로 따로 봅니다).
 const PREFETCH_TIMEOUT_SECS: u64 = 48 * 3600;
@@ -320,7 +323,8 @@ pub struct TargetSpec {
 struct Worker {
     pid: u32,
     child: Arc<Mutex<Child>>,
-    stdin: Arc<Mutex<ChildStdin>>,
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
+    quit_requested: Arc<AtomicBool>,
     /// 요청 id → 답을 기다리는 자리.
     pending: Arc<Mutex<HashMap<String, mpsc::Sender<Value>>>>,
     /// 기동 직후 온 `ready` 한 줄.
@@ -330,6 +334,7 @@ struct Worker {
 
 #[derive(Default)]
 pub struct UpscaleState {
+    shutdown: Mutex<graceful::ShutdownState>,
     workers: Mutex<HashMap<String, Worker>>,
     /// 설치 중인 엔진의 취소 깃발.
     cancels: Mutex<HashMap<String, Arc<AtomicBool>>>,
@@ -1489,20 +1494,16 @@ fn remeasure_disk_in_background(app: &AppHandle, engine: &str, min_age_secs: u64
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn ensure_worker(app: &AppHandle, state: &UpscaleState, engine: &str) -> Res<Worker> {
-    {
-        let workers = state.workers.lock_safe();
-        if let Some(worker) = workers.get(engine) {
-            if worker.alive.load(Ordering::SeqCst) {
-                return Ok(worker.clone());
+    let cached=state.workers.lock_safe().get(engine).cloned();
+    if let Some(worker)=cached {
+        if worker.quit_requested.load(Ordering::SeqCst) {
+            if worker.child.lock_safe().try_wait().map_err(|e|err("워커 종료 확인",e))?.is_none() {
+                return Err(format!("{engine} 워커의 정상 종료를 기다리고 있습니다. 새 작업을 시작하지 않았습니다."));
             }
-        }
+        } else if worker.alive.load(Ordering::SeqCst) { return Ok(worker); }
+        let mut workers=state.workers.lock_safe();
+        if workers.get(engine).is_some_and(|w|Arc::ptr_eq(&w.child,&worker.child)) { workers.remove(engine); }
     }
-    // 죽은 것은 치우고 새로 띄웁니다.
-    {
-        let mut workers = state.workers.lock_safe();
-        workers.remove(engine);
-    }
-
     let family = family_of(engine)?;
     /*
       **무거운 엔진은 혼자 씁니다.**
@@ -1651,7 +1652,8 @@ fn ensure_worker(app: &AppHandle, state: &UpscaleState, engine: &str) -> Res<Wor
     let worker = Worker {
         pid,
         child: Arc::new(Mutex::new(child)),
-        stdin: Arc::new(Mutex::new(stdin)),
+        stdin: Arc::new(Mutex::new(Some(stdin))),
+        quit_requested: Arc::new(AtomicBool::new(false)),
         pending,
         ready,
         alive,
@@ -1670,6 +1672,7 @@ fn ask(
     mut request: Value,
     timeout_secs: u64,
 ) -> Res<Value> {
+    if worker.quit_requested.load(Ordering::SeqCst) { return Err("워커의 정상 종료를 기다리는 중입니다.".into()); }
     let id = state.next_id();
     request["id"] = json!(id);
     let (sender, receiver) = mpsc::channel::<Value>();
@@ -1678,7 +1681,7 @@ fn ask(
     let line = format!("{}\n", request);
     let write = {
         let mut stdin = worker.stdin.lock_safe();
-        stdin.write_all(line.as_bytes()).and_then(|_| stdin.flush())
+        match stdin.as_mut() { Some(input)=>input.write_all(line.as_bytes()).and_then(|_|input.flush()),None=>Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe,"워커 입력을 정상 종료했습니다.")) }
     };
     if let Err(e) = write {
         worker.pending.lock_safe().remove(&id);
@@ -1741,15 +1744,22 @@ mod device_fault_tests {
 
 /// 워커 하나를 내립니다 — `quit` 을 보내고 3초 뒤에도 살아 있으면 **우리가 띄운 자식 핸들로만** 종료.
 fn stop_worker(app: &AppHandle, state: &UpscaleState, engine: &str) {
-    let worker = state.workers.lock_safe().remove(engine);
+    let worker = {
+        let mut workers=state.workers.lock_safe();
+        // 정상 종료 대기의 핸들은 후속 자동 정리에서도 기존 fallback으로 넘기지 않습니다.
+        if workers.get(engine).is_some_and(|w|w.quit_requested.load(Ordering::SeqCst)) { return; }
+        workers.remove(engine)
+    };
     let Some(worker) = worker else { return };
     let _ = app; // 로그 밖에는 쓰지 않습니다.
 
     {
         // 이름이 아니라 이 자식의 stdin 으로 «끝내라» 를 보냅니다.
         if let Ok(mut stdin) = worker.stdin.lock() {
-            let _ = stdin.write_all(b"{\"id\":\"quit\",\"op\":\"quit\"}\n");
-            let _ = stdin.flush();
+            if let Some(input)=stdin.as_mut() {
+                let _ = input.write_all(b"{\"id\":\"quit\",\"op\":\"quit\"}\n");
+                let _ = input.flush();
+            }
         }
     }
     let deadline = Instant::now() + QUIT_GRACE;
@@ -2362,27 +2372,17 @@ pub fn upscale_stop_workers(app: AppHandle) -> Res<()> {
 }
 
 pub(crate) fn stop_workers_command(app: AppHandle, family: &'static Family) -> Res<()> {
-    let state = app.state::<UpscaleState>();
-    // 다른 갈래의 워커는 건드리지 않습니다 — 업스케일 «워커 내리기» 가 로컬 생성을 끊으면 안 됩니다.
-    let engines: Vec<String> = state
-        .workers
-        .lock_safe()
-        .keys()
-        .filter(|engine| family.ids.contains(&engine.as_str()))
-        .cloned()
-        .collect();
-    let mut busy: Vec<String> = Vec::new();
-    for engine in engines {
-        let queue = state.queue(&engine);
-        match queue.try_lock() {
-            Ok(_guard) => stop_worker(&app, &state, &engine),
-            Err(_) => busy.push(engine),
-        };
-    }
-    if !busy.is_empty() {
-        log::info!("업스케일이 도는 중이라 워커를 두었습니다 — {}", busy.join(", "));
-    }
-    Ok(())
+    let state=app.state::<UpscaleState>();
+    let report=graceful::release_idle(&state,Some(family),&uuid::Uuid::new_v4().to_string(),Duration::from_secs(10))?;
+    graceful::require_complete(&report)
+}
+
+pub(crate) fn graceful_worker_status(app: &AppHandle) -> Value { graceful::status(&app.state::<UpscaleState>()) }
+pub(crate) fn cancel_graceful_worker_shutdown(app: &AppHandle, operation_id: &str) -> bool { graceful::cancel(&app.state::<UpscaleState>(),operation_id) }
+pub(crate) fn release_idle_workers(app: &AppHandle, operation_id: &str) -> Res<Value> {
+    let report=graceful::release_idle(&app.state::<UpscaleState>(),None,operation_id,Duration::from_secs(10))?;
+    graceful::require_complete(&report)?;
+    Ok(report)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3072,13 +3072,18 @@ mod git_cache_tests {
     }
 }
 
-// 유지보수 종료는 기존 강제 정리 fallback에 들어갈 자식이 하나라도 있으면 거절합니다.
-pub(crate) fn maintenance_blockers(app: &AppHandle) -> Vec<String> {
-    let state = app.state::<UpscaleState>();
-    let mut blockers = Vec::new();
-    if !state.cancels.lock_safe().is_empty() || !state.prefetching.lock_safe().is_empty() { blockers.push("엔진 설치 또는 가중치 다운로드가 남아 있습니다.".into()); }
-    if !state.workers.lock_safe().is_empty() { blockers.push("상주 워커가 남아 있어 강제 종료 없는 앱 종료를 확인할 수 없습니다.".into()); }
-    if state.queues.lock_safe().values().any(|queue| queue.try_lock().is_err()) { blockers.push("엔진 작업이 진행 중입니다.".into()); }
+// 읽기 검사는 워커를 정리하지 않습니다. 실제 종료 준비가 유휴 워커의 자연 종료를 기다립니다.
+pub(crate) fn maintenance_work_blockers(app: &AppHandle) -> Vec<String> {
+    let state=app.state::<UpscaleState>();let mut blockers=Vec::new();
+    if !state.cancels.lock_safe().is_empty()||!state.prefetching.lock_safe().is_empty() { blockers.push("엔진 설치 또는 가중치 다운로드가 남아 있습니다.".into()); }
+    if state.queues.lock_safe().values().any(|queue|queue.try_lock().is_err()) { blockers.push("엔진 작업이 진행 중입니다.".into()); }
     if !side_children().lock_safe().is_empty() { blockers.push("앱이 시작한 설치 또는 처리 자식이 남아 있습니다.".into()); }
+    if graceful::active(&state) { blockers.push("상주 워커의 정상 종료 확인이 진행 중입니다.".into()); }
     blockers
+}
+pub(crate) fn maintenance_blockers(app: &AppHandle) -> Vec<String> {
+    let mut blockers=maintenance_work_blockers(app);
+    if !app.state::<UpscaleState>().workers.lock_safe().is_empty() { blockers.push("유휴 상주 워커의 정상 종료 확인이 필요합니다.".into()); }
+    blockers
+
 }

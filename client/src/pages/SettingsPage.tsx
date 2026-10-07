@@ -32,13 +32,13 @@ import { isMacOS } from "@/lib/platform";
 import { resetTutorials, setTutorialsEnabled, useTutorial } from "@/lib/tutorialStore";
 import { TUTORIALS } from "@/tutorials";
 import MagnificConnectPanel from "@/components/MagnificConnectPanel";
-import LoraLibraryPanel from "@/components/LoraLibraryPanel";
 import GlobalNav from "@/components/GlobalNav";
 import { READING_WIDTH } from "@/lib/layout";
 import { ConfirmDialogHost, confirmDialog } from "@/components/ConfirmDialog";
 import PromptLibraryPanel from "@/components/PromptLibraryPanel";
 import LocalEnginesPanel from "@/components/LocalEnginesPanel";
-import ComfyGenerationPanel from "@/components/ComfyGenerationPanel";
+import ApiTokenRow from "@/components/ApiTokenRow";
+import WorkflowLibraryPanel from "@/components/WorkflowLibraryPanel";
 import {
   getAutoUnfoldEnabled,
   setAutoUnfoldEnabled,
@@ -846,20 +846,24 @@ export default function SettingsPage() {
           로라 서랍 — 로컬 모델 바로 아래에 두려 했으나, 로라는 «어떤 결로 뽑는가» 라
           엔진 설치보다 자주 만집니다. 위에 둡니다.
         */}
-        <Section icon={Layers} tint="oklch(0.78 0.16 320)" title={t("로라 (엔진별로 찾고 받기)")} anchor="settings-lora">
-          <LoraLibraryPanel />
+        <Section icon={Layers} tint="oklch(0.78 0.16 320)" title={t("Comfy LoRA 입력")} anchor="settings-lora">
+          <p className="text-xs text-white/60">{t("Comfy에 이미 설치된 LoRA 파일명과 강도 역할을 workflow에서 검사합니다. 앱 전용 LoRA 다운로드·실행은 종료되었으며 기존 파일은 보존됩니다.")}</p>
+          <div className="grid gap-2 md:grid-cols-2">
+            <ApiTokenRow provider="civitai" title={t("Civitai API 키")} description={t("기존 인증 저장소를 보존합니다. workflow·manifest·내보내기에 키를 넣지 않습니다.")} placeholder="Civitai API 키" />
+            <ApiTokenRow provider="huggingface" title={t("허깅페이스 토큰")} description={t("기존 토큰과 내부 인증 참조를 유지합니다. 이 설정이 다운로드나 외부 전송을 시작하지 않습니다.")} placeholder="hf_…" prefix="hf_" />
+          </div>
         </Section>
 
         <Section icon={Link2} tint="oklch(0.78 0.16 45)" title={t("마그니픽 (MCP 로 끝까지 뽑기)")} anchor="settings-magnific">
           <MagnificConnectPanel />
         </Section>
 
-        <Section icon={Cpu} tint="oklch(0.78 0.16 290)" title={t("로컬 모델 (그림·영상·음악)")} anchor="settings-local-engines">
+        <Section icon={Cpu} tint="oklch(0.78 0.16 290)" title={t("로컬 모션 캡처 모델")} anchor="settings-local-engines">
           <LocalEnginesPanel />
         </Section>
 
-        <Section icon={Link2} tint="oklch(0.78 0.16 160)" title={t("ComfyUI (그림·영상 생성)")} anchor="settings-comfy-generation">
-          <ComfyGenerationPanel />
+        <Section icon={Link2} tint="oklch(0.78 0.16 160)" title={t("ComfyUI workflow (그림·영상·음악·목소리)")} anchor="settings-comfy-generation">
+          <WorkflowLibraryPanel />
         </Section>
 
         {/* ── 업스케일 엔진 ─────────────────────────────────────────── */}

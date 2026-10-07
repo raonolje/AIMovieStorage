@@ -1,0 +1,439 @@
+{
+  "schemaVersion": 1,
+  "status": "blocked-design-catalog-not-allowlist",
+  "presets": [
+    {
+      "id": "h3-fl2va-t2va",
+      "graphSha256": "3426f167d66b7aa77e7bc19131739a79f8f7c322e22bc983e97f16e8fa9142a7",
+      "modelRuleId": "minimaxh3",
+      "operation": "text-to-video",
+      "outputKind": "video",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "trusted-project-exact-H3-authorization-required"
+      ]
+    },
+    {
+      "id": "h3-fl2va-first-frame",
+      "graphSha256": "401048a6add786e923b1e7da67e1e2752ae30df26a265a7a4bb9c24f2bd1daab",
+      "modelRuleId": "minimaxh3",
+      "operation": "image-to-video",
+      "outputKind": "video",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "trusted-project-exact-H3-authorization-required"
+      ]
+    },
+    {
+      "id": "h3-fl2va-first-last-frame",
+      "graphSha256": "ccd3cbc7b8617e671b9b1468e9ddbe571357e5dbf91bc902376ba9e9801f0337",
+      "modelRuleId": "minimaxh3",
+      "operation": "first-last-frame",
+      "outputKind": "video",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "trusted-project-exact-H3-authorization-required"
+      ]
+    },
+    {
+      "id": "h3-ref2va-1-identity",
+      "graphSha256": "cd8df6e990f2630b8ca52f9ab4ac87903a9301d33dffffa76056b7c698545a84",
+      "modelRuleId": "minimaxh3",
+      "operation": "identity-reference",
+      "outputKind": "video",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "trusted-project-exact-H3-authorization-required",
+        "frozen-pure-contract-does-not-expand-COMFY_AUTOGROW_V3"
+      ]
+    },
+    {
+      "id": "h3-ref2va-2-identity",
+      "graphSha256": "d06a88eb4c0a6c7ce8a753fde332c33b0ebc5f4cdb25d024ba006dc922faa98d",
+      "modelRuleId": "minimaxh3",
+      "operation": "identity-reference",
+      "outputKind": "video",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "trusted-project-exact-H3-authorization-required",
+        "frozen-pure-contract-does-not-expand-COMFY_AUTOGROW_V3"
+      ]
+    },
+    {
+      "id": "h3-ref2va-4-identity",
+      "graphSha256": "29d0b5763bdf7e70cadb949dc826b7fffaae9d05f90f56a5d4b62fe51bf189ae",
+      "modelRuleId": "minimaxh3",
+      "operation": "identity-reference",
+      "outputKind": "video",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "trusted-project-exact-H3-authorization-required",
+        "frozen-pure-contract-does-not-expand-COMFY_AUTOGROW_V3"
+      ]
+    },
+    {
+      "id": "h3-ref2va-2-identity-video",
+      "graphSha256": "8dc372a6e7374276ab9ca47520e98bcf16417cd5f28502114d412da06d4b4570",
+      "modelRuleId": "minimaxh3",
+      "operation": "motion-control",
+      "outputKind": "video",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "trusted-project-exact-H3-authorization-required",
+        "frozen-pure-contract-does-not-expand-COMFY_AUTOGROW_V3"
+      ]
+    },
+    {
+      "id": "h3-ref2va-1-identity-audio",
+      "graphSha256": "70b14915ee671bea1b760ec232cd1ee21ab22f497c772f70927cdde7eb104fc9",
+      "modelRuleId": "minimaxh3",
+      "operation": "identity-reference",
+      "outputKind": "video",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "trusted-project-exact-H3-authorization-required",
+        "frozen-pure-contract-does-not-expand-COMFY_AUTOGROW_V3",
+        "frozen-pure-audio-reference-alignment-mode-missing"
+      ]
+    },
+    {
+      "id": "ltx25-distilled-t2va",
+      "graphSha256": "c2616a9d694d32feaa2b3d5743e79d0f4e032ca5c0ca761178a5a4f8768f61fe",
+      "modelRuleId": "ltx2.5",
+      "operation": "text-to-video",
+      "outputKind": "video",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "exact-distilled-Comfy-stack-not-in-cached-enum",
+        "native-dev-assets-cannot-be-substituted-for-distilled-stack",
+        "frozen-pure-contract-does-not-support-FLOAT-INT-MultiType"
+      ]
+    },
+    {
+      "id": "ltx25-distilled-first-frame",
+      "graphSha256": "45e593b5fe0b718a740547bc9fab8198f66b2b3c12de75a9af53265ed3116448",
+      "modelRuleId": "ltx2.5",
+      "operation": "image-to-video",
+      "outputKind": "video",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "exact-distilled-Comfy-stack-not-in-cached-enum",
+        "native-dev-assets-cannot-be-substituted-for-distilled-stack",
+        "frozen-pure-contract-does-not-support-FLOAT-INT-MultiType"
+      ]
+    },
+    {
+      "id": "ltx25-distilled-first-last-frame",
+      "graphSha256": "d659b63ea409916a3f26726e07605a670468f7d27e82fb7aaad81afb29f43a7d",
+      "modelRuleId": "ltx2.5",
+      "operation": "first-last-frame",
+      "outputKind": "video",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "exact-distilled-Comfy-stack-not-in-cached-enum",
+        "native-dev-assets-cannot-be-substituted-for-distilled-stack",
+        "frozen-pure-contract-does-not-support-FLOAT-INT-MultiType"
+      ]
+    },
+    {
+      "id": "zimage-turbo-t2i",
+      "graphSha256": "2623b2823cbe0be331512a58ace0816eeffa8f0c5578aeba3f2999b24ac93162",
+      "modelRuleId": "zimageTurbo6B",
+      "operation": "text-to-image",
+      "outputKind": "image",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "exact-loader-files-or-local-format-registration-unverified",
+        "exact-full-weight-hashes-and-license-or-project-authorization-required"
+      ]
+    },
+    {
+      "id": "qwen-image-t2i",
+      "graphSha256": "fa166a96bbea693e43776af9588bd56cf97c2ceaee77bcb0855edcb33ec7e4ae",
+      "modelRuleId": "qwenimage20B",
+      "operation": "text-to-image",
+      "outputKind": "image",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "exact-loader-files-or-local-format-registration-unverified",
+        "exact-full-weight-hashes-and-license-or-project-authorization-required"
+      ]
+    },
+    {
+      "id": "anima-base-t2i",
+      "graphSha256": "411df86e943f0a1a937cf575418ee65830df56d395fa6e1987fe84ebe1f82351",
+      "modelRuleId": "anima2B",
+      "operation": "text-to-image",
+      "outputKind": "image",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "exact-loader-files-or-local-format-registration-unverified",
+        "exact-full-weight-hashes-and-license-or-project-authorization-required",
+        "native-Diffusers-transformer-and-separate-text-conditioner-require-reviewed-assembly",
+        "Anima-current-non-commercial-license-requires-project-use-review"
+      ]
+    },
+    {
+      "id": "qwen-edit2511-builtin-1",
+      "graphSha256": "c1dd43feedee3001b1f0ed82de9bcd543cc8bac9fcdd4302b256c0550aacaf43",
+      "modelRuleId": "qwenimageedit2511",
+      "operation": "image-edit",
+      "outputKind": "image",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "dedicated-edit-model-rule-required-no-base-model-alias",
+        "exact-Comfy-edit-stack-not-in-cached-enum"
+      ]
+    },
+    {
+      "id": "qwen-edit2511-builtin-2",
+      "graphSha256": "e4f925369a1373213a5b34017482d24d6ffb54786fe2b0bc1fa290b9a61fc939",
+      "modelRuleId": "qwenimageedit2511",
+      "operation": "image-edit",
+      "outputKind": "image",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "dedicated-edit-model-rule-required-no-base-model-alias",
+        "exact-Comfy-edit-stack-not-in-cached-enum"
+      ]
+    },
+    {
+      "id": "qwen-edit2511-builtin-3",
+      "graphSha256": "72d5a599142bf82ceb5adec7005b872cf5aee43771a37c0d0d406b939e8ff81b",
+      "modelRuleId": "qwenimageedit2511",
+      "operation": "image-edit",
+      "outputKind": "image",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "dedicated-edit-model-rule-required-no-base-model-alias",
+        "exact-Comfy-edit-stack-not-in-cached-enum"
+      ]
+    },
+    {
+      "id": "qwen-edit2511-local-sdnq-1",
+      "graphSha256": "fec35e05aeaa3e1639cb3f2395a27a15b859c33677748bf213444355456647ce",
+      "modelRuleId": "qwenimageedit2511",
+      "operation": "image-edit",
+      "outputKind": "image",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "custom-node-not-approved",
+        "native-fixed-local-no-download-no-LoRA-policy-missing",
+        "full-local-Diffusers-tree-hashes-license-and-source-attestation-required",
+        "frozen-pure-contract-has-no-reviewed-absolute-model-directory-asset-type"
+      ]
+    },
+    {
+      "id": "qwen-edit2511-local-sdnq-2",
+      "graphSha256": "ea50585d90a00826341a2e3090a7eaa1c9cf4afd6a294770bbd42165d44d17bb",
+      "modelRuleId": "qwenimageedit2511",
+      "operation": "image-edit",
+      "outputKind": "image",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "custom-node-not-approved",
+        "native-fixed-local-no-download-no-LoRA-policy-missing",
+        "full-local-Diffusers-tree-hashes-license-and-source-attestation-required",
+        "frozen-pure-contract-has-no-reviewed-absolute-model-directory-asset-type"
+      ]
+    },
+    {
+      "id": "qwen-edit2511-local-sdnq-3",
+      "graphSha256": "0005fd307f1acfc01d3ebea2bbccdbd8fa6079258d7f0a8b1686cec0d2e845ba",
+      "modelRuleId": "qwenimageedit2511",
+      "operation": "image-edit",
+      "outputKind": "image",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "custom-node-not-approved",
+        "native-fixed-local-no-download-no-LoRA-policy-missing",
+        "full-local-Diffusers-tree-hashes-license-and-source-attestation-required",
+        "frozen-pure-contract-has-no-reviewed-absolute-model-directory-asset-type"
+      ]
+    },
+    {
+      "id": "qwen-edit2511-local-sdnq-4",
+      "graphSha256": "f2228db41fde329c725831b9cc28b7e27256b8558ac8d5e16004dc3bd693303e",
+      "modelRuleId": "qwenimageedit2511",
+      "operation": "image-edit",
+      "outputKind": "image",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "custom-node-not-approved",
+        "native-fixed-local-no-download-no-LoRA-policy-missing",
+        "full-local-Diffusers-tree-hashes-license-and-source-attestation-required",
+        "frozen-pure-contract-has-no-reviewed-absolute-model-directory-asset-type"
+      ]
+    },
+    {
+      "id": "qwen-tts-custom-voice",
+      "graphSha256": "6612004edbad7f0e81066457fd8d0b480a19fee77dfcb6d0f020485afa44c17a",
+      "modelRuleId": "qwen3tts-custom-voice",
+      "operation": "tts",
+      "outputKind": "audio",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "custom-node-not-approved",
+        "installed-Qwen-TTS-missing-tokenizer-or-model-auto-download-not-fail-closed",
+        "implicit-model-loader-not-representable-by-frozen-pure-loader-role",
+        "exact-model-tokenizer-tree-hashes-and-project-license-required"
+      ]
+    },
+    {
+      "id": "qwen-tts-voice-design",
+      "graphSha256": "6d8bcc091aa807975e5b1c9fd93d5d3bdc99f4aa0155e161b02b911309d788b8",
+      "modelRuleId": "qwen3tts-voice-design",
+      "operation": "tts",
+      "outputKind": "audio",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "custom-node-not-approved",
+        "installed-Qwen-TTS-missing-tokenizer-or-model-auto-download-not-fail-closed",
+        "implicit-model-loader-not-representable-by-frozen-pure-loader-role",
+        "exact-model-tokenizer-tree-hashes-and-project-license-required"
+      ]
+    },
+    {
+      "id": "qwen-tts-voice-clone",
+      "graphSha256": "d3753d4fa6c71a9c6e8287171711d30865786ef5e587863c37773b519bd04ed1",
+      "modelRuleId": "qwen3tts-voice-clone",
+      "operation": "tts",
+      "outputKind": "audio",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "custom-node-not-approved",
+        "installed-Qwen-TTS-missing-tokenizer-or-model-auto-download-not-fail-closed",
+        "implicit-model-loader-not-representable-by-frozen-pure-loader-role",
+        "exact-model-tokenizer-tree-hashes-and-project-license-required"
+      ]
+    },
+    {
+      "id": "acestep-v1-music",
+      "graphSha256": "ef2432346bf55d891d0de2c872baf25e87102b72935bba146e6f49e686b6cec3",
+      "modelRuleId": "acestep",
+      "operation": "music-generation",
+      "outputKind": "audio",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "combined-Comfy-checkpoint-not-in-cached-enum",
+        "existing-native-components-require-reviewed-combined-format-mapping"
+      ]
+    },
+    {
+      "id": "acestep-v1-audio-edit",
+      "graphSha256": "b342130070e42c690db92b74bc169102a5c4eabb5ebf3e9770390bfffbc9205d",
+      "modelRuleId": "acestep",
+      "operation": "music-generation",
+      "outputKind": "audio",
+      "executionSelectable": false,
+      "blockers": [
+        "workflow_native_preset_execution_review_required",
+        "loaded-core-source-attestation-unknown",
+        "cached-node-schema-requires-current-preflight",
+        "actual-generation-and-registration-not-run",
+        "combined-Comfy-checkpoint-not-in-cached-enum",
+        "existing-native-components-require-reviewed-combined-format-mapping"
+      ]
+    }
+  ]
+}

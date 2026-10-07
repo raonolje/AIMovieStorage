@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isDesktopApp } from "@/lib/llm";
 import { getMediaLibrarySettings, queueMirrorWrite, queueMirrorWriteAndConfirm, registerMirrorSection, type ProjectAssetType } from "@/lib/mediaLibrary";
 
-export type ComfyKind = "image" | "video";
+export type ComfyKind = "image" | "video" | "audio";
 export type ComfyValue = string | number | boolean;
 export interface ComfyInputMapping {
   nodeId: string;
@@ -13,9 +13,9 @@ export interface ComfyInputMapping {
   value?: ComfyValue;
 }
 export interface ComfyWorkflowConfig { workflowPath: string; mappings: ComfyInputMapping[]; outputNodeIds: string[] }
-export interface ComfyGenerationSettings { baseUrl: string; image: ComfyWorkflowConfig; video: ComfyWorkflowConfig }
+export interface ComfyGenerationSettings { baseUrl: string; installationRoot?: string; connectionHistory?: {baseUrl:string;installationRoot?:string;archivedAtUtc:string}[]; image: ComfyWorkflowConfig; video: ComfyWorkflowConfig; audio: ComfyWorkflowConfig }
 export interface ComfyWorkflowInfo { sha256: string; nodes: { id: string; classType: string; title: string; inputs: {name: string; value: ComfyValue}[] }[] }
-export interface ComfyOutput { path: string; name: string; kind: ComfyKind; nodeId: string }
+export interface ComfyOutput { path: string; name: string; kind: ComfyKind; nodeId: string; sha256?: string; bytes?: number; provenance?: unknown; mediaFacts?: Record<string,unknown> }
 export interface ComfyReference { kind: "image" | "video" | "audio"; path: string }
 export interface ComfyBinding { nodeId: string; input: string; value?: ComfyValue; filePath?: string }
 export interface ComfyStatus { state: "pending" | "completed" | "failed"; promptId: string; error?: string }
@@ -23,7 +23,7 @@ export interface ComfyStatus { state: "pending" | "completed" | "failed"; prompt
 const KEY = "ai-video-storage.comfy-generation.v1";
 const SECTION = "comfy-generation";
 const emptyWorkflow = (): ComfyWorkflowConfig => ({ workflowPath: "", mappings: [], outputNodeIds: [] });
-const defaults = (): ComfyGenerationSettings => ({ baseUrl: "http://127.0.0.1:8188", image: emptyWorkflow(), video: emptyWorkflow() });
+const defaults = (): ComfyGenerationSettings => ({ baseUrl: "http://127.0.0.1:8188", image: emptyWorkflow(), video: emptyWorkflow(), audio: emptyWorkflow() });
 const listeners = new Set<() => void>();
 export const subscribeComfyGeneration = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 const publish = () => listeners.forEach(listener => listener());
@@ -32,7 +32,9 @@ export function normalizeComfyGenerationSettings(raw: unknown): ComfyGenerationS
   const object = raw && typeof raw === "object" ? raw as Partial<ComfyGenerationSettings> : {};
   const result = defaults();
   if (typeof object.baseUrl === "string" && object.baseUrl.trim()) result.baseUrl = object.baseUrl.trim();
-  for (const kind of ["image", "video"] as const) {
+  if (typeof object.installationRoot === "string" && object.installationRoot.trim()) result.installationRoot = object.installationRoot.trim();
+  if(Array.isArray(object.connectionHistory))result.connectionHistory=object.connectionHistory.filter(item=>typeof item?.baseUrl==="string"&&typeof item?.archivedAtUtc==="string").map(item=>({...item}));
+  for (const kind of ["image", "video", "audio"] as const) {
     const config = object[kind];
     if (!config || typeof config.workflowPath !== "string") continue;
     result[kind] = {
@@ -51,13 +53,13 @@ function readSettings(): ComfyGenerationSettings | null {
 }
 export function getComfyGenerationSettings(): ComfyGenerationSettings { return readSettings() ?? defaults(); }
 export function saveComfyGenerationSettings(update: (current: ComfyGenerationSettings) => ComfyGenerationSettings): ComfyGenerationSettings {
-  const next = normalizeComfyGenerationSettings(update(getComfyGenerationSettings()));
+  const previous=getComfyGenerationSettings(),next = connectionUpdate(previous,update(previous));
   window.localStorage.setItem(KEY, JSON.stringify(next)); queueMirrorWrite(SECTION, next); publish(); return next;
 }
 /** 외부 조종기는 파일 저장이 실패한 값을 성공으로 돌려주면 안 됩니다. */
 export async function saveComfyGenerationSettingsAndConfirm(update: (current: ComfyGenerationSettings) => ComfyGenerationSettings): Promise<ComfyGenerationSettings> {
   const previous = getComfyGenerationSettings();
-  const next = normalizeComfyGenerationSettings(update(previous));
+  const next = connectionUpdate(previous,update(previous));
   const text = JSON.stringify(next);
   window.localStorage.setItem(KEY, text); publish();
   try { await queueMirrorWriteAndConfirm(SECTION, next); }
@@ -69,6 +71,12 @@ export async function saveComfyGenerationSettingsAndConfirm(update: (current: Co
     throw error;
   }
   return next;
+}
+function connectionUpdate(previous:ComfyGenerationSettings,raw:ComfyGenerationSettings) {
+ const next=normalizeComfyGenerationSettings(raw);
+ const url=new URL(next.baseUrl);if(url.protocol!=="http:"||!["localhost","127.0.0.1","[::1]"].includes(url.hostname)||url.username||url.password||url.search||url.hash||url.pathname!=="/")throw new Error("comfy_loopback_endpoint_required");
+ if(previous.baseUrl!==next.baseUrl||previous.installationRoot!==next.installationRoot)next.connectionHistory=[...(previous.connectionHistory??[]),{baseUrl:previous.baseUrl,installationRoot:previous.installationRoot,archivedAtUtc:new Date().toISOString()}];
+ return next;
 }
 /** 설정 화면과 조종기가 같은 검사를 사용합니다. 파일 업로드나 생성은 하지 않습니다. */
 export function validateComfyWorkflowConfig(config: ComfyWorkflowConfig, info: ComfyWorkflowInfo): void {
@@ -146,6 +154,11 @@ export interface ComfyRunRequest {
   /** 접수할 때 고정합니다. 기다리는 동안 설정을 바꿔도 다른 서버의 작업을 읽지 않습니다. */
   settings?: ComfyGenerationSettings;
   workflowSha256?: string;
+  /** 새 실행은 manifest/환경/등록 참조를 같은 검사기로 확인한 계획을 필수로 받습니다. */
+  adapterPlan?: import("./comfyWorkflowContract").WorkflowAdapterPlan;
+  workflowManifest?: import("./comfyWorkflowContractV2").AnyComfyWorkflowManifest;
+  lyricsTransforms?: unknown[];
+  workflowConfig?: ComfyWorkflowConfig;
   baseDirectory?: string;
   clientId?: string;
   existingPromptId?: string;
@@ -153,6 +166,7 @@ export interface ComfyRunRequest {
   shouldStop?: () => boolean;
   onProgress?: (message: string) => void;
   onSubmitting?: () => Promise<void>;
+  onSubmissionCancelled?: () => Promise<void>;
   onSubmitted?: (promptId: string) => Promise<void>;
   onCollected?: (files: ComfyOutput[]) => Promise<void>;
 }
@@ -167,27 +181,46 @@ export async function runComfyToProject(input: ComfyRunRequest): Promise<{ promp
       throw new Error("ComfyUI 작업을 접수한 뒤 저장 폴더가 바뀌었습니다. 원래 저장 폴더로 돌아와 결과를 이어받으세요.");
   };
   assertStorage();
-  const config = settings[input.kind];
+  if (!input.adapterPlan) throw new Error("workflow_admission_required: 검사한 manifest와 명시 입력 역할을 가진 실행 계획이 필요합니다. 기존 전역 mapping으로 자동 실행하지 않습니다.");
+  const config = input.workflowConfig ?? input.adapterPlan.config;
+  const clientId=input.clientId??`aimoviestorage-${crypto.randomUUID()}`;
+  const provenance={ ...input.adapterPlan.provenance,prompt:input.prompt,negative:input.negative??"",clientId,lyricsTransforms:input.lyricsTransforms??[] };
   let promptId = input.existingPromptId;
   const stopped = () => { if (input.shouldStop?.()) throw new Error("ComfyUI 결과 기다리기를 중지했습니다. 서버 작업은 계속될 수 있습니다. 작업 번호로 다시 확인하세요."); };
+  stopped();
   if (!promptId) {
     if (!config.workflowPath) throw new Error("설정에서 ComfyUI 생성 워크플로를 먼저 고르세요.");
     const info = await inspectComfyGenerationWorkflow(config.workflowPath);
     if (input.workflowSha256 && input.workflowSha256 !== info.sha256) throw new Error("접수한 뒤 ComfyUI 워크플로 파일이 변경됐습니다. 다시 검사하고 실행하세요.");
-    const bindings = prepareComfyBindings(config, info, input);
+    const bindings = input.adapterPlan.bindings;
+    if(!input.workflowManifest)throw new Error("workflow_native_manifest_required");
+    const destination={baseDirectory,projectName:input.projectName,assetType:input.assetType,ownerName:input.ownerName,stem:input.stem,kind:input.kind};
+    let admissionToken:string|undefined,submitStarted=false,checkpointStarted=false;
+    try {
+    stopped();
+    ({admissionToken}=await invoke<{admissionToken:string}>("comfy_admit_generation",{request:{baseUrl:settings.baseUrl,workflowPath:config.workflowPath,expectedWorkflowSha256:info.sha256,bindings,manifest:input.workflowManifest,manifestJson:JSON.stringify(input.workflowManifest),provenance,destination}}));
     stopped();
     assertStorage();
     input.onProgress?.("ComfyUI 에 레퍼런스와 워크플로를 보내는 중");
+    checkpointStarted=true;
     await input.onSubmitting?.();
     stopped();
     assertStorage();
+    submitStarted=true;
     const result = await invoke<{ promptId: string }>("comfy_submit_generation", { request: {
       baseUrl: settings.baseUrl, workflowPath: config.workflowPath, bindings,
-      clientId: input.clientId ?? `aimoviestorage-${crypto.randomUUID()}`,
+      clientId,
       expectedWorkflowSha256: info.sha256,
+      admissionToken,
     } });
     promptId = result.promptId;
     await input.onSubmitted?.(promptId);
+    } finally {
+      if(admissionToken&&!submitStarted) {
+        await invoke("comfy_revoke_generation_admission",{admissionToken}).catch(()=>undefined);
+        if(checkpointStarted)await input.onSubmissionCancelled?.().catch(()=>undefined);
+      }
+    }
   }
   const deadline = Date.now() + Math.min(86400, Math.max(1, input.timeoutSecs ?? 7200)) * 1000;
   while (true) {
@@ -206,7 +239,9 @@ export async function runComfyToProject(input: ComfyRunRequest): Promise<{ promp
     baseUrl: settings.baseUrl, promptId, baseDirectory, projectName: input.projectName,
     assetType: input.assetType, ownerName: input.ownerName, stem: input.stem, kind: input.kind,
     outputNodeIds: config.outputNodeIds,
+    provenance: { ...provenance, promptId },
   } });
   await input.onCollected?.(files);
+  stopped();
   return { promptId, files };
 }

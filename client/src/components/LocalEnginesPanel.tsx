@@ -1,3 +1,4 @@
+import { isLegacyGenerationEngine } from "@/lib/generationRoutingPolicy";
 import { useEffect, useState } from "react";
 import ApiTokenRow from "@/components/ApiTokenRow";
 import { invoke } from "@tauri-apps/api/core";
@@ -55,9 +56,8 @@ export default function LocalEnginesPanel({
     try { void saveLocalMemoryPolicy(next).catch(failed); }
     catch (error) { failed(error); }
   };
-  const shown = kinds
-    ? engines.filter((engine) => kinds.includes(engine.kind))
-    : engines;
+  const active = engines.filter(engine => !isLegacyGenerationEngine(engine.id));
+  const shown = kinds ? active.filter(engine => kinds.includes(engine.kind)) : active;
 
   /*
     이 컴퓨터를 **한 번** 읽습니다(). 카드마다 읽으면 엔진 수만큼 nvidia-smi 가 돕니다.
@@ -201,11 +201,11 @@ export default function LocalEnginesPanel({
             onClick={() => {
               setStoppingWorkers(true);
               void stopLocalWorkers()
-                .then(() => toast.success(t("로컬 모델 워커를 내렸습니다. 해당 워커의 RAM·VRAM을 해제했습니다.")))
+                .then(() => toast.success(t("유휴 로컬 모델 워커의 정상 종료를 확인했습니다.")))
                 .catch((error) => toast.error(t("워커를 내리지 못했습니다: {error}", { error: String(error) })))
                 .finally(() => setStoppingWorkers(false));
             }}
-            title={t("현재 로컬 워커를 모두 종료합니다. 실행 중인 생성도 중단될 수 있으며 다음 생성 때 모델을 다시 불러옵니다.")}
+            title={t("유휴 워커에 정상 종료를 요청합니다. 실행·다운로드 중인 워커는 유지하며 종료를 확인하지 못하면 앱을 계속 엽니다.")}
             className="rounded-md px-2.5 py-1.5 text-[11px] font-semibold"
             style={{
               background: "oklch(1 0 0 / 6%)",

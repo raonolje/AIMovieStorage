@@ -1,3 +1,4 @@
+import { resolvePromptSelection, promptStamp, promptStaleMessage, assertPromptSnapshot, promptResultForModel } from "@/lib/promptModelSelection";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { confirmDialog } from "@/components/ConfirmDialog";
@@ -133,7 +134,10 @@ export function usePromptCard<
     (docs/복원/10 §1). 정체성 그림의 표시를 여기서 찾아 싣습니다 — props 로 내려받지 않는 이유는
     ProjectMediaContext 설명과 같습니다(중간 컴포넌트 하나만 빠뜨려도 조용히 빈 값).
   */
-  const { imageMarks } = useProjectMedia();
+  const { imageMarks, promptProject } = useProjectMedia();
+  const selection = resolvePromptSelection("image", { workflowTarget: entity.promptWorkflow, model: entity.promptModel, engine: entity.promptEngine, project: promptProject, platform: getTargetPlatform() });
+  const latestPrompt = useRef({ entity, selection });
+  latestPrompt.current = { entity, selection };
   /*
     분석과 프롬프트 작성은 **따로** 잠급니다.
 
@@ -186,8 +190,7 @@ export function usePromptCard<
     고 느꼈습니다 — 실은 폴더에 멀쩡히 있는데 화면이 못 본 것이었습니다.
 
     카드를 열 때 한 번만 읽습니다. 계속 읽으면 방금 지운 것이 되살아납니다.
-    이미 목록에 있는 자리는 건드리지 않고, **없는 것만 뒤에 붙입니다.**
-  */
+    이미 목록에 있는 자리는 건드리지 않고, **없는 것만 뒤에 붙입니다.*  */
   const scanned = useRef(false);
   useEffect(() => {
     if (scanned.current || !options.projectName.trim()) return;
@@ -214,8 +217,7 @@ export function usePromptCard<
           저장이 끝나기 전에 창을 닫으면 filePath 를 채우는 두 번째 patch 가
           버려집니다. 그 상태로 다시 열면 폴더 파일이 «목록에 없는 것» 으로
           보여 새로 붙었습니다. 이름이 같고 아직 filePath 가 없는 것이 있으면
-          새로 붙이지 않고 **그 자리에 경로를 채웁니다.**
-        */
+          새로 붙이지 않고 **그 자리에 경로를 채웁니다.*        */
         const orphans = new Map(
           (current.references || [])
             .filter((image) => !image.filePath && image.name)
@@ -735,7 +737,7 @@ export function usePromptCard<
   const applyPrompt = (
     result: { ko: string; en: string; negativeKo: string; negativeEn: string },
     label: string,
-  ) => patch((current) => withPromptResult(current, result, label));
+  ) => patch((current) => ({ ...withPromptResult(current, promptResultForModel(result, selection.modelId), label), promptModelStamp: promptStamp(selection) }));
 
   /** API 없이 규칙으로 조립합니다. 실패했을 때의 대비이자, 키가 없을 때의 길입니다. */
   const buildByRule = (references: ReferenceImage[] = entity.references || []) =>
@@ -772,7 +774,7 @@ export function usePromptCard<
    * 4단계가 화면 없이 같은 재료를 지어야 해서입니다. 여기서는 훅만 아는 것(앵커·틀 태그·레퍼런스)을 모읍니다.
    */
   const promptRequestPayload = (references: ReferenceImage[] = entity.references || []) =>
-    sheetRequestPayload({
+    ({ generationTarget: selection, ...sheetRequestPayload({
       kind,
       name,
       description: options.description,
@@ -785,7 +787,7 @@ export function usePromptCard<
       identityMarks: identityMarks(),
       templateMention: kind === "background" ? templateMentionOf(references) : null,
       references: referenceTags(references),
-    });
+    }) });
 
   /*
     ── 전개도 틀 그림을 레퍼런스에 자동으로 ────────────────────────────────
@@ -923,6 +925,8 @@ export function usePromptCard<
       if (!ok) return;
     }
 
+    const requestedStamp = promptStamp(selection);
+    const beforePrompt = [entity.promptKo, entity.promptEn, entity.negativeKo, entity.negativeEn];
     setPromptBusy(true);
     patch(() => ({ promptLoading: true } as Partial<T>));
     /*
@@ -939,7 +943,7 @@ export function usePromptCard<
         deliveredTo: `${name || "이름 없음"} · 프롬프트 네 칸에 넣음`,
         task: options.promptTask,
         template: options.promptTemplate,
-        modelId: entity.promptModel,
+        modelId: selection.modelId,
         /*
           **고른 플랫폼을 요청에 실어 보냅니다.** (지시 128)
 
@@ -948,13 +952,17 @@ export function usePromptCard<
           달라져요. 예전에는 화면에서 고르기만 하고 요청에는 안 넘겨서,
           마그니픽용으로 골라도 프롬프트가 그대로 나왔습니다.
         */
-        platformId: getTargetPlatform(),
+        platformId: selection.platformId,
         data: promptRequestPayload(references),
         // 방금 추가한 전개도 틀은 아직 현재 렌더의 entity.references에 없을 수 있습니다.
         // 요청문에 쓴 @태그와 실제 전송 이미지는 같은 목록에서 골라야 합니다.
         images: sheetReferenceSources(references),
       });
-      applyPrompt(withUnfoldFrame(result, references), conditions());
+      assertPromptSnapshot(requestedStamp, promptStamp(latestPrompt.current.selection));
+      const now = latestPrompt.current.entity;
+      assertPromptSnapshot(beforePrompt, [now.promptKo, now.promptEn, now.negativeKo, now.negativeEn]);
+      applyPrompt(withUnfoldFrame(promptResultForModel(result, selection.modelId), references), conditions());
+      patch(() => ({ promptModelStamp: requestedStamp } as Partial<T>));
       toast.success("프롬프트를 받았습니다.");
     } catch (error) {
       if (isLlmCancel(error)) {
@@ -963,8 +971,7 @@ export function usePromptCard<
         toast.message("프롬프트 작성을 중지했습니다.");
       } else {
         // 실패해도 빈 칸을 보여 주지 않습니다. 규칙으로 조립한 것이라도 바탕은 됩니다.
-        applyPrompt(buildByRule(references), conditions("규칙 조립"));
-        toast.error(`API 요청이 실패해 규칙으로 조립했습니다. ${error}`);
+        toast.error(`프롬프트 작성이 완료되지 않았습니다. 기존 문장을 보존했습니다. ${error}`);
       }
     } finally {
       promptJob.current = null;
@@ -1000,6 +1007,8 @@ export function usePromptCard<
     applyAnalysis,
     firstReferenceBusy,
     /** 지금 고른 이미지 모델 id. 화면의 드롭다운이 이 값을 보여 줍니다. */
+    selection,
+    staleMessage: promptStaleMessage(entity.promptModelStamp, selection, Boolean(entity.promptKo || entity.promptEn)),
     firstReferenceModelId,
     runFirstReference,
     cancelFirstReference,

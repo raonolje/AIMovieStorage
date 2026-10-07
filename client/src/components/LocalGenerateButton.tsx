@@ -28,8 +28,6 @@ import ComfyGenerateButton from "@/components/ComfyGenerateButton";
 /**
  * «로컬로 뽑기» — 이 컴퓨터의 모델로 그림·영상을 바로 만듭니다.
  *
- *
- *
  * 카드마다 프롬프트를 따로 쓰지 않습니다. **적어 둔 프롬프트를 그대로** 가져가되,
  * 보내는 순간에 마그니픽 전제(@칩·미드저니 매개변수)를 걷어냅니다(`tuneForLocal`).
  *
@@ -38,6 +36,8 @@ import ComfyGenerateButton from "@/components/ComfyGenerateButton";
  */
 function LocalEngineGenerateButton({
   kind,
+  selectedEngine,
+  onEngineChange,
   prompt,
   aspect = "16:9",
   seconds,
@@ -53,6 +53,8 @@ function LocalEngineGenerateButton({
   onDone,
 }: {
   kind: Extract<LocalEngineKind, "image" | "video">;
+  selectedEngine?: string;
+  onEngineChange?: (engine: LocalEngineId) => void;
   prompt: LocalPromptInput;
   /** 「16:9」·「2:3」. 로컬은 크기를 설정으로 받습니다 — 프롬프트의 `--ar` 은 버립니다. */
   aspect?: string;
@@ -89,7 +91,9 @@ function LocalEngineGenerateButton({
   useLocalEngines(); // 설치 상태를 구독해야 단추가 제때 살아납니다.
   const engines = availableLocalEngines(kind);
   const [engineId, setEngineId] = useState<LocalEngineId | "">("");
-  const engine = engines.find((item) => item.id === engineId) ?? engines[0];
+  const chosenId = onEngineChange ? selectedEngine : engineId;
+  const engine = engines.find((item) => item.id === chosenId);
+  const displayEngine = engine ?? engines[0];
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   /*
@@ -103,8 +107,6 @@ function LocalEngineGenerateButton({
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   /**
    * 모캡에서 구운 **동작 기준**. 영상에서만 씁니다.
-   *
-   *
    */
   const [pose, setPose] = useState<PoseFrameSet | null>(null);
   const [structure, setStructure] = useState<LocalStructureControl | null>(null);
@@ -121,10 +123,11 @@ function LocalEngineGenerateButton({
 
   // 쓸 수 있는 엔진이 없으면 **아무것도 안 그립니다.** 설치는 설정에서 합니다 —
   // 카드마다 「설치하세요」 를 띄우면 화면이 안내문으로 뒤덮입니다.
-  if (!engine) return null;
+  if (!displayEngine) return null;
 
   const run = async () => {
     if (busy) return;
+    if (!engine) { toast.error("먼저 로컬 모델을 선택하세요. 선택한 모델로 프롬프트를 재작성할 수 있습니다."); return; }
     const tuned = tuneForLocal(engine.id, prompt);
     if (!tuned.prompt.trim()) {
       toast.error("보낼 프롬프트가 없습니다.");
@@ -316,10 +319,10 @@ function LocalEngineGenerateButton({
         엔진이 둘 이상일 때만 고르는 칸을 냅니다. 하나뿐인데 드롭다운을 두면
         고를 것이 없는 칸만 자리를 차지합니다.
       */}
-      {engines.length > 1 && (
+      {engines.length > 0 && (
         <select
-          value={engine.id}
-          onChange={(event) => setEngineId(event.target.value as LocalEngineId)}
+          value={engine?.id ?? ""}
+          onChange={(event) => { const id = event.target.value as LocalEngineId; setEngineId(id); onEngineChange?.(id); }}
           title="이 컴퓨터에 깔린 로컬 모델 중에서"
           className="rounded-md px-1.5 py-1 text-[10px] outline-none"
           style={{
@@ -328,6 +331,7 @@ function LocalEngineGenerateButton({
             color: "oklch(0.82 0.01 265)",
           }}
         >
+          <option value="" disabled>로컬 모델 선택</option>
           {engines.map((item) => (
             <option key={item.id} value={item.id}>
               {item.name}
@@ -342,7 +346,7 @@ function LocalEngineGenerateButton({
         title={
           busy
             ? status || "만드는 중…"
-            : `${engine.name} 으로 이 컴퓨터에서 바로 만듭니다. 적어 둔 프롬프트를 그대로 쓰되 마그니픽용 @칩과 매개변수는 걷어냅니다.`
+            : `${displayEngine.name} 으로 이 컴퓨터에서 바로 만듭니다. 적어 둔 프롬프트를 그대로 쓰되 마그니픽용 @칩과 매개변수는 걷어냅니다.`
         }
         className="flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10px] font-semibold disabled:opacity-50"
         style={{
@@ -359,7 +363,7 @@ function LocalEngineGenerateButton({
       </button>
       </div>
 
-      {kind === "video" && endFrameChoices?.length && (["ltx25", "wanvideo"].includes(engine.id) || endFrameId) ? <label className="flex items-center gap-1 text-[10px]">
+      {kind === "video" && endFrameChoices?.length && (["ltx25", "wanvideo"].includes(displayEngine.id) || endFrameId) ? <label className="flex items-center gap-1 text-[10px]">
         <span>{t("끝 그림 (LTX/Wan)")}</span>
         <select value={endFrameId} onChange={event => setEndFrameId(event.target.value)} disabled={busy}
           aria-label={t("끝 그림 (LTX/Wan)")} title={t("시작·끝 그림을 모델 조건으로 사용합니다. LTX는 마지막 잠재 구간에 조건을 넣어 최종 프레임이 끝 그림과 어긋날 수 있습니다. 중간 접촉과 동작도 별도 검수가 필요합니다.")}
@@ -370,9 +374,9 @@ function LocalEngineGenerateButton({
       </label> : null}
       {needsReferenceRange && <H3ReferenceRangePicker paths={videoReferences} value={referenceRange}
         onChange={range => setReferenceSelection({ key: referenceKey, range })} disabled={busy} />}
-      {kind === "video" && (engine.id === "ltx25" || structure) && <StructureControlPicker
+      {kind === "video" && (displayEngine.id === "ltx25" || structure) && <StructureControlPicker
         paths={videoReferences} value={structure} onChange={setStructure} disabled={busy} seconds={seconds} />}
-      {kind === "video" && engine.id === "ltx25" && <label className="flex items-center gap-1 text-[10px]"
+      {kind === "video" && displayEngine.id === "ltx25" && <label className="flex items-center gap-1 text-[10px]"
         title={t("설정한 크기가 최종 출력입니다. 절반 크기로 생성한 뒤 2배 확대·3회 정제합니다. 윤곽·포즈 기준은 128픽셀, 그 외는 64픽셀 배수로 맞춥니다. 시간과 메모리가 늘 수 있습니다.")}>
         <span>{t("LTX 품질")}</span>
         <select value={ltxQuality} disabled={busy} onChange={event => setLtxQuality(event.target.value as "single" | "two-stage")}
@@ -386,16 +390,16 @@ function LocalEngineGenerateButton({
 
       {/* 받아 둔 로라가 있을 때만 뜹니다. 없으면 이 줄 자체가 없습니다. */}
       <LoraPicker
-        engine={engine.id}
-        picked={picked[engine.id] ?? []}
-        onChange={(next) => setPicked((current) => ({ ...current, [engine.id]: next }))}
+        engine={displayEngine.id}
+        picked={picked[displayEngine.id] ?? []}
+        onChange={(next) => setPicked((current) => ({ ...current, [displayEngine.id]: next }))}
         disabled={busy}
       />
 
       {/* 동작을 받는 엔진일 때만 뜹니다 — 없는 엔진에 주면 조용히 무시됩니다. */}
       {kind === "video" && (
         <PoseControlPicker
-          engine={engine.id}
+          engine={displayEngine.id}
           projectName={projectName}
           value={pose}
           onChange={setPose}
@@ -407,10 +411,13 @@ function LocalEngineGenerateButton({
 }
 
 /** 외부 ComfyUI 는 앱 내 로컬 모델 설치 여부와 무관하게 쓸 수 있습니다. */
-export default function LocalGenerateButton(props: Parameters<typeof LocalEngineGenerateButton>[0]) {
+export function LegacyLocalGenerateButton(props: Parameters<typeof LocalEngineGenerateButton>[0]) {
   return <>
     <LocalEngineGenerateButton {...props} />
     <ComfyGenerateButton kind={props.kind} prompt={props.prompt} references={props.references} firstFrame={props.firstFrame}
       projectName={props.projectName} assetType={props.assetType} ownerName={props.ownerName} stem={props.stem} onDone={props.onDone} />
   </>;
 }
+
+/** Comfy 실행기를 기본으로 사용하며 legacy 직접 실행은 runtime에서 차단합니다. */
+export default function LocalGenerateButton(props: Parameters<typeof LegacyLocalGenerateButton>[0] & { workflowTarget?: import("@/lib/promptModelSelection").WorkflowPromptTarget; target?: import("@/lib/comfyWorkflowRuntime").WorkflowRunInput["target"] }) { return <ComfyGenerateButton workflowTarget={props.workflowTarget} target={props.target} kind={props.kind} prompt={props.prompt} references={props.references} firstFrame={props.firstFrame} projectName={props.projectName} assetType={props.assetType} ownerName={props.ownerName} stem={props.stem} onDone={props.onDone} />; }

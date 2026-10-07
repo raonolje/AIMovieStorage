@@ -5,6 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({invoke}));
 vi.mock("@/lib/llm", () => ({isDesktopApp:() => true}));
 vi.mock("@/lib/mediaLibrary", () => ({getMediaLibrarySettings:() => ({baseDirectory:storage.directory}),registerMirrorSection:vi.fn(),queueMirrorWrite:vi.fn()}));
 import { prepareComfyBindings, runComfyToProject, type ComfyGenerationSettings, type ComfyRunRequest, type ComfyWorkflowInfo } from "./comfyGeneration";
+import type { WorkflowAdapterPlan, ComfyWorkflowManifest } from "./comfyWorkflowContract";
 
 const info: ComfyWorkflowInfo = {sha256:"verified",nodes:[
   {id:"1",classType:"CLIPTextEncode",title:"",inputs:[{name:"text",value:"old prompt"}]},
@@ -15,9 +16,11 @@ const info: ComfyWorkflowInfo = {sha256:"verified",nodes:[
 ]};
 const settings: ComfyGenerationSettings = {baseUrl:"http://127.0.0.1:8188",image:{workflowPath:"D:/image.json",mappings:[{nodeId:"1",input:"text",source:"prompt"}],outputNodeIds:[]},
   video:{workflowPath:"D:/video.json",mappings:[{nodeId:"1",input:"text",source:"prompt"},{nodeId:"2",input:"image",source:"reference",referenceKind:"image",referenceIndex:0},
-    {nodeId:"3",input:"file",source:"reference",referenceKind:"video",referenceIndex:0},{nodeId:"4",input:"seed",source:"value",value:99}],outputNodeIds:["8"]}};
+    {nodeId:"3",input:"file",source:"reference",referenceKind:"video",referenceIndex:0},{nodeId:"4",input:"seed",source:"value",value:99}],outputNodeIds:["8"]},audio:{workflowPath:"",mappings:[],outputNodeIds:[]}};
 const request = (): ComfyRunRequest => ({kind:"video",prompt:"new prompt",references:[{kind:"video",path:"D:/camera.mp4"},{kind:"image",path:"D:/actor.png"}],
-  projectName:"movie",assetType:"scene-video",ownerName:"scene",stem:"take",settings,workflowSha256:"verified"});
+  projectName:"movie",assetType:"scene-video",ownerName:"scene",stem:"take",settings,workflowSha256:"verified",adapterPlan:plan(),workflowManifest:{} as ComfyWorkflowManifest});
+// CPU 전송/재개 계약만 검사합니다. 라이브 노드·weight admission은 pure 검사기 시험에서 검증합니다.
+const plan=():WorkflowAdapterPlan=>({config:settings.video,references:[],bindings:[],provenance:{workflowSha256:"a".repeat(64),manifestSha256:"b".repeat(64),promptTarget:{kind:"workflow",workflowId:"cpu",workflowSha256:"a".repeat(64),roleId:"main",modelRuleId:"wan2.2"},assets:[],values:{},weightAuthorizations:[],verification:{static:"passed",installedRequirements:"passed",actualGenerationRegistration:"not-run",executionAdmission:"required",checkedAtUtc:"2026-10-06T00:00:00.000Z"}}});
 
 describe("ComfyUI 입력 연결", () => {
   it("모델을 추측하지 않고 영상과 그림 순서를 각 갈래별로 맞춥니다", () => {
@@ -40,10 +43,15 @@ describe("ComfyUI 작업 이어받기", () => {
   const files = [{path:"D:/projects/movie/take_ComfyUI_001.mp4",name:"take_ComfyUI_001",kind:"video",nodeId:"8"}];
   const respond = () => invoke.mockImplementation(async (command: string) => {
     if (command === "comfy_inspect_generation_workflow") return info;
+    if (command === "comfy_admit_generation") return {admissionToken:"cpu-only-fixture"};
     if (command === "comfy_submit_generation") return {promptId:"job-1"};
     if (command === "comfy_generation_status") return {state:"completed",promptId:"job-1"};
     if (command === "comfy_collect_generation") return files;
     throw new Error(command);
+  });
+  it("검사 계획 없이 전역 mapping만 주면 네이티브 호출 전에 거절합니다",async()=>{
+    await expect(runComfyToProject({...request(),adapterPlan:undefined})).rejects.toThrow("workflow_admission_required");
+    expect(invoke).not.toHaveBeenCalled();
   });
   it("작업 기록을 먼저 저장한 뒤에만 전송하고 결과 전체를 기록합니다", async () => {
     respond();

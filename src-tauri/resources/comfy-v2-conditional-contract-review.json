@@ -1,0 +1,4171 @@
+{
+  "schemaVersion": 2,
+  "status": "conditional-structural-review-not-runtime-allowlist",
+  "supportedExecutionVersions": [
+    1
+  ],
+  "coreCommit": "b0b743566f65daafc423b4fea8a2fbda94b3384a",
+  "comfyVersion": "0.39.0",
+  "reviewVersion": "offline-preset-source-review-v1-core-0.39.0",
+  "pins": {
+    "MiniMaxH3ReferenceToVideo": {
+      "classType": "MiniMaxH3ReferenceToVideo",
+      "pythonModule": "comfy_extras.nodes_minimax_h3",
+      "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+      "sourceSha256": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c",
+      "schemaSha256": "a6fda71ef4f1631f3b55f86df10ea03a36f2ea64b2517ea28fdbc052ea4a6124",
+      "comfyVersion": "0.39.0"
+    },
+    "LTXVEmptyLatentAudio": {
+      "classType": "LTXVEmptyLatentAudio",
+      "pythonModule": "comfy_extras.nodes_lt_audio",
+      "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+      "sourceSha256": "19e958412230602ae5499f6fc4f9a50b18a42ddefa5fbcf565e4e39a5b9795f6",
+      "schemaSha256": "32ee3f17dc956d9bb577907cc10d4d1e93c5f5f2848f440e94af1c295fb6b9d0",
+      "comfyVersion": "0.39.0"
+    }
+  },
+  "entries": [
+    {
+      "id": "h3-ref2va-1-identity",
+      "workflowSha256": "cd8df6e990f2630b8ca52f9ab4ac87903a9301d33dffffa76056b7c698545a84",
+      "graph": {
+        "1": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "2": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "type": "minimax",
+            "device": "default"
+          }
+        },
+        "3": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+          }
+        },
+        "4": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+          }
+        },
+        "5": {
+          "class_type": "MiniMaxH3SigmaShift",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "shift_video": 12,
+            "shift_audio": 3
+          }
+        },
+        "6": {
+          "class_type": "MiniMaxH3ReferenceToVideo",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ],
+            "audio_vae": [
+              "4",
+              0
+            ],
+            "prompt": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.",
+            "width": 1344,
+            "height": 768,
+            "length": 124,
+            "ref_image_size": "match",
+            "ref_images.ref_image_0": [
+              "20",
+              0
+            ]
+          }
+        },
+        "7": {
+          "class_type": "ConditioningZeroOut",
+          "inputs": {
+            "conditioning": [
+              "6",
+              0
+            ]
+          }
+        },
+        "8": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "5",
+              0
+            ],
+            "seed": 7,
+            "steps": 30,
+            "cfg": 4,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "positive": [
+              "6",
+              0
+            ],
+            "negative": [
+              "7",
+              0
+            ],
+            "latent_image": [
+              "6",
+              1
+            ],
+            "denoise": 1
+          }
+        },
+        "9": {
+          "class_type": "LTXVSeparateAVLatent",
+          "inputs": {
+            "av_latent": [
+              "8",
+              0
+            ]
+          }
+        },
+        "10": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "9",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ]
+          }
+        },
+        "11": {
+          "class_type": "VAEDecodeAudio",
+          "inputs": {
+            "samples": [
+              "9",
+              1
+            ],
+            "vae": [
+              "4",
+              0
+            ]
+          }
+        },
+        "12": {
+          "class_type": "CreateVideo",
+          "inputs": {
+            "images": [
+              "10",
+              0
+            ],
+            "audio": [
+              "11",
+              0
+            ],
+            "fps": 24
+          }
+        },
+        "13": {
+          "class_type": "SaveVideo",
+          "inputs": {
+            "video": [
+              "12",
+              0
+            ],
+            "filename_prefix": "video/aimoviestorage_h3-ref2va-1-identity",
+            "format": "mp4",
+            "format.codec": "h264"
+          }
+        },
+        "20": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_identity_1.png"
+          }
+        }
+      },
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "6",
+              "input": "prompt",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience."
+            },
+            {
+              "nodeId": "8",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "6",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 1344
+            },
+            {
+              "nodeId": "6",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "6",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 124
+            },
+            {
+              "nodeId": "12",
+              "input": "fps",
+              "id": "fps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "identity1",
+              "semantic": "identityImage",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "minimaxh3",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "13"
+          ],
+          "referenceGroups": [
+            {
+              "id": "identity",
+              "role": "identityImage",
+              "mediaKind": "image",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "identity1"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "single"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"6\",\"input\":\"prompt\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.\"},{\"id\":\"seed\",\"nodeId\":\"8\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"width\",\"nodeId\":\"6\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":1344},{\"id\":\"height\",\"nodeId\":\"6\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":768},{\"id\":\"frames\",\"nodeId\":\"6\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":124},{\"id\":\"fps\",\"nodeId\":\"12\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"identity1\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"minimaxh3\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"13\"],\"referenceGroups\":[{\"id\":\"identity\",\"role\":\"identityImage\",\"mediaKind\":\"image\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"identity1\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"single\"}]}",
+        "originalV1SelectionSha256": "c383efad7cca614a581743665d40730f25bbcc16dc5bd98afcbe0d04ebf3be3a",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "c383efad7cca614a581743665d40730f25bbcc16dc5bd98afcbe0d04ebf3be3a"
+        },
+        "reviewedVariantId": "h3-ref2va-1-identity",
+        "extensions": [
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_images",
+            "referenceGroupId": "identity",
+            "component": "image",
+            "count": 1
+          }
+        ]
+      },
+      "rawNodeRequirements": [
+        {
+          "nodeId": "1",
+          "classType": "UNETLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "1a6924d2123ea41e99b4dfb086940f8cfa8f8aa97fe41d30fec6d2d35dcc838e"
+        },
+        {
+          "nodeId": "2",
+          "classType": "CLIPLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "ddaa7e4572eaa96616e8320d8a09150c80073b84ebc35880cc7a840a32587ccd"
+        },
+        {
+          "nodeId": "3",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "4",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "5",
+          "classType": "MiniMaxH3SigmaShift",
+          "pythonModule": "comfy_extras.nodes_minimax_h3",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c",
+          "schemaSha256": "04395f5d9d135f42a3f5f2d7f160fac8477690061b2a8bd52290f849aa35500d"
+        },
+        {
+          "nodeId": "6",
+          "classType": "MiniMaxH3ReferenceToVideo",
+          "pythonModule": "comfy_extras.nodes_minimax_h3",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c",
+          "schemaSha256": "a6fda71ef4f1631f3b55f86df10ea03a36f2ea64b2517ea28fdbc052ea4a6124"
+        },
+        {
+          "nodeId": "7",
+          "classType": "ConditioningZeroOut",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "56c02806282a044adc5ab28f9967439c053b23032ea964cb3626d5f475ccc496"
+        },
+        {
+          "nodeId": "8",
+          "classType": "KSampler",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "0b796842c65ef5f6c0a003c26cd7d1adb1abca13e3ad8a17300a4eb4cb91c842"
+        },
+        {
+          "nodeId": "9",
+          "classType": "LTXVSeparateAVLatent",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "51959eb3903b4956ba5ffb40ad4c885e001da33a3d4d079fffdbba7e52dfda8d"
+        },
+        {
+          "nodeId": "10",
+          "classType": "VAEDecode",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "8b5732fd566318e6e296cc278b67bec062f9c2ccf4a20ee95578f6c8efe88cb9"
+        },
+        {
+          "nodeId": "11",
+          "classType": "VAEDecodeAudio",
+          "pythonModule": "comfy_extras.nodes_audio",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "897429f8a08be406486beceb39a250c5c206a1162dce868003c93df80dd01887",
+          "schemaSha256": "f85d29a4831dabf919b9e637d0790bdfcdba4c5563db2b3593ea378f9c93a624"
+        },
+        {
+          "nodeId": "12",
+          "classType": "CreateVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "68054861437806f51beab4c22eaa864870fdaa3062dea489f2ce75a49428498b"
+        },
+        {
+          "nodeId": "13",
+          "classType": "SaveVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "f1e39318c5f181de8fb71289673433096a087769080a0d9d395f89c511198ea0"
+        },
+        {
+          "nodeId": "20",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        }
+      ],
+      "inputContract": {
+        "projectAssetsOnly": true,
+        "decodeAndFullHashRequired": true,
+        "noImplicitReferenceReplication": true,
+        "noReferenceCollage": true,
+        "noMissingMediaDefaults": true,
+        "noTruncation": true,
+        "modelVariant": "ref2va",
+        "fps": 24,
+        "canvas": {
+          "width": 1344,
+          "height": 768,
+          "multiple": 32
+        },
+        "frames": {
+          "min": 124,
+          "max": 362,
+          "gridBase": 5,
+          "gridStep": 17
+        },
+        "fixedIdentityCount": 1,
+        "referenceVideo": null,
+        "referenceAudio": null,
+        "pictureTags": [
+          "<Picture 1>"
+        ],
+        "fixedAutogrowExpansion": true
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "h3-ref2va-2-identity",
+      "workflowSha256": "d06a88eb4c0a6c7ce8a753fde332c33b0ebc5f4cdb25d024ba006dc922faa98d",
+      "graph": {
+        "1": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "2": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "type": "minimax",
+            "device": "default"
+          }
+        },
+        "3": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+          }
+        },
+        "4": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+          }
+        },
+        "5": {
+          "class_type": "MiniMaxH3SigmaShift",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "shift_video": 12,
+            "shift_audio": 3
+          }
+        },
+        "6": {
+          "class_type": "MiniMaxH3ReferenceToVideo",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ],
+            "audio_vae": [
+              "4",
+              0
+            ],
+            "prompt": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.",
+            "width": 1344,
+            "height": 768,
+            "length": 124,
+            "ref_image_size": "match",
+            "ref_images.ref_image_0": [
+              "20",
+              0
+            ],
+            "ref_images.ref_image_1": [
+              "21",
+              0
+            ]
+          }
+        },
+        "7": {
+          "class_type": "ConditioningZeroOut",
+          "inputs": {
+            "conditioning": [
+              "6",
+              0
+            ]
+          }
+        },
+        "8": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "5",
+              0
+            ],
+            "seed": 7,
+            "steps": 30,
+            "cfg": 4,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "positive": [
+              "6",
+              0
+            ],
+            "negative": [
+              "7",
+              0
+            ],
+            "latent_image": [
+              "6",
+              1
+            ],
+            "denoise": 1
+          }
+        },
+        "9": {
+          "class_type": "LTXVSeparateAVLatent",
+          "inputs": {
+            "av_latent": [
+              "8",
+              0
+            ]
+          }
+        },
+        "10": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "9",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ]
+          }
+        },
+        "11": {
+          "class_type": "VAEDecodeAudio",
+          "inputs": {
+            "samples": [
+              "9",
+              1
+            ],
+            "vae": [
+              "4",
+              0
+            ]
+          }
+        },
+        "12": {
+          "class_type": "CreateVideo",
+          "inputs": {
+            "images": [
+              "10",
+              0
+            ],
+            "audio": [
+              "11",
+              0
+            ],
+            "fps": 24
+          }
+        },
+        "13": {
+          "class_type": "SaveVideo",
+          "inputs": {
+            "video": [
+              "12",
+              0
+            ],
+            "filename_prefix": "video/aimoviestorage_h3-ref2va-2-identity",
+            "format": "mp4",
+            "format.codec": "h264"
+          }
+        },
+        "20": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_identity_1.png"
+          }
+        },
+        "21": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_identity_2.png"
+          }
+        }
+      },
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "6",
+              "input": "prompt",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience."
+            },
+            {
+              "nodeId": "8",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "6",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 1344
+            },
+            {
+              "nodeId": "6",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "6",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 124
+            },
+            {
+              "nodeId": "12",
+              "input": "fps",
+              "id": "fps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "identity1",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "21",
+              "input": "image",
+              "id": "identity2",
+              "semantic": "identityImage",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "minimaxh3",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "13"
+          ],
+          "referenceGroups": [
+            {
+              "id": "identity",
+              "role": "identityImage",
+              "mediaKind": "image",
+              "minItems": 2,
+              "maxItems": 2,
+              "slotIds": [
+                "identity1",
+                "identity2"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "multiple"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"6\",\"input\":\"prompt\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.\"},{\"id\":\"seed\",\"nodeId\":\"8\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"width\",\"nodeId\":\"6\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":1344},{\"id\":\"height\",\"nodeId\":\"6\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":768},{\"id\":\"frames\",\"nodeId\":\"6\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":124},{\"id\":\"fps\",\"nodeId\":\"12\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"identity1\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"identity2\",\"nodeId\":\"21\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"minimaxh3\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"13\"],\"referenceGroups\":[{\"id\":\"identity\",\"role\":\"identityImage\",\"mediaKind\":\"image\",\"minItems\":2,\"maxItems\":2,\"slotIds\":[\"identity1\",\"identity2\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"multiple\"}]}",
+        "originalV1SelectionSha256": "5e31948ede60da6205bc192c83239070b19fb1f6025e7e4c1b89d859681bd58d",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "5e31948ede60da6205bc192c83239070b19fb1f6025e7e4c1b89d859681bd58d"
+        },
+        "reviewedVariantId": "h3-ref2va-2-identity",
+        "extensions": [
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_images",
+            "referenceGroupId": "identity",
+            "component": "image",
+            "count": 2
+          }
+        ]
+      },
+      "rawNodeRequirements": [
+        {
+          "nodeId": "1",
+          "classType": "UNETLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "1a6924d2123ea41e99b4dfb086940f8cfa8f8aa97fe41d30fec6d2d35dcc838e"
+        },
+        {
+          "nodeId": "2",
+          "classType": "CLIPLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "ddaa7e4572eaa96616e8320d8a09150c80073b84ebc35880cc7a840a32587ccd"
+        },
+        {
+          "nodeId": "3",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "4",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "5",
+          "classType": "MiniMaxH3SigmaShift",
+          "pythonModule": "comfy_extras.nodes_minimax_h3",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c",
+          "schemaSha256": "04395f5d9d135f42a3f5f2d7f160fac8477690061b2a8bd52290f849aa35500d"
+        },
+        {
+          "nodeId": "6",
+          "classType": "MiniMaxH3ReferenceToVideo",
+          "pythonModule": "comfy_extras.nodes_minimax_h3",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c",
+          "schemaSha256": "a6fda71ef4f1631f3b55f86df10ea03a36f2ea64b2517ea28fdbc052ea4a6124"
+        },
+        {
+          "nodeId": "7",
+          "classType": "ConditioningZeroOut",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "56c02806282a044adc5ab28f9967439c053b23032ea964cb3626d5f475ccc496"
+        },
+        {
+          "nodeId": "8",
+          "classType": "KSampler",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "0b796842c65ef5f6c0a003c26cd7d1adb1abca13e3ad8a17300a4eb4cb91c842"
+        },
+        {
+          "nodeId": "9",
+          "classType": "LTXVSeparateAVLatent",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "51959eb3903b4956ba5ffb40ad4c885e001da33a3d4d079fffdbba7e52dfda8d"
+        },
+        {
+          "nodeId": "10",
+          "classType": "VAEDecode",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "8b5732fd566318e6e296cc278b67bec062f9c2ccf4a20ee95578f6c8efe88cb9"
+        },
+        {
+          "nodeId": "11",
+          "classType": "VAEDecodeAudio",
+          "pythonModule": "comfy_extras.nodes_audio",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "897429f8a08be406486beceb39a250c5c206a1162dce868003c93df80dd01887",
+          "schemaSha256": "f85d29a4831dabf919b9e637d0790bdfcdba4c5563db2b3593ea378f9c93a624"
+        },
+        {
+          "nodeId": "12",
+          "classType": "CreateVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "68054861437806f51beab4c22eaa864870fdaa3062dea489f2ce75a49428498b"
+        },
+        {
+          "nodeId": "13",
+          "classType": "SaveVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "f1e39318c5f181de8fb71289673433096a087769080a0d9d395f89c511198ea0"
+        },
+        {
+          "nodeId": "20",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        },
+        {
+          "nodeId": "21",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        }
+      ],
+      "inputContract": {
+        "projectAssetsOnly": true,
+        "decodeAndFullHashRequired": true,
+        "noImplicitReferenceReplication": true,
+        "noReferenceCollage": true,
+        "noMissingMediaDefaults": true,
+        "noTruncation": true,
+        "modelVariant": "ref2va",
+        "fps": 24,
+        "canvas": {
+          "width": 1344,
+          "height": 768,
+          "multiple": 32
+        },
+        "frames": {
+          "min": 124,
+          "max": 362,
+          "gridBase": 5,
+          "gridStep": 17
+        },
+        "fixedIdentityCount": 2,
+        "referenceVideo": null,
+        "referenceAudio": null,
+        "pictureTags": [
+          "<Picture 1>",
+          "<Picture 2>"
+        ],
+        "fixedAutogrowExpansion": true
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "h3-ref2va-4-identity",
+      "workflowSha256": "29d0b5763bdf7e70cadb949dc826b7fffaae9d05f90f56a5d4b62fe51bf189ae",
+      "graph": {
+        "1": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "2": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "type": "minimax",
+            "device": "default"
+          }
+        },
+        "3": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+          }
+        },
+        "4": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+          }
+        },
+        "5": {
+          "class_type": "MiniMaxH3SigmaShift",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "shift_video": 12,
+            "shift_audio": 3
+          }
+        },
+        "6": {
+          "class_type": "MiniMaxH3ReferenceToVideo",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ],
+            "audio_vae": [
+              "4",
+              0
+            ],
+            "prompt": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.",
+            "width": 1344,
+            "height": 768,
+            "length": 124,
+            "ref_image_size": "match",
+            "ref_images.ref_image_0": [
+              "20",
+              0
+            ],
+            "ref_images.ref_image_1": [
+              "21",
+              0
+            ],
+            "ref_images.ref_image_2": [
+              "22",
+              0
+            ],
+            "ref_images.ref_image_3": [
+              "23",
+              0
+            ]
+          }
+        },
+        "7": {
+          "class_type": "ConditioningZeroOut",
+          "inputs": {
+            "conditioning": [
+              "6",
+              0
+            ]
+          }
+        },
+        "8": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "5",
+              0
+            ],
+            "seed": 7,
+            "steps": 30,
+            "cfg": 4,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "positive": [
+              "6",
+              0
+            ],
+            "negative": [
+              "7",
+              0
+            ],
+            "latent_image": [
+              "6",
+              1
+            ],
+            "denoise": 1
+          }
+        },
+        "9": {
+          "class_type": "LTXVSeparateAVLatent",
+          "inputs": {
+            "av_latent": [
+              "8",
+              0
+            ]
+          }
+        },
+        "10": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "9",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ]
+          }
+        },
+        "11": {
+          "class_type": "VAEDecodeAudio",
+          "inputs": {
+            "samples": [
+              "9",
+              1
+            ],
+            "vae": [
+              "4",
+              0
+            ]
+          }
+        },
+        "12": {
+          "class_type": "CreateVideo",
+          "inputs": {
+            "images": [
+              "10",
+              0
+            ],
+            "audio": [
+              "11",
+              0
+            ],
+            "fps": 24
+          }
+        },
+        "13": {
+          "class_type": "SaveVideo",
+          "inputs": {
+            "video": [
+              "12",
+              0
+            ],
+            "filename_prefix": "video/aimoviestorage_h3-ref2va-4-identity",
+            "format": "mp4",
+            "format.codec": "h264"
+          }
+        },
+        "20": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_identity_1.png"
+          }
+        },
+        "21": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_identity_2.png"
+          }
+        },
+        "22": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_identity_3.png"
+          }
+        },
+        "23": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_identity_4.png"
+          }
+        }
+      },
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "6",
+              "input": "prompt",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience."
+            },
+            {
+              "nodeId": "8",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "6",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 1344
+            },
+            {
+              "nodeId": "6",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "6",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 124
+            },
+            {
+              "nodeId": "12",
+              "input": "fps",
+              "id": "fps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "identity1",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "21",
+              "input": "image",
+              "id": "identity2",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "22",
+              "input": "image",
+              "id": "identity3",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "23",
+              "input": "image",
+              "id": "identity4",
+              "semantic": "identityImage",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "minimaxh3",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "13"
+          ],
+          "referenceGroups": [
+            {
+              "id": "identity",
+              "role": "identityImage",
+              "mediaKind": "image",
+              "minItems": 4,
+              "maxItems": 4,
+              "slotIds": [
+                "identity1",
+                "identity2",
+                "identity3",
+                "identity4"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "multiple"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"6\",\"input\":\"prompt\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.\"},{\"id\":\"seed\",\"nodeId\":\"8\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"width\",\"nodeId\":\"6\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":1344},{\"id\":\"height\",\"nodeId\":\"6\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":768},{\"id\":\"frames\",\"nodeId\":\"6\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":124},{\"id\":\"fps\",\"nodeId\":\"12\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"identity1\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"identity2\",\"nodeId\":\"21\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"identity3\",\"nodeId\":\"22\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"identity4\",\"nodeId\":\"23\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"minimaxh3\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"13\"],\"referenceGroups\":[{\"id\":\"identity\",\"role\":\"identityImage\",\"mediaKind\":\"image\",\"minItems\":4,\"maxItems\":4,\"slotIds\":[\"identity1\",\"identity2\",\"identity3\",\"identity4\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"multiple\"}]}",
+        "originalV1SelectionSha256": "eb9ee4a17b9795a1a700534f7ca484621a4fa8484bce6985582d416bdd68f81b",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "eb9ee4a17b9795a1a700534f7ca484621a4fa8484bce6985582d416bdd68f81b"
+        },
+        "reviewedVariantId": "h3-ref2va-4-identity",
+        "extensions": [
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_images",
+            "referenceGroupId": "identity",
+            "component": "image",
+            "count": 4
+          }
+        ]
+      },
+      "rawNodeRequirements": [
+        {
+          "nodeId": "1",
+          "classType": "UNETLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "1a6924d2123ea41e99b4dfb086940f8cfa8f8aa97fe41d30fec6d2d35dcc838e"
+        },
+        {
+          "nodeId": "2",
+          "classType": "CLIPLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "ddaa7e4572eaa96616e8320d8a09150c80073b84ebc35880cc7a840a32587ccd"
+        },
+        {
+          "nodeId": "3",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "4",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "5",
+          "classType": "MiniMaxH3SigmaShift",
+          "pythonModule": "comfy_extras.nodes_minimax_h3",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c",
+          "schemaSha256": "04395f5d9d135f42a3f5f2d7f160fac8477690061b2a8bd52290f849aa35500d"
+        },
+        {
+          "nodeId": "6",
+          "classType": "MiniMaxH3ReferenceToVideo",
+          "pythonModule": "comfy_extras.nodes_minimax_h3",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c",
+          "schemaSha256": "a6fda71ef4f1631f3b55f86df10ea03a36f2ea64b2517ea28fdbc052ea4a6124"
+        },
+        {
+          "nodeId": "7",
+          "classType": "ConditioningZeroOut",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "56c02806282a044adc5ab28f9967439c053b23032ea964cb3626d5f475ccc496"
+        },
+        {
+          "nodeId": "8",
+          "classType": "KSampler",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "0b796842c65ef5f6c0a003c26cd7d1adb1abca13e3ad8a17300a4eb4cb91c842"
+        },
+        {
+          "nodeId": "9",
+          "classType": "LTXVSeparateAVLatent",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "51959eb3903b4956ba5ffb40ad4c885e001da33a3d4d079fffdbba7e52dfda8d"
+        },
+        {
+          "nodeId": "10",
+          "classType": "VAEDecode",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "8b5732fd566318e6e296cc278b67bec062f9c2ccf4a20ee95578f6c8efe88cb9"
+        },
+        {
+          "nodeId": "11",
+          "classType": "VAEDecodeAudio",
+          "pythonModule": "comfy_extras.nodes_audio",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "897429f8a08be406486beceb39a250c5c206a1162dce868003c93df80dd01887",
+          "schemaSha256": "f85d29a4831dabf919b9e637d0790bdfcdba4c5563db2b3593ea378f9c93a624"
+        },
+        {
+          "nodeId": "12",
+          "classType": "CreateVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "68054861437806f51beab4c22eaa864870fdaa3062dea489f2ce75a49428498b"
+        },
+        {
+          "nodeId": "13",
+          "classType": "SaveVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "f1e39318c5f181de8fb71289673433096a087769080a0d9d395f89c511198ea0"
+        },
+        {
+          "nodeId": "20",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        },
+        {
+          "nodeId": "21",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        },
+        {
+          "nodeId": "22",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        },
+        {
+          "nodeId": "23",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        }
+      ],
+      "inputContract": {
+        "projectAssetsOnly": true,
+        "decodeAndFullHashRequired": true,
+        "noImplicitReferenceReplication": true,
+        "noReferenceCollage": true,
+        "noMissingMediaDefaults": true,
+        "noTruncation": true,
+        "modelVariant": "ref2va",
+        "fps": 24,
+        "canvas": {
+          "width": 1344,
+          "height": 768,
+          "multiple": 32
+        },
+        "frames": {
+          "min": 124,
+          "max": 362,
+          "gridBase": 5,
+          "gridStep": 17
+        },
+        "fixedIdentityCount": 4,
+        "referenceVideo": null,
+        "referenceAudio": null,
+        "pictureTags": [
+          "<Picture 1>",
+          "<Picture 2>",
+          "<Picture 3>",
+          "<Picture 4>"
+        ],
+        "fixedAutogrowExpansion": true
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "h3-ref2va-2-identity-video",
+      "workflowSha256": "8dc372a6e7374276ab9ca47520e98bcf16417cd5f28502114d412da06d4b4570",
+      "graph": {
+        "1": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "2": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "type": "minimax",
+            "device": "default"
+          }
+        },
+        "3": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+          }
+        },
+        "4": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+          }
+        },
+        "5": {
+          "class_type": "MiniMaxH3SigmaShift",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "shift_video": 12,
+            "shift_audio": 3
+          }
+        },
+        "6": {
+          "class_type": "MiniMaxH3ReferenceToVideo",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ],
+            "audio_vae": [
+              "4",
+              0
+            ],
+            "prompt": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.",
+            "width": 1344,
+            "height": 768,
+            "length": 124,
+            "ref_image_size": "match",
+            "ref_images.ref_image_0": [
+              "20",
+              0
+            ],
+            "ref_images.ref_image_1": [
+              "21",
+              0
+            ],
+            "ref_videos.ref_video_0": [
+              "41",
+              0
+            ],
+            "ref_video_audios.ref_video_audio_0": [
+              "41",
+              1
+            ]
+          }
+        },
+        "7": {
+          "class_type": "ConditioningZeroOut",
+          "inputs": {
+            "conditioning": [
+              "6",
+              0
+            ]
+          }
+        },
+        "8": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "5",
+              0
+            ],
+            "seed": 7,
+            "steps": 30,
+            "cfg": 4,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "positive": [
+              "6",
+              0
+            ],
+            "negative": [
+              "7",
+              0
+            ],
+            "latent_image": [
+              "6",
+              1
+            ],
+            "denoise": 1
+          }
+        },
+        "9": {
+          "class_type": "LTXVSeparateAVLatent",
+          "inputs": {
+            "av_latent": [
+              "8",
+              0
+            ]
+          }
+        },
+        "10": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "9",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ]
+          }
+        },
+        "11": {
+          "class_type": "VAEDecodeAudio",
+          "inputs": {
+            "samples": [
+              "9",
+              1
+            ],
+            "vae": [
+              "4",
+              0
+            ]
+          }
+        },
+        "12": {
+          "class_type": "CreateVideo",
+          "inputs": {
+            "images": [
+              "10",
+              0
+            ],
+            "audio": [
+              "11",
+              0
+            ],
+            "fps": 24
+          }
+        },
+        "13": {
+          "class_type": "SaveVideo",
+          "inputs": {
+            "video": [
+              "12",
+              0
+            ],
+            "filename_prefix": "video/aimoviestorage_h3-ref2va-2-identity-video",
+            "format": "mp4",
+            "format.codec": "h264"
+          }
+        },
+        "20": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_identity_1.png"
+          }
+        },
+        "21": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_identity_2.png"
+          }
+        },
+        "40": {
+          "class_type": "LoadVideo",
+          "inputs": {
+            "file": "registered_reference_video.mp4"
+          }
+        },
+        "41": {
+          "class_type": "GetVideoComponents",
+          "inputs": {
+            "video": [
+              "40",
+              0
+            ]
+          }
+        }
+      },
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "6",
+              "input": "prompt",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience."
+            },
+            {
+              "nodeId": "8",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "6",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 1344
+            },
+            {
+              "nodeId": "6",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "6",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 124
+            },
+            {
+              "nodeId": "12",
+              "input": "fps",
+              "id": "fps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "identity1",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "21",
+              "input": "image",
+              "id": "identity2",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "40",
+              "input": "file",
+              "id": "referenceVideo",
+              "semantic": "sourceVideo",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "minimaxh3",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "13"
+          ],
+          "referenceGroups": [
+            {
+              "id": "identity",
+              "role": "identityImage",
+              "mediaKind": "image",
+              "minItems": 2,
+              "maxItems": 2,
+              "slotIds": [
+                "identity1",
+                "identity2"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "multiple"
+            },
+            {
+              "id": "referenceVideo",
+              "role": "sourceVideo",
+              "mediaKind": "video",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "referenceVideo"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "none"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"6\",\"input\":\"prompt\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.\"},{\"id\":\"seed\",\"nodeId\":\"8\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"width\",\"nodeId\":\"6\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":1344},{\"id\":\"height\",\"nodeId\":\"6\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":768},{\"id\":\"frames\",\"nodeId\":\"6\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":124},{\"id\":\"fps\",\"nodeId\":\"12\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"identity1\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"identity2\",\"nodeId\":\"21\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"referenceVideo\",\"nodeId\":\"40\",\"input\":\"file\",\"semantic\":\"sourceVideo\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"minimaxh3\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"13\"],\"referenceGroups\":[{\"id\":\"identity\",\"role\":\"identityImage\",\"mediaKind\":\"image\",\"minItems\":2,\"maxItems\":2,\"slotIds\":[\"identity1\",\"identity2\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"multiple\"},{\"id\":\"referenceVideo\",\"role\":\"sourceVideo\",\"mediaKind\":\"video\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"referenceVideo\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"none\"}]}",
+        "originalV1SelectionSha256": "9376ac3e600183551eb75d0db25bc8b896ed67f63a7c779cb5d48fc35a4683b2",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "9376ac3e600183551eb75d0db25bc8b896ed67f63a7c779cb5d48fc35a4683b2"
+        },
+        "reviewedVariantId": "h3-ref2va-2-identity-video",
+        "extensions": [
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_images",
+            "referenceGroupId": "identity",
+            "component": "image",
+            "count": 2
+          },
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_videos",
+            "referenceGroupId": "referenceVideo",
+            "component": "video-frames",
+            "count": 1
+          },
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_video_audios",
+            "referenceGroupId": "referenceVideo",
+            "component": "video-audio",
+            "count": 1
+          }
+        ]
+      },
+      "rawNodeRequirements": [
+        {
+          "nodeId": "1",
+          "classType": "UNETLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "1a6924d2123ea41e99b4dfb086940f8cfa8f8aa97fe41d30fec6d2d35dcc838e"
+        },
+        {
+          "nodeId": "2",
+          "classType": "CLIPLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "ddaa7e4572eaa96616e8320d8a09150c80073b84ebc35880cc7a840a32587ccd"
+        },
+        {
+          "nodeId": "3",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "4",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "5",
+          "classType": "MiniMaxH3SigmaShift",
+          "pythonModule": "comfy_extras.nodes_minimax_h3",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c",
+          "schemaSha256": "04395f5d9d135f42a3f5f2d7f160fac8477690061b2a8bd52290f849aa35500d"
+        },
+        {
+          "nodeId": "6",
+          "classType": "MiniMaxH3ReferenceToVideo",
+          "pythonModule": "comfy_extras.nodes_minimax_h3",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c",
+          "schemaSha256": "a6fda71ef4f1631f3b55f86df10ea03a36f2ea64b2517ea28fdbc052ea4a6124"
+        },
+        {
+          "nodeId": "7",
+          "classType": "ConditioningZeroOut",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "56c02806282a044adc5ab28f9967439c053b23032ea964cb3626d5f475ccc496"
+        },
+        {
+          "nodeId": "8",
+          "classType": "KSampler",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "0b796842c65ef5f6c0a003c26cd7d1adb1abca13e3ad8a17300a4eb4cb91c842"
+        },
+        {
+          "nodeId": "9",
+          "classType": "LTXVSeparateAVLatent",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "51959eb3903b4956ba5ffb40ad4c885e001da33a3d4d079fffdbba7e52dfda8d"
+        },
+        {
+          "nodeId": "10",
+          "classType": "VAEDecode",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "8b5732fd566318e6e296cc278b67bec062f9c2ccf4a20ee95578f6c8efe88cb9"
+        },
+        {
+          "nodeId": "11",
+          "classType": "VAEDecodeAudio",
+          "pythonModule": "comfy_extras.nodes_audio",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "897429f8a08be406486beceb39a250c5c206a1162dce868003c93df80dd01887",
+          "schemaSha256": "f85d29a4831dabf919b9e637d0790bdfcdba4c5563db2b3593ea378f9c93a624"
+        },
+        {
+          "nodeId": "12",
+          "classType": "CreateVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "68054861437806f51beab4c22eaa864870fdaa3062dea489f2ce75a49428498b"
+        },
+        {
+          "nodeId": "13",
+          "classType": "SaveVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "f1e39318c5f181de8fb71289673433096a087769080a0d9d395f89c511198ea0"
+        },
+        {
+          "nodeId": "20",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        },
+        {
+          "nodeId": "21",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        },
+        {
+          "nodeId": "40",
+          "classType": "LoadVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "42c27c4bcc662bc5ff67e3c3d0f38ecb75b639adbc9fe95881c0b0f81e0860ab"
+        },
+        {
+          "nodeId": "41",
+          "classType": "GetVideoComponents",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "a207e7fe9d38e623b265269f76ad56f1873a3b1554d54a5536d93909efffa4ad"
+        }
+      ],
+      "inputContract": {
+        "projectAssetsOnly": true,
+        "decodeAndFullHashRequired": true,
+        "noImplicitReferenceReplication": true,
+        "noReferenceCollage": true,
+        "noMissingMediaDefaults": true,
+        "noTruncation": true,
+        "modelVariant": "ref2va",
+        "fps": 24,
+        "canvas": {
+          "width": 1344,
+          "height": 768,
+          "multiple": 32
+        },
+        "frames": {
+          "min": 124,
+          "max": 362,
+          "gridBase": 5,
+          "gridStep": 17
+        },
+        "fixedIdentityCount": 2,
+        "referenceVideo": {
+          "fps": 24,
+          "minFrames": 56,
+          "maxFrames": 124,
+          "gridBase": 5,
+          "gridStep": 17,
+          "requiresAudioTrack": true,
+          "rejectTruncation": true
+        },
+        "referenceAudio": null,
+        "pictureTags": [
+          "<Picture 1>",
+          "<Picture 2>"
+        ],
+        "fixedAutogrowExpansion": true
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "h3-ref2va-1-identity-audio",
+      "workflowSha256": "70b14915ee671bea1b760ec232cd1ee21ab22f497c772f70927cdde7eb104fc9",
+      "graph": {
+        "1": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "2": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "type": "minimax",
+            "device": "default"
+          }
+        },
+        "3": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+          }
+        },
+        "4": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+          }
+        },
+        "5": {
+          "class_type": "MiniMaxH3SigmaShift",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "shift_video": 12,
+            "shift_audio": 3
+          }
+        },
+        "6": {
+          "class_type": "MiniMaxH3ReferenceToVideo",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ],
+            "audio_vae": [
+              "4",
+              0
+            ],
+            "prompt": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.",
+            "width": 1344,
+            "height": 768,
+            "length": 124,
+            "ref_image_size": "match",
+            "ref_images.ref_image_0": [
+              "20",
+              0
+            ],
+            "ref_audios.ref_audio_0": [
+              "42",
+              0
+            ]
+          }
+        },
+        "7": {
+          "class_type": "ConditioningZeroOut",
+          "inputs": {
+            "conditioning": [
+              "6",
+              0
+            ]
+          }
+        },
+        "8": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "5",
+              0
+            ],
+            "seed": 7,
+            "steps": 30,
+            "cfg": 4,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "positive": [
+              "6",
+              0
+            ],
+            "negative": [
+              "7",
+              0
+            ],
+            "latent_image": [
+              "6",
+              1
+            ],
+            "denoise": 1
+          }
+        },
+        "9": {
+          "class_type": "LTXVSeparateAVLatent",
+          "inputs": {
+            "av_latent": [
+              "8",
+              0
+            ]
+          }
+        },
+        "10": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "9",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ]
+          }
+        },
+        "11": {
+          "class_type": "VAEDecodeAudio",
+          "inputs": {
+            "samples": [
+              "9",
+              1
+            ],
+            "vae": [
+              "4",
+              0
+            ]
+          }
+        },
+        "12": {
+          "class_type": "CreateVideo",
+          "inputs": {
+            "images": [
+              "10",
+              0
+            ],
+            "audio": [
+              "11",
+              0
+            ],
+            "fps": 24
+          }
+        },
+        "13": {
+          "class_type": "SaveVideo",
+          "inputs": {
+            "video": [
+              "12",
+              0
+            ],
+            "filename_prefix": "video/aimoviestorage_h3-ref2va-1-identity-audio",
+            "format": "mp4",
+            "format.codec": "h264"
+          }
+        },
+        "20": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_identity_1.png"
+          }
+        },
+        "42": {
+          "class_type": "LoadAudio",
+          "inputs": {
+            "audio": "registered_reference_audio.wav"
+          }
+        }
+      },
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "6",
+              "input": "prompt",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience."
+            },
+            {
+              "nodeId": "8",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "6",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 1344
+            },
+            {
+              "nodeId": "6",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "6",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 124
+            },
+            {
+              "nodeId": "12",
+              "input": "fps",
+              "id": "fps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "identity1",
+              "semantic": "identityImage",
+              "required": true
+            },
+            {
+              "nodeId": "42",
+              "input": "audio",
+              "id": "referenceAudio",
+              "semantic": "audio",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "minimaxh3",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "13"
+          ],
+          "referenceGroups": [
+            {
+              "id": "identity",
+              "role": "identityImage",
+              "mediaKind": "image",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "identity1"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "single"
+            },
+            {
+              "id": "referenceAudio",
+              "role": "audio",
+              "mediaKind": "audio",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "referenceAudio"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "none"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"6\",\"input\":\"prompt\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic scene. Preserve the person in <Picture 1>. Smooth natural movement and quiet ambience.\"},{\"id\":\"seed\",\"nodeId\":\"8\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"width\",\"nodeId\":\"6\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":1344},{\"id\":\"height\",\"nodeId\":\"6\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":768},{\"id\":\"frames\",\"nodeId\":\"6\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":124},{\"id\":\"fps\",\"nodeId\":\"12\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"identity1\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"identityImage\",\"required\":true},{\"id\":\"referenceAudio\",\"nodeId\":\"42\",\"input\":\"audio\",\"semantic\":\"audio\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"minimaxh3\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"13\"],\"referenceGroups\":[{\"id\":\"identity\",\"role\":\"identityImage\",\"mediaKind\":\"image\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"identity1\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"single\"},{\"id\":\"referenceAudio\",\"role\":\"audio\",\"mediaKind\":\"audio\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"referenceAudio\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"none\"}]}",
+        "originalV1SelectionSha256": "6a0c5488123fa8041e2b2c0234c4f257c9981e771ac6677ab94f48e3682b3e4c",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "6a0c5488123fa8041e2b2c0234c4f257c9981e771ac6677ab94f48e3682b3e4c"
+        },
+        "reviewedVariantId": "h3-ref2va-1-identity-audio",
+        "extensions": [
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_images",
+            "referenceGroupId": "identity",
+            "component": "image",
+            "count": 1
+          },
+          {
+            "kind": "autogrow",
+            "nodeId": "6",
+            "inputGroup": "ref_audios",
+            "referenceGroupId": "referenceAudio",
+            "component": "audio-reference",
+            "count": 1
+          }
+        ]
+      },
+      "rawNodeRequirements": [
+        {
+          "nodeId": "1",
+          "classType": "UNETLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "1a6924d2123ea41e99b4dfb086940f8cfa8f8aa97fe41d30fec6d2d35dcc838e"
+        },
+        {
+          "nodeId": "2",
+          "classType": "CLIPLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "ddaa7e4572eaa96616e8320d8a09150c80073b84ebc35880cc7a840a32587ccd"
+        },
+        {
+          "nodeId": "3",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "4",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "5",
+          "classType": "MiniMaxH3SigmaShift",
+          "pythonModule": "comfy_extras.nodes_minimax_h3",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c",
+          "schemaSha256": "04395f5d9d135f42a3f5f2d7f160fac8477690061b2a8bd52290f849aa35500d"
+        },
+        {
+          "nodeId": "6",
+          "classType": "MiniMaxH3ReferenceToVideo",
+          "pythonModule": "comfy_extras.nodes_minimax_h3",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "108ceff11e5a5c9a34a57bbc380447cf9941beb673a1bd421abc818de54ccd5c",
+          "schemaSha256": "a6fda71ef4f1631f3b55f86df10ea03a36f2ea64b2517ea28fdbc052ea4a6124"
+        },
+        {
+          "nodeId": "7",
+          "classType": "ConditioningZeroOut",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "56c02806282a044adc5ab28f9967439c053b23032ea964cb3626d5f475ccc496"
+        },
+        {
+          "nodeId": "8",
+          "classType": "KSampler",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "0b796842c65ef5f6c0a003c26cd7d1adb1abca13e3ad8a17300a4eb4cb91c842"
+        },
+        {
+          "nodeId": "9",
+          "classType": "LTXVSeparateAVLatent",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "51959eb3903b4956ba5ffb40ad4c885e001da33a3d4d079fffdbba7e52dfda8d"
+        },
+        {
+          "nodeId": "10",
+          "classType": "VAEDecode",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "8b5732fd566318e6e296cc278b67bec062f9c2ccf4a20ee95578f6c8efe88cb9"
+        },
+        {
+          "nodeId": "11",
+          "classType": "VAEDecodeAudio",
+          "pythonModule": "comfy_extras.nodes_audio",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "897429f8a08be406486beceb39a250c5c206a1162dce868003c93df80dd01887",
+          "schemaSha256": "f85d29a4831dabf919b9e637d0790bdfcdba4c5563db2b3593ea378f9c93a624"
+        },
+        {
+          "nodeId": "12",
+          "classType": "CreateVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "68054861437806f51beab4c22eaa864870fdaa3062dea489f2ce75a49428498b"
+        },
+        {
+          "nodeId": "13",
+          "classType": "SaveVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "f1e39318c5f181de8fb71289673433096a087769080a0d9d395f89c511198ea0"
+        },
+        {
+          "nodeId": "20",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        },
+        {
+          "nodeId": "42",
+          "classType": "LoadAudio",
+          "pythonModule": "comfy_extras.nodes_audio",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "897429f8a08be406486beceb39a250c5c206a1162dce868003c93df80dd01887",
+          "schemaSha256": "4bee78588bbeaf205283cf3e714807ae9321102b0774e74c1d9653ef84948b02"
+        }
+      ],
+      "inputContract": {
+        "projectAssetsOnly": true,
+        "decodeAndFullHashRequired": true,
+        "noImplicitReferenceReplication": true,
+        "noReferenceCollage": true,
+        "noMissingMediaDefaults": true,
+        "noTruncation": true,
+        "modelVariant": "ref2va",
+        "fps": 24,
+        "canvas": {
+          "width": 1344,
+          "height": 768,
+          "multiple": 32
+        },
+        "frames": {
+          "min": 124,
+          "max": 362,
+          "gridBase": 5,
+          "gridStep": 17
+        },
+        "fixedIdentityCount": 1,
+        "referenceVideo": null,
+        "referenceAudio": "standalone-reference-not-driving-audio",
+        "pictureTags": [
+          "<Picture 1>"
+        ],
+        "fixedAutogrowExpansion": true
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "ltx25-distilled-t2va",
+      "workflowSha256": "c2616a9d694d32feaa2b3d5743e79d0f4e032ca5c0ca761178a5a4f8768f61fe",
+      "graph": {
+        "1": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "2": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+            "type": "ltxv",
+            "device": "default"
+          }
+        },
+        "3": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "ltx-2.5-video-vae-bf16.safetensors"
+          }
+        },
+        "4": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "ltx-2.5-audio-vae-bf16.safetensors"
+          }
+        },
+        "5": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "text": "A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound."
+          }
+        },
+        "6": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "text": "flicker, warped anatomy, blurry, distorted sound"
+          }
+        },
+        "7": {
+          "class_type": "EmptyLTXVLatentVideo",
+          "inputs": {
+            "width": 768,
+            "height": 512,
+            "length": 121,
+            "batch_size": 1
+          }
+        },
+        "8": {
+          "class_type": "LTXVEmptyLatentAudio",
+          "inputs": {
+            "frames_number": 121,
+            "frame_rate": 24,
+            "batch_size": 1,
+            "audio_vae": [
+              "4",
+              0
+            ]
+          }
+        },
+        "9": {
+          "class_type": "LTXVConditioning",
+          "inputs": {
+            "positive": [
+              "5",
+              0
+            ],
+            "negative": [
+              "6",
+              0
+            ],
+            "frame_rate": 24
+          }
+        },
+        "10": {
+          "class_type": "LTXVConcatAVLatent",
+          "inputs": {
+            "video_latent": [
+              "7",
+              0
+            ],
+            "audio_latent": [
+              "8",
+              0
+            ]
+          }
+        },
+        "11": {
+          "class_type": "ModelSamplingLTXV",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "max_shift": 2.05,
+            "base_shift": 0.95,
+            "latent": [
+              "10",
+              0
+            ]
+          }
+        },
+        "12": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "11",
+              0
+            ],
+            "seed": 7,
+            "steps": 8,
+            "cfg": 1,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "positive": [
+              "9",
+              0
+            ],
+            "negative": [
+              "9",
+              1
+            ],
+            "latent_image": [
+              "10",
+              0
+            ],
+            "denoise": 1
+          }
+        },
+        "13": {
+          "class_type": "LTXVSeparateAVLatent",
+          "inputs": {
+            "av_latent": [
+              "12",
+              0
+            ]
+          }
+        },
+        "15": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "13",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ]
+          }
+        },
+        "16": {
+          "class_type": "LTXVAudioVAEDecode",
+          "inputs": {
+            "samples": [
+              "13",
+              1
+            ],
+            "audio_vae": [
+              "4",
+              0
+            ]
+          }
+        },
+        "17": {
+          "class_type": "CreateVideo",
+          "inputs": {
+            "images": [
+              "15",
+              0
+            ],
+            "audio": [
+              "16",
+              0
+            ],
+            "fps": 24
+          }
+        },
+        "18": {
+          "class_type": "SaveVideo",
+          "inputs": {
+            "video": [
+              "17",
+              0
+            ],
+            "filename_prefix": "video/aimoviestorage_ltx25_0",
+            "format": "mp4",
+            "format.codec": "h264"
+          }
+        }
+      },
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "5",
+              "input": "text",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound."
+            },
+            {
+              "nodeId": "7",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "7",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 512
+            },
+            {
+              "nodeId": "7",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 121
+            },
+            {
+              "nodeId": "8",
+              "input": "frames_number",
+              "id": "audioFrames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 121
+            },
+            {
+              "nodeId": "9",
+              "input": "frame_rate",
+              "id": "conditioningFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "8",
+              "input": "frame_rate",
+              "id": "audioFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "17",
+              "input": "fps",
+              "id": "outputFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "12",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "ltx2.5",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "18"
+          ],
+          "referenceGroups": []
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"5\",\"input\":\"text\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound.\"},{\"id\":\"width\",\"nodeId\":\"7\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":768},{\"id\":\"height\",\"nodeId\":\"7\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":512},{\"id\":\"frames\",\"nodeId\":\"7\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":121},{\"id\":\"audioFrames\",\"nodeId\":\"8\",\"input\":\"frames_number\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":121},{\"id\":\"conditioningFps\",\"nodeId\":\"9\",\"input\":\"frame_rate\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"audioFps\",\"nodeId\":\"8\",\"input\":\"frame_rate\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"outputFps\",\"nodeId\":\"17\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"seed\",\"nodeId\":\"12\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"ltx2.5\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"18\"],\"referenceGroups\":[]}",
+        "originalV1SelectionSha256": "638791106b99104bbeb00ac1716f8b8b1399b4caa2c322a2f363231769e9ea89",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "638791106b99104bbeb00ac1716f8b8b1399b4caa2c322a2f363231769e9ea89"
+        },
+        "reviewedVariantId": "ltx25-distilled-t2va",
+        "extensions": [
+          {
+            "kind": "numeric-union",
+            "nodeId": "8",
+            "input": "frame_rate",
+            "members": [
+              "FLOAT",
+              "INT"
+            ]
+          }
+        ]
+      },
+      "rawNodeRequirements": [
+        {
+          "nodeId": "1",
+          "classType": "UNETLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "1a6924d2123ea41e99b4dfb086940f8cfa8f8aa97fe41d30fec6d2d35dcc838e"
+        },
+        {
+          "nodeId": "2",
+          "classType": "CLIPLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "ddaa7e4572eaa96616e8320d8a09150c80073b84ebc35880cc7a840a32587ccd"
+        },
+        {
+          "nodeId": "3",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "4",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "5",
+          "classType": "CLIPTextEncode",
+          "pythonModule": "nodes",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "b84a3d7e14ee7718fef648c106ea00d7b58b249565d3b774162a1e6a225dcba6"
+        },
+        {
+          "nodeId": "6",
+          "classType": "CLIPTextEncode",
+          "pythonModule": "nodes",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "b84a3d7e14ee7718fef648c106ea00d7b58b249565d3b774162a1e6a225dcba6"
+        },
+        {
+          "nodeId": "7",
+          "classType": "EmptyLTXVLatentVideo",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "2e9d270db6e30f8f8bf582a9588ccff85b8465e67fd174b3815d9d5fada5f2f0"
+        },
+        {
+          "nodeId": "8",
+          "classType": "LTXVEmptyLatentAudio",
+          "pythonModule": "comfy_extras.nodes_lt_audio",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "19e958412230602ae5499f6fc4f9a50b18a42ddefa5fbcf565e4e39a5b9795f6",
+          "schemaSha256": "32ee3f17dc956d9bb577907cc10d4d1e93c5f5f2848f440e94af1c295fb6b9d0"
+        },
+        {
+          "nodeId": "9",
+          "classType": "LTXVConditioning",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "bd92233f52ca10d7d33ac3dcf10de3d98d628687dde6037e8d3b52d9273f8497"
+        },
+        {
+          "nodeId": "10",
+          "classType": "LTXVConcatAVLatent",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "7471b7a8393175699eb08f5760e45ae8b312e855326bb0b519fd7b56596f8eb4"
+        },
+        {
+          "nodeId": "11",
+          "classType": "ModelSamplingLTXV",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "204959b493aca58be07f9c16855675f09f6d6fd889f00dcf7139d5789c401955"
+        },
+        {
+          "nodeId": "12",
+          "classType": "KSampler",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "0b796842c65ef5f6c0a003c26cd7d1adb1abca13e3ad8a17300a4eb4cb91c842"
+        },
+        {
+          "nodeId": "13",
+          "classType": "LTXVSeparateAVLatent",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "51959eb3903b4956ba5ffb40ad4c885e001da33a3d4d079fffdbba7e52dfda8d"
+        },
+        {
+          "nodeId": "15",
+          "classType": "VAEDecode",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "8b5732fd566318e6e296cc278b67bec062f9c2ccf4a20ee95578f6c8efe88cb9"
+        },
+        {
+          "nodeId": "16",
+          "classType": "LTXVAudioVAEDecode",
+          "pythonModule": "comfy_extras.nodes_lt_audio",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "19e958412230602ae5499f6fc4f9a50b18a42ddefa5fbcf565e4e39a5b9795f6",
+          "schemaSha256": "17b1e8653486d10b3ce9824e4a11a0ee18849c3c21c889f7a45b67efe7ba1a02"
+        },
+        {
+          "nodeId": "17",
+          "classType": "CreateVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "68054861437806f51beab4c22eaa864870fdaa3062dea489f2ce75a49428498b"
+        },
+        {
+          "nodeId": "18",
+          "classType": "SaveVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "f1e39318c5f181de8fb71289673433096a087769080a0d9d395f89c511198ea0"
+        }
+      ],
+      "inputContract": {
+        "projectAssetsOnly": true,
+        "decodeAndFullHashRequired": true,
+        "noImplicitReferenceReplication": true,
+        "noReferenceCollage": true,
+        "noMissingMediaDefaults": true,
+        "noTruncation": true,
+        "modelVariant": "distilled-int8-convrot",
+        "fps": 24,
+        "frames": {
+          "min": 9,
+          "max": 249,
+          "gridBase": 1,
+          "gridStep": 8
+        },
+        "canvas": {
+          "multiple": 32
+        },
+        "sameValues": [
+          [
+            "frames",
+            "audioFrames"
+          ],
+          [
+            "conditioningFps",
+            "audioFps",
+            "outputFps"
+          ]
+        ],
+        "identityReference": false
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "ltx25-distilled-first-frame",
+      "workflowSha256": "45e593b5fe0b718a740547bc9fab8198f66b2b3c12de75a9af53265ed3116448",
+      "graph": {
+        "1": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "2": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+            "type": "ltxv",
+            "device": "default"
+          }
+        },
+        "3": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "ltx-2.5-video-vae-bf16.safetensors"
+          }
+        },
+        "4": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "ltx-2.5-audio-vae-bf16.safetensors"
+          }
+        },
+        "5": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "text": "A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound."
+          }
+        },
+        "6": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "text": "flicker, warped anatomy, blurry, distorted sound"
+          }
+        },
+        "7": {
+          "class_type": "EmptyLTXVLatentVideo",
+          "inputs": {
+            "width": 768,
+            "height": 512,
+            "length": 121,
+            "batch_size": 1
+          }
+        },
+        "8": {
+          "class_type": "LTXVEmptyLatentAudio",
+          "inputs": {
+            "frames_number": 121,
+            "frame_rate": 24,
+            "batch_size": 1,
+            "audio_vae": [
+              "4",
+              0
+            ]
+          }
+        },
+        "9": {
+          "class_type": "LTXVConditioning",
+          "inputs": {
+            "positive": [
+              "5",
+              0
+            ],
+            "negative": [
+              "6",
+              0
+            ],
+            "frame_rate": 24
+          }
+        },
+        "10": {
+          "class_type": "LTXVConcatAVLatent",
+          "inputs": {
+            "video_latent": [
+              "30",
+              2
+            ],
+            "audio_latent": [
+              "8",
+              0
+            ]
+          }
+        },
+        "11": {
+          "class_type": "ModelSamplingLTXV",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "max_shift": 2.05,
+            "base_shift": 0.95,
+            "latent": [
+              "10",
+              0
+            ]
+          }
+        },
+        "12": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "11",
+              0
+            ],
+            "seed": 7,
+            "steps": 8,
+            "cfg": 1,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "positive": [
+              "30",
+              0
+            ],
+            "negative": [
+              "30",
+              1
+            ],
+            "latent_image": [
+              "10",
+              0
+            ],
+            "denoise": 1
+          }
+        },
+        "13": {
+          "class_type": "LTXVSeparateAVLatent",
+          "inputs": {
+            "av_latent": [
+              "12",
+              0
+            ]
+          }
+        },
+        "14": {
+          "class_type": "LTXVCropGuides",
+          "inputs": {
+            "positive": [
+              "30",
+              0
+            ],
+            "negative": [
+              "30",
+              1
+            ],
+            "latent": [
+              "13",
+              0
+            ]
+          }
+        },
+        "15": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "14",
+              2
+            ],
+            "vae": [
+              "3",
+              0
+            ]
+          }
+        },
+        "16": {
+          "class_type": "LTXVAudioVAEDecode",
+          "inputs": {
+            "samples": [
+              "13",
+              1
+            ],
+            "audio_vae": [
+              "4",
+              0
+            ]
+          }
+        },
+        "17": {
+          "class_type": "CreateVideo",
+          "inputs": {
+            "images": [
+              "15",
+              0
+            ],
+            "audio": [
+              "16",
+              0
+            ],
+            "fps": 24
+          }
+        },
+        "18": {
+          "class_type": "SaveVideo",
+          "inputs": {
+            "video": [
+              "17",
+              0
+            ],
+            "filename_prefix": "video/aimoviestorage_ltx25_1",
+            "format": "mp4",
+            "format.codec": "h264"
+          }
+        },
+        "20": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_firstFrame.png"
+          }
+        },
+        "30": {
+          "class_type": "LTXVAddGuide",
+          "inputs": {
+            "positive": [
+              "9",
+              0
+            ],
+            "negative": [
+              "9",
+              1
+            ],
+            "vae": [
+              "3",
+              0
+            ],
+            "latent": [
+              "7",
+              0
+            ],
+            "image": [
+              "20",
+              0
+            ],
+            "frame_idx": 0,
+            "strength": 1
+          }
+        }
+      },
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "5",
+              "input": "text",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound."
+            },
+            {
+              "nodeId": "7",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "7",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 512
+            },
+            {
+              "nodeId": "7",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 121
+            },
+            {
+              "nodeId": "8",
+              "input": "frames_number",
+              "id": "audioFrames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 121
+            },
+            {
+              "nodeId": "9",
+              "input": "frame_rate",
+              "id": "conditioningFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "8",
+              "input": "frame_rate",
+              "id": "audioFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "17",
+              "input": "fps",
+              "id": "outputFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "12",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "firstFrame",
+              "semantic": "firstFrame",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "ltx2.5",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "18"
+          ],
+          "referenceGroups": [
+            {
+              "id": "firstFrame",
+              "role": "firstFrame",
+              "mediaKind": "image",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "firstFrame"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "none"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"5\",\"input\":\"text\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound.\"},{\"id\":\"width\",\"nodeId\":\"7\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":768},{\"id\":\"height\",\"nodeId\":\"7\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":512},{\"id\":\"frames\",\"nodeId\":\"7\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":121},{\"id\":\"audioFrames\",\"nodeId\":\"8\",\"input\":\"frames_number\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":121},{\"id\":\"conditioningFps\",\"nodeId\":\"9\",\"input\":\"frame_rate\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"audioFps\",\"nodeId\":\"8\",\"input\":\"frame_rate\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"outputFps\",\"nodeId\":\"17\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"seed\",\"nodeId\":\"12\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"firstFrame\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"firstFrame\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"ltx2.5\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"18\"],\"referenceGroups\":[{\"id\":\"firstFrame\",\"role\":\"firstFrame\",\"mediaKind\":\"image\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"firstFrame\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"none\"}]}",
+        "originalV1SelectionSha256": "84d2a045b69093bbe43c226347c15f0aa2be3b75b363a2d83a0ed87d261bcc3c",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "84d2a045b69093bbe43c226347c15f0aa2be3b75b363a2d83a0ed87d261bcc3c"
+        },
+        "reviewedVariantId": "ltx25-distilled-first-frame",
+        "extensions": [
+          {
+            "kind": "numeric-union",
+            "nodeId": "8",
+            "input": "frame_rate",
+            "members": [
+              "FLOAT",
+              "INT"
+            ]
+          }
+        ]
+      },
+      "rawNodeRequirements": [
+        {
+          "nodeId": "1",
+          "classType": "UNETLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "1a6924d2123ea41e99b4dfb086940f8cfa8f8aa97fe41d30fec6d2d35dcc838e"
+        },
+        {
+          "nodeId": "2",
+          "classType": "CLIPLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "ddaa7e4572eaa96616e8320d8a09150c80073b84ebc35880cc7a840a32587ccd"
+        },
+        {
+          "nodeId": "3",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "4",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "5",
+          "classType": "CLIPTextEncode",
+          "pythonModule": "nodes",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "b84a3d7e14ee7718fef648c106ea00d7b58b249565d3b774162a1e6a225dcba6"
+        },
+        {
+          "nodeId": "6",
+          "classType": "CLIPTextEncode",
+          "pythonModule": "nodes",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "b84a3d7e14ee7718fef648c106ea00d7b58b249565d3b774162a1e6a225dcba6"
+        },
+        {
+          "nodeId": "7",
+          "classType": "EmptyLTXVLatentVideo",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "2e9d270db6e30f8f8bf582a9588ccff85b8465e67fd174b3815d9d5fada5f2f0"
+        },
+        {
+          "nodeId": "8",
+          "classType": "LTXVEmptyLatentAudio",
+          "pythonModule": "comfy_extras.nodes_lt_audio",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "19e958412230602ae5499f6fc4f9a50b18a42ddefa5fbcf565e4e39a5b9795f6",
+          "schemaSha256": "32ee3f17dc956d9bb577907cc10d4d1e93c5f5f2848f440e94af1c295fb6b9d0"
+        },
+        {
+          "nodeId": "9",
+          "classType": "LTXVConditioning",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "bd92233f52ca10d7d33ac3dcf10de3d98d628687dde6037e8d3b52d9273f8497"
+        },
+        {
+          "nodeId": "10",
+          "classType": "LTXVConcatAVLatent",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "7471b7a8393175699eb08f5760e45ae8b312e855326bb0b519fd7b56596f8eb4"
+        },
+        {
+          "nodeId": "11",
+          "classType": "ModelSamplingLTXV",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "204959b493aca58be07f9c16855675f09f6d6fd889f00dcf7139d5789c401955"
+        },
+        {
+          "nodeId": "12",
+          "classType": "KSampler",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "0b796842c65ef5f6c0a003c26cd7d1adb1abca13e3ad8a17300a4eb4cb91c842"
+        },
+        {
+          "nodeId": "13",
+          "classType": "LTXVSeparateAVLatent",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "51959eb3903b4956ba5ffb40ad4c885e001da33a3d4d079fffdbba7e52dfda8d"
+        },
+        {
+          "nodeId": "14",
+          "classType": "LTXVCropGuides",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "e28608eac4860c8744efe3a6bf1b8ce3c5a0276b17e5d34df237b417f70b767f"
+        },
+        {
+          "nodeId": "15",
+          "classType": "VAEDecode",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "8b5732fd566318e6e296cc278b67bec062f9c2ccf4a20ee95578f6c8efe88cb9"
+        },
+        {
+          "nodeId": "16",
+          "classType": "LTXVAudioVAEDecode",
+          "pythonModule": "comfy_extras.nodes_lt_audio",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "19e958412230602ae5499f6fc4f9a50b18a42ddefa5fbcf565e4e39a5b9795f6",
+          "schemaSha256": "17b1e8653486d10b3ce9824e4a11a0ee18849c3c21c889f7a45b67efe7ba1a02"
+        },
+        {
+          "nodeId": "17",
+          "classType": "CreateVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "68054861437806f51beab4c22eaa864870fdaa3062dea489f2ce75a49428498b"
+        },
+        {
+          "nodeId": "18",
+          "classType": "SaveVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "f1e39318c5f181de8fb71289673433096a087769080a0d9d395f89c511198ea0"
+        },
+        {
+          "nodeId": "20",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        },
+        {
+          "nodeId": "30",
+          "classType": "LTXVAddGuide",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "9848a658ef13b4d8f5cd76384d055cd0c8b108dc27112b25d89e0f9d86f1e18d"
+        }
+      ],
+      "inputContract": {
+        "projectAssetsOnly": true,
+        "decodeAndFullHashRequired": true,
+        "noImplicitReferenceReplication": true,
+        "noReferenceCollage": true,
+        "noMissingMediaDefaults": true,
+        "noTruncation": true,
+        "modelVariant": "distilled-int8-convrot",
+        "fps": 24,
+        "frames": {
+          "min": 9,
+          "max": 249,
+          "gridBase": 1,
+          "gridStep": 8
+        },
+        "canvas": {
+          "multiple": 32
+        },
+        "sameValues": [
+          [
+            "frames",
+            "audioFrames"
+          ],
+          [
+            "conditioningFps",
+            "audioFps",
+            "outputFps"
+          ]
+        ],
+        "identityReference": false
+      },
+      "executionAdmission": false
+    },
+    {
+      "id": "ltx25-distilled-first-last-frame",
+      "workflowSha256": "d659b63ea409916a3f26726e07605a670468f7d27e82fb7aaad81afb29f43a7d",
+      "graph": {
+        "1": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "2": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+            "type": "ltxv",
+            "device": "default"
+          }
+        },
+        "3": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "ltx-2.5-video-vae-bf16.safetensors"
+          }
+        },
+        "4": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "ltx-2.5-audio-vae-bf16.safetensors"
+          }
+        },
+        "5": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "text": "A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound."
+          }
+        },
+        "6": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "text": "flicker, warped anatomy, blurry, distorted sound"
+          }
+        },
+        "7": {
+          "class_type": "EmptyLTXVLatentVideo",
+          "inputs": {
+            "width": 768,
+            "height": 512,
+            "length": 121,
+            "batch_size": 1
+          }
+        },
+        "8": {
+          "class_type": "LTXVEmptyLatentAudio",
+          "inputs": {
+            "frames_number": 121,
+            "frame_rate": 24,
+            "batch_size": 1,
+            "audio_vae": [
+              "4",
+              0
+            ]
+          }
+        },
+        "9": {
+          "class_type": "LTXVConditioning",
+          "inputs": {
+            "positive": [
+              "5",
+              0
+            ],
+            "negative": [
+              "6",
+              0
+            ],
+            "frame_rate": 24
+          }
+        },
+        "10": {
+          "class_type": "LTXVConcatAVLatent",
+          "inputs": {
+            "video_latent": [
+              "31",
+              2
+            ],
+            "audio_latent": [
+              "8",
+              0
+            ]
+          }
+        },
+        "11": {
+          "class_type": "ModelSamplingLTXV",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "max_shift": 2.05,
+            "base_shift": 0.95,
+            "latent": [
+              "10",
+              0
+            ]
+          }
+        },
+        "12": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "11",
+              0
+            ],
+            "seed": 7,
+            "steps": 8,
+            "cfg": 1,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "positive": [
+              "31",
+              0
+            ],
+            "negative": [
+              "31",
+              1
+            ],
+            "latent_image": [
+              "10",
+              0
+            ],
+            "denoise": 1
+          }
+        },
+        "13": {
+          "class_type": "LTXVSeparateAVLatent",
+          "inputs": {
+            "av_latent": [
+              "12",
+              0
+            ]
+          }
+        },
+        "14": {
+          "class_type": "LTXVCropGuides",
+          "inputs": {
+            "positive": [
+              "31",
+              0
+            ],
+            "negative": [
+              "31",
+              1
+            ],
+            "latent": [
+              "13",
+              0
+            ]
+          }
+        },
+        "15": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "14",
+              2
+            ],
+            "vae": [
+              "3",
+              0
+            ]
+          }
+        },
+        "16": {
+          "class_type": "LTXVAudioVAEDecode",
+          "inputs": {
+            "samples": [
+              "13",
+              1
+            ],
+            "audio_vae": [
+              "4",
+              0
+            ]
+          }
+        },
+        "17": {
+          "class_type": "CreateVideo",
+          "inputs": {
+            "images": [
+              "15",
+              0
+            ],
+            "audio": [
+              "16",
+              0
+            ],
+            "fps": 24
+          }
+        },
+        "18": {
+          "class_type": "SaveVideo",
+          "inputs": {
+            "video": [
+              "17",
+              0
+            ],
+            "filename_prefix": "video/aimoviestorage_ltx25_2",
+            "format": "mp4",
+            "format.codec": "h264"
+          }
+        },
+        "20": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_firstFrame.png"
+          }
+        },
+        "21": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "registered_endFrame.png"
+          }
+        },
+        "30": {
+          "class_type": "LTXVAddGuide",
+          "inputs": {
+            "positive": [
+              "9",
+              0
+            ],
+            "negative": [
+              "9",
+              1
+            ],
+            "vae": [
+              "3",
+              0
+            ],
+            "latent": [
+              "7",
+              0
+            ],
+            "image": [
+              "20",
+              0
+            ],
+            "frame_idx": 0,
+            "strength": 1
+          }
+        },
+        "31": {
+          "class_type": "LTXVAddGuide",
+          "inputs": {
+            "positive": [
+              "30",
+              0
+            ],
+            "negative": [
+              "30",
+              1
+            ],
+            "vae": [
+              "3",
+              0
+            ],
+            "latent": [
+              "30",
+              2
+            ],
+            "image": [
+              "21",
+              0
+            ],
+            "frame_idx": -1,
+            "strength": 1
+          }
+        }
+      },
+      "selectionEnvelope": {
+        "schemaVersion": 2,
+        "base": {
+          "slots": [
+            {
+              "nodeId": "5",
+              "input": "text",
+              "id": "positive",
+              "semantic": "positive",
+              "required": true,
+              "defaultValue": "A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound."
+            },
+            {
+              "nodeId": "7",
+              "input": "width",
+              "id": "width",
+              "semantic": "width",
+              "required": true,
+              "defaultValue": 768
+            },
+            {
+              "nodeId": "7",
+              "input": "height",
+              "id": "height",
+              "semantic": "height",
+              "required": true,
+              "defaultValue": 512
+            },
+            {
+              "nodeId": "7",
+              "input": "length",
+              "id": "frames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 121
+            },
+            {
+              "nodeId": "8",
+              "input": "frames_number",
+              "id": "audioFrames",
+              "semantic": "frameCount",
+              "required": true,
+              "defaultValue": 121
+            },
+            {
+              "nodeId": "9",
+              "input": "frame_rate",
+              "id": "conditioningFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "8",
+              "input": "frame_rate",
+              "id": "audioFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "17",
+              "input": "fps",
+              "id": "outputFps",
+              "semantic": "fps",
+              "required": true,
+              "defaultValue": 24
+            },
+            {
+              "nodeId": "12",
+              "input": "seed",
+              "id": "seed",
+              "semantic": "seed",
+              "required": true,
+              "defaultValue": 7
+            },
+            {
+              "nodeId": "20",
+              "input": "image",
+              "id": "firstFrame",
+              "semantic": "firstFrame",
+              "required": true
+            },
+            {
+              "nodeId": "21",
+              "input": "image",
+              "id": "endFrame",
+              "semantic": "endFrame",
+              "required": true
+            }
+          ],
+          "promptRoles": [
+            {
+              "id": "primary",
+              "modelRuleId": "ltx2.5",
+              "loaderNodeIds": [
+                "1"
+              ],
+              "positiveSlotIds": [
+                "positive"
+              ],
+              "negativeSlotIds": [],
+              "negativeSupport": "unsupported"
+            }
+          ],
+          "selectedPromptRoleId": "primary",
+          "outputNodeIds": [
+            "18"
+          ],
+          "referenceGroups": [
+            {
+              "id": "firstFrame",
+              "role": "firstFrame",
+              "mediaKind": "image",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "firstFrame"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "none"
+            },
+            {
+              "id": "endFrame",
+              "role": "endFrame",
+              "mediaKind": "image",
+              "minItems": 1,
+              "maxItems": 1,
+              "slotIds": [
+                "endFrame"
+              ],
+              "strategy": "fixed-slots",
+              "order": "explicit",
+              "identity": "none"
+            }
+          ]
+        },
+        "originalV1SelectionJson": "{\"slots\":[{\"id\":\"positive\",\"nodeId\":\"5\",\"input\":\"text\",\"semantic\":\"positive\",\"required\":true,\"defaultValue\":\"A cinematic shot of a person in a quiet street. The person moves naturally. Smooth camera movement. Soft ambient sound.\"},{\"id\":\"width\",\"nodeId\":\"7\",\"input\":\"width\",\"semantic\":\"width\",\"required\":true,\"defaultValue\":768},{\"id\":\"height\",\"nodeId\":\"7\",\"input\":\"height\",\"semantic\":\"height\",\"required\":true,\"defaultValue\":512},{\"id\":\"frames\",\"nodeId\":\"7\",\"input\":\"length\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":121},{\"id\":\"audioFrames\",\"nodeId\":\"8\",\"input\":\"frames_number\",\"semantic\":\"frameCount\",\"required\":true,\"defaultValue\":121},{\"id\":\"conditioningFps\",\"nodeId\":\"9\",\"input\":\"frame_rate\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"audioFps\",\"nodeId\":\"8\",\"input\":\"frame_rate\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"outputFps\",\"nodeId\":\"17\",\"input\":\"fps\",\"semantic\":\"fps\",\"required\":true,\"defaultValue\":24},{\"id\":\"seed\",\"nodeId\":\"12\",\"input\":\"seed\",\"semantic\":\"seed\",\"required\":true,\"defaultValue\":7},{\"id\":\"firstFrame\",\"nodeId\":\"20\",\"input\":\"image\",\"semantic\":\"firstFrame\",\"required\":true},{\"id\":\"endFrame\",\"nodeId\":\"21\",\"input\":\"image\",\"semantic\":\"endFrame\",\"required\":true}],\"promptRoles\":[{\"id\":\"primary\",\"modelRuleId\":\"ltx2.5\",\"loaderNodeIds\":[\"1\"],\"positiveSlotIds\":[\"positive\"],\"negativeSlotIds\":[],\"negativeSupport\":\"unsupported\"}],\"selectedPromptRoleId\":\"primary\",\"outputNodeIds\":[\"18\"],\"referenceGroups\":[{\"id\":\"firstFrame\",\"role\":\"firstFrame\",\"mediaKind\":\"image\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"firstFrame\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"none\"},{\"id\":\"endFrame\",\"role\":\"endFrame\",\"mediaKind\":\"image\",\"minItems\":1,\"maxItems\":1,\"slotIds\":[\"endFrame\"],\"strategy\":\"fixed-slots\",\"order\":\"explicit\",\"identity\":\"none\"}]}",
+        "originalV1SelectionSha256": "9b08294d0f1a0df7f9f6d74df93da65978a80a8ff55b026ae487023271284456",
+        "migration": {
+          "fromSchemaVersion": 1,
+          "serializer": "exact-json-text-sha256",
+          "legacySelectionSha256": "9b08294d0f1a0df7f9f6d74df93da65978a80a8ff55b026ae487023271284456"
+        },
+        "reviewedVariantId": "ltx25-distilled-first-last-frame",
+        "extensions": [
+          {
+            "kind": "numeric-union",
+            "nodeId": "8",
+            "input": "frame_rate",
+            "members": [
+              "FLOAT",
+              "INT"
+            ]
+          }
+        ]
+      },
+      "rawNodeRequirements": [
+        {
+          "nodeId": "1",
+          "classType": "UNETLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "1a6924d2123ea41e99b4dfb086940f8cfa8f8aa97fe41d30fec6d2d35dcc838e"
+        },
+        {
+          "nodeId": "2",
+          "classType": "CLIPLoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "ddaa7e4572eaa96616e8320d8a09150c80073b84ebc35880cc7a840a32587ccd"
+        },
+        {
+          "nodeId": "3",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "4",
+          "classType": "VAELoader",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "dbec21ebb5011e44529d8cbaf6fc1f0e725a8c365fe4a7815f581d8c658532ef"
+        },
+        {
+          "nodeId": "5",
+          "classType": "CLIPTextEncode",
+          "pythonModule": "nodes",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "b84a3d7e14ee7718fef648c106ea00d7b58b249565d3b774162a1e6a225dcba6"
+        },
+        {
+          "nodeId": "6",
+          "classType": "CLIPTextEncode",
+          "pythonModule": "nodes",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "b84a3d7e14ee7718fef648c106ea00d7b58b249565d3b774162a1e6a225dcba6"
+        },
+        {
+          "nodeId": "7",
+          "classType": "EmptyLTXVLatentVideo",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "2e9d270db6e30f8f8bf582a9588ccff85b8465e67fd174b3815d9d5fada5f2f0"
+        },
+        {
+          "nodeId": "8",
+          "classType": "LTXVEmptyLatentAudio",
+          "pythonModule": "comfy_extras.nodes_lt_audio",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "19e958412230602ae5499f6fc4f9a50b18a42ddefa5fbcf565e4e39a5b9795f6",
+          "schemaSha256": "32ee3f17dc956d9bb577907cc10d4d1e93c5f5f2848f440e94af1c295fb6b9d0"
+        },
+        {
+          "nodeId": "9",
+          "classType": "LTXVConditioning",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "bd92233f52ca10d7d33ac3dcf10de3d98d628687dde6037e8d3b52d9273f8497"
+        },
+        {
+          "nodeId": "10",
+          "classType": "LTXVConcatAVLatent",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "7471b7a8393175699eb08f5760e45ae8b312e855326bb0b519fd7b56596f8eb4"
+        },
+        {
+          "nodeId": "11",
+          "classType": "ModelSamplingLTXV",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "204959b493aca58be07f9c16855675f09f6d6fd889f00dcf7139d5789c401955"
+        },
+        {
+          "nodeId": "12",
+          "classType": "KSampler",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "0b796842c65ef5f6c0a003c26cd7d1adb1abca13e3ad8a17300a4eb4cb91c842"
+        },
+        {
+          "nodeId": "13",
+          "classType": "LTXVSeparateAVLatent",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "51959eb3903b4956ba5ffb40ad4c885e001da33a3d4d079fffdbba7e52dfda8d"
+        },
+        {
+          "nodeId": "14",
+          "classType": "LTXVCropGuides",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "e28608eac4860c8744efe3a6bf1b8ce3c5a0276b17e5d34df237b417f70b767f"
+        },
+        {
+          "nodeId": "15",
+          "classType": "VAEDecode",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "8b5732fd566318e6e296cc278b67bec062f9c2ccf4a20ee95578f6c8efe88cb9"
+        },
+        {
+          "nodeId": "16",
+          "classType": "LTXVAudioVAEDecode",
+          "pythonModule": "comfy_extras.nodes_lt_audio",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "19e958412230602ae5499f6fc4f9a50b18a42ddefa5fbcf565e4e39a5b9795f6",
+          "schemaSha256": "17b1e8653486d10b3ce9824e4a11a0ee18849c3c21c889f7a45b67efe7ba1a02"
+        },
+        {
+          "nodeId": "17",
+          "classType": "CreateVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "68054861437806f51beab4c22eaa864870fdaa3062dea489f2ce75a49428498b"
+        },
+        {
+          "nodeId": "18",
+          "classType": "SaveVideo",
+          "pythonModule": "comfy_extras.nodes_video",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "9d01f3f5cc392a475fcf1422366a66d5ea665c59e391a9c0d6374e6b84ed8a0c",
+          "schemaSha256": "f1e39318c5f181de8fb71289673433096a087769080a0d9d395f89c511198ea0"
+        },
+        {
+          "nodeId": "20",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        },
+        {
+          "nodeId": "21",
+          "classType": "LoadImage",
+          "pythonModule": "nodes",
+          "reviewId": "core-0.39.0-minimal-local-review-v1",
+          "sourceSha256": "fe624b0c1b6a3cd124a2214e5700b61337589144c2f0668900a04f8ccc031e38",
+          "schemaSha256": "23e1bbd5cfd0920931d67e31c65c53cb45b51fb125416f0c3e94ccca70ed8291"
+        },
+        {
+          "nodeId": "30",
+          "classType": "LTXVAddGuide",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "9848a658ef13b4d8f5cd76384d055cd0c8b108dc27112b25d89e0f9d86f1e18d"
+        },
+        {
+          "nodeId": "31",
+          "classType": "LTXVAddGuide",
+          "pythonModule": "comfy_extras.nodes_lt",
+          "reviewId": "offline-preset-source-review-v1-core-0.39.0",
+          "sourceSha256": "09ddb30d42244d64ae72e9c64261d1a6b4c512afe0570372222c43dbebd64243",
+          "schemaSha256": "9848a658ef13b4d8f5cd76384d055cd0c8b108dc27112b25d89e0f9d86f1e18d"
+        }
+      ],
+      "inputContract": {
+        "projectAssetsOnly": true,
+        "decodeAndFullHashRequired": true,
+        "noImplicitReferenceReplication": true,
+        "noReferenceCollage": true,
+        "noMissingMediaDefaults": true,
+        "noTruncation": true,
+        "modelVariant": "distilled-int8-convrot",
+        "fps": 24,
+        "frames": {
+          "min": 9,
+          "max": 249,
+          "gridBase": 1,
+          "gridStep": 8
+        },
+        "canvas": {
+          "multiple": 32
+        },
+        "sameValues": [
+          [
+            "frames",
+            "audioFrames"
+          ],
+          [
+            "conditioningFps",
+            "audioFps",
+            "outputFps"
+          ]
+        ],
+        "identityReference": false
+      },
+      "executionAdmission": false
+    }
+  ]
+}

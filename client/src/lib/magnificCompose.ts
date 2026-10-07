@@ -4,6 +4,7 @@ import { loadMagnificModels } from "@/lib/magnificModels";
 import { assertMagnificVideoInputs, findMagnificVideoModel, mediaTypeOfPath } from "@/lib/magnificVideoInputs";
 import { t } from "@/lib/i18n";
 import { assertVideoDuration } from "./videoDuration";
+import { assertNanoBanana21MagnificMapping } from "./nanoBanana21Profile";
 
 /**
  * 마그니픽 캔버스에 «레퍼런스 그림 → 이미지 생성기(프롬프트 + @칩)» 를 «구성» 한 번으로 만듭니다.
@@ -40,6 +41,8 @@ export interface MagnificComposeInput {
   aspectRatio?: string;
   count?: number;
   model?: string;
+  /** Selected image profile, including profiles without a verified adapter. */
+  requestedImageModel?: string;
   /** 프롬프트에서 고른 모델. 데스크톱 mode 대응이 없으면 다른 기본 모델로 바꾸지 않습니다. */
   requestedVideoModel?: string;
   /** 그림이 아니라 **영상** 생성기를 놓습니다. */
@@ -63,6 +66,10 @@ export async function validateMagnificComposition(input: MagnificComposeInput): 
   if (!prompt) throw new Error("보낼 프롬프트가 없습니다.");
   const paths = [...new Set(input.referencePaths.filter((path) => path && path.trim()))];
   const resolution = input.videoResolution ?? "1080p";
+  if (input.kind !== "video") {
+    assertNanoBanana21MagnificMapping(input.requestedImageModel ?? input.model, input.model);
+    if (input.requestedImageModel && !input.model) throw new Error(t("선택한 이미지 모델의 Magnific 연결값이 확인되지 않았습니다. 기본 모델로 바꾸지 않았습니다."));
+  }
   if (input.kind === "video" && input.requestedVideoModel && !input.model) {
     throw new Error(t("선택한 영상 모델의 Magnific 데스크톱 연결값을 확인하지 못했습니다. 기본 모델로 바꾸지 않았습니다. Magnific에서 모델을 직접 고르거나 MCP 생성 목록을 사용하세요."));
   }

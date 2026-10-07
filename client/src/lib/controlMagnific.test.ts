@@ -154,6 +154,55 @@ beforeEach(() => {
 });
 
 describe("Magnific 데스크톱 조종의 미리보기와 실행", () => {
+  it("컷별 이미지 모델을 일괄 구성의 각 항목까지 전달한다", async () => {
+    const { q, control } = await prepare();
+    state.draft!.magnific!.imageModel = "nano-banana";
+    cut().promptModel = "gpt-image";
+    state.draft!.scenes[0].cuts.push({ ...newCut(2), id: "second", promptModel: "nano-banana", promptEn: "A concert stage" });
+    const first = await control.previewControlMagnific({ ...request, kind: "image" });
+    const second = await control.previewControlMagnific({ ...request, kind: "image", cutId: "second" });
+    expect([first.model, second.model]).toEqual(["gpt-2", "imagen-nano-banana-2"]);
+    const job = await control.enqueueControlMagnificBatch({ projectId: "p", expectedRevision: "r1", previewIds: [first.previewId, second.previewId], operationId: "selected-image-models" });
+    expect((await finish(q, job.jobId)).status).toBe("done");
+    expect(state.native.mock.calls.map(([input]) => input.model)).toEqual([first.model, second.model]);
+  });
+  it("카드의 명시 모델을 보존하고 미선택 카드만 프로젝트 모델을 이어받는다", async () => {
+    const { control } = await prepare();
+    state.draft!.magnific!.imageModel = "gpt-image";
+    const character = state.draft!.characters[0];
+    character.promptEn = "Actor portrait";
+    character.promptModel = undefined;
+    const inherited = await control.previewControlMagnificSheet({ projectId: "p", expectedRevision: "r1", target: { kind: "character", id: "c0" } });
+    expect(inherited.model).toBe("gpt-2");
+    character.promptModel = "nano-banana";
+    const explicit = await control.previewControlMagnificSheet({ projectId: "p", expectedRevision: "r1", target: { kind: "character", id: "c0" } });
+    expect(explicit.model).toBe("imagen-nano-banana-2");
+    expect(state.native).not.toHaveBeenCalled();
+  });
+  it("확인된 2.1 선택을 컷·카드·일괄 각 항목에서 그대로 전달한다", async () => {
+    const { q, control } = await prepare();
+    cut().promptModel = "nano-banana-2.1";
+    const cutPreview = await control.previewControlMagnific({ ...request, kind: "image" });
+    const character = state.draft!.characters[0];
+    character.promptModel = "gemini-nano-banana-2.1";
+    character.promptEn = "Actor portrait";
+    const sheetPreview = await control.previewControlMagnificSheet({ projectId: "p", expectedRevision: "r1", target: { kind: "character", id: "c0" } });
+    expect([cutPreview.model,sheetPreview.model]).toEqual(["imagen-nano-banana-2-1","imagen-nano-banana-2-1"]);
+    expect(state.native).not.toHaveBeenCalled();
+    expect(state.catalog).not.toHaveBeenCalled();
+    const job = await control.enqueueControlMagnificBatch({projectId:"p",expectedRevision:"r1",previewIds:[cutPreview.previewId,sheetPreview.previewId],operationId:"nano21-confirmed"});
+    expect((await finish(q, job.jobId)).status).toBe("done");
+    expect(state.native.mock.calls.map(([input])=>input.model)).toEqual(["imagen-nano-banana-2-1","imagen-nano-banana-2-1"]);
+  });
+  it("로컬 엔진이나 영상 모델을 이미지 Magnific 조종에서 자동 대체하지 않는다", async () => {
+    const { control } = await prepare();
+    cut().promptEngine = "qwenimage";
+    await expect(control.previewControlMagnific({ ...request, kind: "image" })).rejects.toThrow("Magnific 엔진");
+    cut().promptEngine = "magnific";
+    cut().promptModel = "seedance-2.5";
+    await expect(control.previewControlMagnific({ ...request, kind: "image" })).rejects.toThrow("이미지 모델이 아닙니다");
+    expect(state.native).not.toHaveBeenCalled();
+  });
   it("이어지는 컷은 앞 컷 대표영상 선택을 기다리고 @영상·끝 프레임을 실제 구성에 넣는다", async () => {
     const { control } = await prepare();
     const first = cut();

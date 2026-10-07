@@ -1,3 +1,4 @@
+import { assertDirectGenerationEnabled } from "./generationRoutingPolicy";
 import { toast } from "sonner";
 import { loadBgmProjects, updateBgmProjectsAndConfirm } from "@/lib/bgmProjects";
 import { loadPrecision, LOCAL_ENGINE_IDS, type LocalEngineId } from "@/lib/localEngines";
@@ -10,8 +11,6 @@ import { bgmSamplingFields, validateBgmSamplingEngine, bgmGenerationMetadata } f
 
 /**
  * **BGM 뽑기도 작업 줄에서.**
- *
- *
  *
  * 맞습니다 — BGM 만 제 화면 안에서 `await` 로 돌고 있었습니다. 그래서 그 화면을 벗어나면
  * 진행을 물을 데가 없고, 앱이 꺼지면 남은 일이 사라졌습니다. 곡 하나에 몇 분씩 걸리는
@@ -73,7 +72,7 @@ export function startBgmTrack(input: BgmPayload): boolean {
     toast.error("먼저 프롬프트를 만들어 주세요.");
     return false;
   }
-  try { validateBgmPayload(input); } catch (error) { toast.error(String(error)); return false; }
+  try { assertDirectGenerationEnabled(input.engine);validateBgmPayload(input); } catch (error) { toast.error(String(error)); return false; }
   const id = enqueueTask({
     lane: "media",
     kind: BGM_TASK,

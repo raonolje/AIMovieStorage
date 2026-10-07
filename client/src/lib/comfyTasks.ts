@@ -7,11 +7,12 @@ import {
 
 const outputSchema = z.object({
   path: z.string().min(1), name: z.string().min(1),
-  kind: z.enum(["image", "video"]), nodeId: z.string().min(1),
+  kind: z.enum(["image", "video", "audio"]), nodeId: z.string().min(1),
+  sha256:z.string().optional(),bytes:z.number().optional(),provenance:z.unknown().optional(),mediaFacts:z.record(z.string(),z.unknown()).optional(),
 });
 const checkpointSchema = z.object({
   provider: z.literal("comfyui"),
-  phase: z.enum(["submitting", "submitted", "collected"]),
+  phase: z.enum(["prepared","submitting", "submitted", "collected", "cancelled-before-submit"]),
   promptId: z.string().min(1).optional(),
   files: z.array(outputSchema).optional(),
 });
@@ -24,6 +25,7 @@ export async function runQueuedComfy(
 ) {
   const saved = getTask(task.id)?.externalCheckpoint;
   const checkpoint = saved ? checkpointSchema.parse(saved) : undefined;
+  if(checkpoint?.phase==="cancelled-before-submit")throw new Error("ComfyUI 제출 전에 취소한 작업입니다. 새 작업 번호로 명시적으로 요청하세요.");
   if (checkpoint?.phase === "submitting")
     throw new Error("ComfyUI 제출 응답을 확인하지 못했습니다. 중복 생성을 막기 위해 다시 보내지 않습니다. ComfyUI 작업 내역을 확인한 뒤 새 작업을 요청하세요.");
   if (checkpoint?.phase === "collected") {
@@ -35,19 +37,21 @@ export async function runQueuedComfy(
   if (checkpoint?.phase === "submitted" && !checkpoint.promptId)
     throw new Error("ComfyUI 작업 번호를 찾지 못했습니다. 다시 제출하지 않습니다.");
   let promptId = checkpoint?.promptId;
+  const save=(next:Record<string,unknown>)=>saveTaskExternalCheckpoint(task.id,{...getTask(task.id)?.externalCheckpoint,...next});
   return runComfyToProject({
     ...request,
     existingPromptId: promptId,
     clientId: `aimoviestorage-${task.id}`,
     shouldStop: () => isStopping(task.id),
     onProgress: step => report({ step }),
-    onSubmitting: () => saveTaskExternalCheckpoint(task.id, { provider: "comfyui", phase: "submitting" }),
+    onSubmitting: () => save({ provider: "comfyui", phase: "submitting" }),
+    onSubmissionCancelled: () => save({ provider: "comfyui", phase: "cancelled-before-submit" }),
     onSubmitted: async id => {
       promptId = id;
-      await saveTaskExternalCheckpoint(task.id, { provider: "comfyui", phase: "submitted", promptId: id });
+      await save({ provider: "comfyui", phase: "submitted", promptId: id });
     },
     onCollected: async files => {
-      await saveTaskExternalCheckpoint(task.id, { provider: "comfyui", phase: "collected", promptId, files });
+      await save({ provider: "comfyui", phase: "collected", promptId, files });
       // 프로젝트 등록이 실패해도 이미 만든 파일과 서버 작업 번호는 조회할 수 있어야 합니다.
       setTaskResult(task.id, { paths: files.map(file => file.path), data: { promptId, attached: false } });
       await flushTaskJournal();

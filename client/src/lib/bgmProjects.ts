@@ -15,9 +15,17 @@
 const STORAGE_KEY = "ai-video-storage.bgm-projects.v1";
 
 import type { SavedPromptEntry } from "@/lib/promptHistory";
+import { normalizeLyricsEnd } from "./musicPromptPolicy";
 import { queueMirrorWrite, queueMirrorWriteAndConfirm, registerMirrorSection } from "@/lib/mediaLibrary";
 
 export interface BgmTrack {
+  promptWorkflow?: import("./promptModelSelection").WorkflowPromptTarget;
+  workflowResults?: Record<string,unknown>;
+  promptWorkflowInputs?: import("./workflowRunContract").WorkflowInputSelection;
+  promptModelStamp?: string;
+  /** 같은 멤버 프로필을 곡마다 재사용합니다. 모델의 공식 화자 ID를 뜻하지 않습니다. */
+  singers?: { id: string; name: string; timbre: string; range: string; diction: string; vibrato: string; delivery: string; parts: string }[];
+  leadMode?: "single" | "group";
   id: string;
   /** 이 곡의 쓰임. "오프닝", "추격 장면" 처럼 */
   name: string;
@@ -91,6 +99,7 @@ export interface BgmProject {
  * 고르는 자리에는 안 나옵니다 — `BGM_TOOLS` 가 화면 목록입니다.
  */
 export type BgmToolId =
+  | "comfy"
   | "suno"
   /** 로컬 — 어느 엔진인지까지 고릅니다(). */
   | "local-minimax"
@@ -142,15 +151,16 @@ export const SUNO_LYRICS_LIMIT = 5000;
 export const SUNO_LYRICS_COMFORT = 3000;
 
 export const BGM_TOOLS: { id: BgmToolId; label: string; hint: string }[] = [
+  {id:"comfy",label:"Comfy · 검사한 음악 workflow",hint:"명시한 음악 모델·역할·가사 입력을 사용합니다. 초안/설치 검사와 실제 생성·등록 검증은 별개입니다."},
   {
     id: "suno",
     label: "Suno v6 (커스텀 모드)",
-    hint: "스타일 1,000자 · 가사 5,000자. 네거티브 대신 «제외할 스타일» 을 씁니다. Style Influence 가 기본 50% 라 앞에 쓴 말이 살아남습니다 — 장르 → 분위기 → 악기 → 보컬 → 프로덕션 차례로. 구간 머리말에 «[Bridge | Female — Whispered]» 처럼 연출을 적을 수 있습니다(v6).",
+    hint: "Suno v6 웹 커스텀 모드용. 곡의 보컬·스타일 일관성에는 Max Mode, 스타일 태그 유지에는 Variety 0을 검토하세요. Exclude는 별도 칸입니다. 음색 고정이나 6명 고유 보컬을 보장하지 않습니다.",
   },
   {
     id: "local-minimax",
     label: "로컬 — MiniMax-Music3",
-    hint: "한 번에 5분짜리 완곡. 도입·전개·후렴이 이어집니다. 스타일은 영문 칸을 보내고, 길이는 가사의 구조 태그가 정합니다. 32kHz 스테레오.",
+    hint: "앱 로컬 MiniMax-Music3용 스타일·가사. hosted Music API와 입력이 다릅니다. 현재 워커의 연주곡 [instrumental] 처리는 검증되지 않았으며 보컬 없는 결과를 보장하지 않습니다.",
   },
   {
     id: "local-acestep",
@@ -167,14 +177,7 @@ export const BGM_TOOLS: { id: BgmToolId; label: string; hint: string }[] = [
  * 빈 채로 뜹니다. 읽을 때 한 번 옮깁니다.
  */
 export function normalizeBgmTool(tool: BgmToolId | undefined): BgmToolId {
-  // 옛 이름은 전부 **미니맥스**로 옮깁니다 — «로컬» 하나였을 때 기본으로 돌던 엔진입니다.
-  if (
-    tool === "minimax-music" ||
-    tool === "comfyui-audio" ||
-    tool === "udio" ||
-    tool === "local-music"
-  )
-    return "local-minimax";
+  // 저장된 명시 ID를 다른 모델로 옮기지 않습니다. 새 workflow는 사용자가 선택합니다.
   return tool ?? "suno";
 }
 
@@ -496,17 +499,17 @@ export function buildBgmStyle(track: BgmTrack): {
       ? ["intro", "theme", "variation", "climax", "outro"]
       : ["intro", "verse", "chorus", "verse", "chorus", "bridge", "chorus", "outro"];
   const lyricsEn = track.instrumental
-    ? structure.map((part) => `[${part}]\n[instrumental]`).join("\n")
+    ? ""
     : (track.lyricsEn || track.lyrics || structure.map((part) => `[${part}]\n`).join("\n"));
   const lyricsKo = track.instrumental
-    ? structure.map((part) => `[${part}] — 연주`).join("\n")
+    ? ""
     : track.lyricsKo || track.lyrics || structure.map((part) => `[${part}]`).join("\n");
 
   return {
-    styleKo: fit(orderKo),
-    styleEn: fit(orderEn),
-    lyricsKo,
-    lyricsEn,
+    styleKo: track.targetTool === "local-minimax" ? `전체 정보: ${orderKo.join(", ")}\n보컬 특징: ${track.instrumental ? "연주곡" : vocals.join(", ")}\n편곡: ${structure.join(" → ")}` : fit(orderKo),
+    styleEn: track.targetTool === "local-minimax" ? `Global Metadata: ${orderEn.join(", ")}\nVocal Details: ${track.instrumental ? "instrumental; vocal-free arrangement requested, unverified local support" : vocals.map(toEnglish).join(", ")}\nArrangement: ${structure.join(" → ")}` : fit(orderEn),
+    lyricsKo: normalizeLyricsEnd(lyricsKo),
+    lyricsEn: normalizeLyricsEnd(lyricsEn),
   };
 }
 

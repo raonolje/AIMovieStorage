@@ -1,49 +1,13 @@
+import { appPromptRequest, applyAppPromptResult } from "./appPromptRequest";
+import { assertPromptSnapshot } from "./promptModelSelection";
 import { toast } from "sonner";
-import { getTargetPlatform } from "@/components/PlatformSelect";
-import { blueprintForSpace, type SpaceKind } from "@/lib/blueprint";
-import { onBootstrapAdopted, onBootstrapDelivered, patchRun } from "@/lib/bootstrapStore";
-import { startProjectGeneration } from "@/lib/batchRun";
-import { buildCutPrompt } from "@/lib/cutPrompt";
-import { buildCutVideoPrompt } from "@/lib/cutVideoPrompt";
-import { summarizeCompositionCamera } from "@/lib/composition";
-import { projectContextOf } from "@/lib/projectContext";
-import { summarizeBootstrap, type BootstrapResult } from "@/lib/projectBootstrap";
-import { cancelLlmJob, isLlmCancel, requestPromptFromLlm } from "@/lib/promptRequest";
-import { relinkPromptText } from "@/lib/promptLinks";
-import { readProject, writeProject } from "@/lib/projectWrite";
-import {
-  enqueueTasks,
-  isStopping,
-  pendingTasksOf,
-  projectIdOfTask,
-  registerTaskRunner,
-  stopTask,
-  withResumableLlm,
-  type NewTask,
-} from "@/lib/taskQueue";
-import {
-  backgroundCardDescription,
-  characterBasics,
-  cutLinkInput,
-  cutLinkPaths,
-  cutPromptNote,
-  cutRequestPayload,
-  cutVideoRequestPayload,
-  cutVideoSkeletonInput,
-  identityMarksOf,
-  sheetReferenceSources,
-  sheetReferenceTags,
-  sheetRequestPayload,
-  sheetRunConditions,
-  templateMentionOf,
-  withCutPromptResult,
-  withPromptResult,
-  withUnfoldFrame,
-} from "@/lib/promptPayloads";
-import type { Background, Character, Cut, ProjectDraft, Scene } from "@/lib/projectTypes";
-import { cutVideoLinkInput } from "@/lib/cutVideoReferences";
-import { relinkContinuityTags, resolveCutContinuity } from "@/lib/cutContinuity";
-import { withCutVideoPrompt } from "@/lib/cutVideoPromptHistory";
+import { onBootstrapAdopted, onBootstrapDelivered, patchRun } from "./bootstrapStore";
+import { startProjectGeneration } from "./batchRun";
+import { summarizeBootstrap, type BootstrapResult } from "./projectBootstrap";
+import { cancelLlmJob, isLlmCancel, requestPromptFromLlm } from "./promptRequest";
+import { readProject, writeProject } from "./projectWrite";
+import { enqueueTasks, isStopping, pendingTasksOf, projectIdOfTask, registerTaskRunner, stopTask, withResumableLlm, type NewTask } from "./taskQueue";
+import type { Cut, ProjectDraft, Scene } from "./projectTypes";
 
 /**
  * **AI 일괄 생성 4단계 — 카드마다 프롬프트를 자세히 쓰기.**
@@ -99,7 +63,6 @@ interface BootstrapPromptPayload {
 
 /** 이 일에 «뽑을 사람이 아직 없어 규칙 조립만 된 카드» 표시. `projectBootstrap` 의 이력 조건이 이 글자로 시작합니다. */
 const RULE_MADE = "AI 일괄 생성 · 규칙 조립";
-const HOW = "AI 일괄 생성 · 프롬프트 작성";
 
 /** 도는 요청의 API 기록 id — 「중지」 가 이걸로 끊습니다. 저장할 값이 아니라 여기 둡니다. */
 const jobs = new Map<string, { project: string; jobId: string }>();
@@ -230,7 +193,7 @@ registerTaskRunner(BOOTSTRAP_PROMPT_TASK, async (raw, report, task) => {
     throw error;
   } finally {
     jobs.delete(task.id);
-    finishIfLast(keyNow(), payload.thenGenerate, task.id);
+    await finishIfLast(keyNow(), payload.thenGenerate, task.id);
   }
 });
 
@@ -238,14 +201,14 @@ registerTaskRunner(BOOTSTRAP_PROMPT_TASK, async (raw, report, task) => {
  * 내가 마지막이면 4단계를 닫습니다. 마지막인지는 **줄**에서 셉니다 — 실패·중지로 끝난 일도 «남은 일» 이
  * 아니므로, 어떻게 끝났든 마지막 하나가 닫습니다.
  */
-function finishIfLast(project: string, thenGenerate: boolean, myId: string) {
+async function finishIfLast(project: string, thenGenerate: boolean, myId: string) {
   const remaining = pendingTasksOf(project, BOOTSTRAP_PROMPT_TASK).filter((task) => task.id !== myId);
   if (remaining.length) return;
   patchRun(project, () => ({ stage: 0, prompts: null }));
   // 중지로 끝난 판에서는 뽑기를 세우지 않습니다 — 사람이 멈춘 것을 이어 돌리면 안 됩니다.
   if (!thenGenerate || isStopping(myId)) return;
   const draft = readProject(project);
-  if (draft) startProjectGeneration(project, draft);
+  if (draft) await startProjectGeneration(project, draft);
 }
 
 /**
@@ -264,257 +227,19 @@ async function writeOne(payload: BootstrapPromptPayload, project: () => string, 
   const request = (options: Parameters<typeof requestPromptFromLlm>[0]) =>
     withResumableLlm(taskId, "prompt", (llm) => requestPromptFromLlm({ ...options, ...llm, onStarted: started }));
 
-  if (target.kind === "character" || target.kind === "background") {
-    await writeSheet(project, draft, target, where, request);
-    return;
-  }
-  await writeCut(project, draft, target, where, request);
-}
-
-/** 이어 받기와 «중지» 손잡이가 붙은 요청 — `writeOne` 이 만들어 시트·컷 쪽에 건넵니다. */
-type PromptRequest = (options: Parameters<typeof requestPromptFromLlm>[0]) => ReturnType<typeof requestPromptFromLlm>;
-
-/** 인물·장소 시트 — `usePromptCard.runPrompt` 와 같은 재료(`sheetRequestPayload`)·같은 넣기(`withPromptResult`). */
-async function writeSheet(
-  project: () => string,
-  draft: ProjectDraft,
-  target: Extract<PromptTarget, { kind: "character" | "background" }>,
-  where: string,
-  request: PromptRequest,
-) {
-  const isCharacter = target.kind === "character";
-  const entity: Character | Background | undefined = isCharacter
-    ? draft.characters.find((item) => item.id === target.id)
-    : draft.backgrounds.find((item) => item.id === target.id);
-  if (!entity) throw new Error(isCharacter ? "그 인물 카드를 찾지 못했습니다." : "그 장소 카드를 찾지 못했습니다.");
-
-  const name = entity.name || "이름 없음";
-  const platform = getTargetPlatform();
-  const references = entity.references || [];
-  /*
-    카드가 보내는 것과 **같은 값**을 같은 자리에서 — 배경은 옛 칩을 실내·실외로 읽고(`blueprintForSpace`),
-    앵커와 전개도 틀 태그는 배경일 때만, 기본 정보는 인물일 때만. 인물 카드의 설명은 `description` 그대로,
-    장소 카드는 «위치 — 설명» 한 줄(`backgroundCardDescription`).
-  */
-  const spaceKind: SpaceKind | undefined = isCharacter ? undefined : (entity as Background).spaceKind || "exterior";
-  const blueprint = isCharacter ? entity.blueprint : blueprintForSpace(entity.blueprint, spaceKind);
-  const basics = isCharacter ? characterBasics(entity as Character) : { basics: undefined, basicsEn: undefined };
-  const kind = isCharacter ? "character" : "background";
-
-  const result = await request({
-    label: `AI 일괄 생성 · 4/4 프롬프트 · ${name} · 시트${where}`,
-    deliveredTo: `${name} · 프롬프트 네 칸에 넣음`,
-    task: isCharacter ? "characterSheet" : "backgroundSheet",
-    template: isCharacter ? "character-sheet" : "background-sheet",
-    modelId: entity.promptModel,
-    platformId: platform,
-    data: sheetRequestPayload({
-      kind,
-      name: entity.name,
-      description: isCharacter ? (entity as Character).description : backgroundCardDescription(entity as Background),
-      projectFacts: projectContextOf(draft)?.facts ?? null,
-      entity,
-      blueprint,
-      spaceKind,
-      basics: basics.basics,
-      basicsEn: basics.basicsEn,
-      identityMarks: identityMarksOf(kind, references, draft.imageMarks || {}),
-      templateMention: kind === "background" ? templateMentionOf(references, platform) : null,
-      references: sheetReferenceTags(references, platform),
-    }),
-    images: sheetReferenceSources(references),
+  const options = appPromptRequest(draft, target);
+  const result = await request({ ...options, label: `AI 일괄 생성 · 4/4 · ${payload.what}${where}` });
+  const wrote = await writeProject(project(), current => {
+    // 재시작한 배치도 실행 시점의 선택을 읽고, 응답 대기 중 변경된 모델·수동 문장은 지킵니다.
+    assertPromptSnapshot(options, appPromptRequest(current, target));
+    const beforeOwner = target.kind === "character" ? draft.characters.find(x=>x.id===target.id)
+      : target.kind === "background" ? draft.backgrounds.find(x=>x.id===target.id)
+      : draft.scenes.find(x=>x.id===target.sceneId)?.cuts.find(x=>x.id===target.cutId);
+    const nowOwner = target.kind === "character" ? current.characters.find(x=>x.id===target.id)
+      : target.kind === "background" ? current.backgrounds.find(x=>x.id===target.id)
+      : current.scenes.find(x=>x.id===target.sceneId)?.cuts.find(x=>x.id===target.cutId);
+    assertPromptSnapshot(beforeOwner, nowOwner);
+    return applyAppPromptResult(current, target, result);
   });
-
-  /*
-    전개도 칩이면 답은 «장소 묘사» 라 카드와 **같은 틀 끼우기**(`withUnfoldFrame`, 규칙 1)를 지납니다 — 안 지나면
-    카드에서는 완결 프롬프트가, 일괄 생성에서는 틀 문장 없는 장소 묘사가 들어갑니다. 예외 하나: 카드는 요청 전에
-    방 크기의 «전개도 틀» 그림을 레퍼런스에 넣는데(`usePromptCard.ensureUnfoldTemplate` — 캔버스로 그려 폴더에
-    저장하는 화면 쪽 일), 여기서는 그리지 않고 **카드에 이미 있는 레퍼런스**로만 끼웁니다. 틀이 없으면 틀 태그 없이
-    칸·카메라 문장만 서고, 그 카드에서 「프롬프트 작성」 을 한 번 누르면 틀이 들어갑니다.
-  */
-  const framed = withUnfoldFrame(result, { kind, blueprint, entity, references, platform });
-  const note = sheetRunConditions({
-    kind,
-    blueprint,
-    spaceKind,
-    referenceCount: references.length,
-    hasAnalysis: Boolean(entity.analysis?.trim()),
-    model: entity.promptModel,
-    extra: HOW,
-  });
-  // 값이 아니라 함수로 — 기다리는 사이 사람이 만진 칸을 지우지 않습니다(CLAUDE.md).
-  const wrote = await writeProject(project(), (current) =>
-    isCharacter
-      ? {
-          characters: current.characters.map((item) =>
-            item.id === target.id ? { ...item, ...withPromptResult(item, framed, note) } : item,
-          ),
-        }
-      : {
-          backgrounds: current.backgrounds.map((item) =>
-            item.id === target.id ? { ...item, ...withPromptResult(item, framed, note) } : item,
-          ),
-        },
-  );
-  if (!wrote.draft) throw new Error(`${name} 카드에 못 넣었습니다 — ${wrote.why}`);
-}
-
-/** 컷 그림·영상 — `CutCard.runCutPrompt`·`runVideoPrompt` 와 같은 재료·같은 넣기(@태그 잇기까지). */
-async function writeCut(
-  project: () => string,
-  draft: ProjectDraft,
-  target: Extract<PromptTarget, { kind: "cutImage" | "cutVideo" }>,
-  where: string,
-  request: PromptRequest,
-) {
-  const found = findCut(draft, target.sceneId, target.cutId);
-  if (!found) throw new Error("그 컷을 찾지 못했습니다.");
-  const { scene, cut } = found;
-  const context = projectContextOf(draft);
-  const cutCharacters = draft.characters.filter((item) => cut.characterIds.includes(item.id));
-  const background = draft.backgrounds.find((item) => item.id === cut.backgroundId);
-  const summary = summarizeCompositionCamera(cut.composition, { heightsCm: heightsOf(draft) });
-  // 컷 카드의 두 스위치와 같은 판정 — 구도를 켠 컷만 카메라·자리를 글에 싣습니다.
-  const useComposition = usesComposition(cut);
-  const useRefVideo = cut.useRefVideo !== false && Boolean(cut.refVideoPath);
-  const platform = getTargetPlatform();
-  const label = cutLabelOf(draft, scene, cut);
-
-  if (target.kind === "cutImage") {
-    const result = await request({
-      label: `AI 일괄 생성 · 4/4 프롬프트 · ${label} · 그림${where}`,
-      deliveredTo: `${label} · 프롬프트 네 칸에 넣음`,
-      task: "cutPrompt",
-      template: "cut-prompt",
-      platformId: platform,
-      techniques: cut.techniques || [],
-      data: cutRequestPayload({
-        projectFacts: context?.facts ?? null,
-        sceneSummary: scene.summary,
-        cut,
-        cutCharacters,
-        background,
-        summary,
-        useComposition,
-        facts: buildCutPrompt({ cut, characters: cutCharacters, background, context }).facts,
-      }),
-      images: cut.guideImage ? [cut.guideImage] : [],
-    });
-    /*
-      새 글에도 @태그를 **바로** 잇습니다 — 컷 카드의 `keepPrompt` 와 같은 재료(`cutLinkInput`). 일괄 생성
-      직후에는 시트가 아직 없어 «아직 그림 없음» 줄이 사람과 장소의 자리를 잡습니다 — 나중에 그림이 오면
-      「@ 다시 잇기」 가 그 자리를 태그로 바꿉니다.
-    */
-    const wrote = await writeProject(project(), (current) =>
-      patchCutIn(current, target.sceneId, target.cutId, (now) => {
-        const link = linkInputOf(current, now);
-        const linked = { ko: relinkPromptText(result.ko, link, "ko"), en: relinkPromptText(result.en, link, "en") };
-        const note = cutPromptNote({
-          how: HOW,
-          useComposition: usesComposition(now),
-          hasComposition: summarizeCompositionCamera(now.composition, { heightsCm: heightsOf(current) }).hasComposition,
-          tags: now.styleTags || [],
-          techniques: now.techniques || [],
-          peopleCount: current.characters.filter((item) => now.characterIds.includes(item.id)).length,
-        });
-        return withCutPromptResult(now, result, linked, HOW, note);
-      }),
-    );
-    if (!wrote.draft) throw new Error(`${label} 에 못 넣었습니다 — ${wrote.why}`);
-    return;
-  }
-
-  // ── 영상 — 규칙 뼈대 위에 LLM 이 상황·환경·동작을 채웁니다(컷 카드의 「프롬프트 작성」(영상) 과 같은 길).
-  const skeletonInput = cutVideoSkeletonInput({
-    cut,
-    continuity: resolveCutContinuity(scene, cut),
-    characters: draft.characters,
-    cutCharacters,
-    background,
-    context,
-    useComposition,
-    useRefVideo,
-    aspect: draft.aspect?.video || draft.aspect?.image,
-    videoModel: draft.magnific?.videoModel,
-  });
-  const skeleton = buildCutVideoPrompt(skeletonInput);
-  const result = await request({
-    label: `AI 일괄 생성 · 4/4 프롬프트 · ${label} · 영상${where}`,
-    deliveredTo: `${label} · 영상 프롬프트 두 칸에 넣음`,
-    task: "cutVideoPrompt",
-    template: "cut-video-prompt",
-    modelId: skeletonInput.modelId,
-    platformId: platform,
-    techniques: cut.techniques || [],
-    data: cutVideoRequestPayload({
-      skeleton,
-      skeletonInput,
-      projectFacts: context?.facts ?? null,
-      sceneSummary: scene.summary,
-      cut,
-      cutCharacters,
-      background,
-      summary,
-      useComposition,
-    }),
-  });
-  const wrote = await writeProject(project(), (current) =>
-    patchCutIn(current, target.sceneId, target.cutId, (now) => {
-      const liveScene = current.scenes.find(item => item.id === target.sceneId)!;
-      const continuity = resolveCutContinuity(liveScene, now);
-      const link = cutVideoLinkInput(now, linkInputOf(current, now), continuity, current.characters);
-      const source = (text: string) => continuity ? relinkContinuityTags(text, continuity.sourceCut, continuity.video) : text;
-      return withCutVideoPrompt(now, {
-        ko: relinkPromptText(source(result.ko), link, "ko"),
-        en: relinkPromptText(source(result.en), link, "en"),
-      }, HOW);
-    }),
-  );
-  if (!wrote.draft) throw new Error(`${label} 영상 칸에 못 넣었습니다 — ${wrote.why}`);
-}
-
-// ── 잔손 ──────────────────────────────────────────────────────────────────────
-
-function findCut(draft: ProjectDraft, sceneId: string, cutId: string) {
-  const scene = draft.scenes.find((item) => item.id === sceneId);
-  const cut = scene?.cuts.find((item) => item.id === cutId);
-  return scene && cut ? { scene, cut } : null;
-}
-
-/** 인물 키(cm) 표 — 카메라 거리로 샷 크기를 재는 잣대(컷 카드와 같은 기본값 170). */
-const heightsOf = (draft: ProjectDraft) =>
-  Object.fromEntries(draft.characters.map((item) => [item.id, item.heightCm ?? 170]));
-
-/** 컷 카드의 «구도 쓰기» 스위치와 같은 판정. */
-const usesComposition = (cut: Cut) =>
-  cut.useComposition !== false && Boolean(cut.composition || cut.guideImage || cut.guideImagePath);
-
-/** @태그 잇기 재료 — **지금 초안**(갱신 함수 안의 `current`)으로 짓습니다. 캡처는 새로 만들지 않습니다. */
-function linkInputOf(current: ProjectDraft, cut: Cut) {
-  const background = current.backgrounds.find((item) => item.id === cut.backgroundId);
-  const useComposition = usesComposition(cut);
-  return cutLinkInput({
-    cut,
-    characters: current.characters,
-    background,
-    summary: summarizeCompositionCamera(cut.composition, { heightsCm: heightsOf(current) }),
-    useComposition,
-    ...cutLinkPaths(cut, background, useComposition),
-  });
-}
-
-/** 컷 하나를 «지금 값을 받아» 고칩니다 — 씬·컷 트리 안에서. */
-function patchCutIn(
-  current: ProjectDraft,
-  sceneId: string,
-  cutId: string,
-  update: (cut: Cut) => Partial<Cut>,
-): Partial<ProjectDraft> {
-  return {
-    scenes: current.scenes.map((scene) =>
-      scene.id !== sceneId
-        ? scene
-        : { ...scene, cuts: scene.cuts.map((cut) => (cut.id === cutId ? { ...cut, ...update(cut) } : cut)) },
-    ),
-  };
+  if (!wrote.draft) throw new Error(`프롬프트를 저장하지 못했습니다: ${wrote.why}`);
 }

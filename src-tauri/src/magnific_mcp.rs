@@ -435,6 +435,7 @@ async fn rpc(token: &str, session: Option<&str>, body: Value) -> Res<Value> {
 /// 합니다. 세션을 붙잡아 두면 끊겼을 때 어디가 끊겼는지 알기 어려워집니다. 악수는 한 번에
 /// 한 왕복이라 값이 싸요.
 async fn call_tool(tool: &str, args: Value) -> Res<Value> {
+    if tool == "images_generate" { validate_image_generation_args(&args)?; }
     let token = access_token().await?;
     let hello = rpc(
         &token,
@@ -523,9 +524,84 @@ pub async fn magnific_call(tool: String, args: Option<Value>) -> Res<Value> {
     Ok(payload_of(&result))
 }
 
+#[cfg(test)]
+mod readonly_catalog_audit {
+    use super::*;
+
+    /// Explicit audit invocation only. Calls the existing native OAuth/tool route.
+    /// It never copies credentials out of this module or invokes generation/upload.
+    #[tokio::test]
+    #[ignore = "Explicit authorized live catalog audit only; no generation or upload"]
+    async fn existing_app_route_image_catalog_only() {
+        let output = PathBuf::from(std::env::var("AIMS_MAGNIFIC_READONLY_OUTPUT")
+            .expect("AIMS_MAGNIFIC_READONLY_OUTPUT must name the isolated receipt"));
+        assert!(output.is_absolute() && output.parent().is_some_and(|parent| parent.is_dir()));
+        assert!(!output.exists(), "Do not overwrite an earlier catalog receipt");
+        // Only the original credential-store module handles this check. No token
+        // value is returned to the caller. A fresh login/refresh is out of scope.
+        let existing = read_saved();
+        assert!(existing.client_id.is_some() && existing.access_token.is_some()
+            && existing.expires_at.is_some_and(|at| at > now() + 300),
+            "existing_auth_not_fresh; no login or refresh performed");
+        drop(existing);
+        let store = store_path("magnific-mcp.json").expect("existing credential-store path");
+        let before = fs::metadata(&store).expect("existing credential-store metadata");
+        let catalog = magnific_call("images_models_list".into(), Some(json!({
+            "search": "Nano Banana", "includePreviews": false
+        }))).await.unwrap_or_else(|_| panic!("existing_app_catalog_route_failed; no raw auth error printed"));
+        let after = fs::metadata(&store).expect("credential-store metadata after call");
+        assert_eq!(before.len(), after.len(), "credential-store length changed");
+        assert_eq!(before.modified().unwrap(), after.modified().unwrap(), "credential-store modified");
+        let receipt = json!({
+            "checkedAtUnixSeconds": now(),
+            "endpoint": MCP_URL,
+            "route": "existing magnific_mcp::magnific_call; original internal credential handling",
+            "tool": "images_models_list", "arguments": {"search":"Nano Banana","includePreviews":false},
+            "credentialStoreMetadataUnchanged": true,
+            "credentialsExported": false, "refreshPerformed": false,
+            "generation": false, "uploads": false,
+            "catalog": catalog
+        });
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&output).unwrap();
+        file.write_all(serde_json::to_string_pretty(&receipt).unwrap().as_bytes()).unwrap();
+        eprintln!("existing_app_readonly_catalog_receipt_written; credentials not returned");
+    }
+
+    #[tokio::test]
+    #[ignore = "Explicit authorized read-only schema audit; original native OAuth client only"]
+    async fn existing_app_route_image_tool_contracts_only() {
+        let output = PathBuf::from(std::env::var("AIMS_MAGNIFIC_READONLY_OUTPUT").expect("isolated receipt path"));
+        assert!(output.is_absolute() && output.parent().is_some_and(|parent| parent.is_dir()) && !output.exists());
+        let existing = read_saved();
+        assert!(existing.client_id.is_some() && existing.access_token.is_some()
+            && existing.expires_at.is_some_and(|at| at > now() + 300), "existing_auth_not_fresh; no login or refresh performed");
+        drop(existing);
+        let store = store_path("magnific-mcp.json").unwrap();
+        let before = fs::metadata(&store).unwrap();
+        let tools = read_tool_list().await.unwrap_or_else(|_| panic!("existing_app_tool_contract_route_failed; raw auth not printed"));
+        let selected: Vec<Value> = tools.into_iter().filter(|tool| matches!(tool.get("name").and_then(Value::as_str), Some("images_models_list" | "images_models_show" | "images_generate"))).collect();
+        assert!(selected.iter().any(|tool| tool.get("name").and_then(Value::as_str)==Some("images_generate")), "images_generate schema not exposed");
+        let after = fs::metadata(&store).unwrap();
+        assert_eq!(before.len(), after.len());
+        assert_eq!(before.modified().unwrap(), after.modified().unwrap(), "credential-store modified");
+        let receipt=json!({"checkedAtUnixSeconds":now(),"endpoint":MCP_URL,"route":"existing magnific_check tools/list path; original internal OAuth client","method":"tools/list","tools":selected,"credentialStoreMetadataUnchanged":true,"credentialsExported":false,"refreshPerformed":false,"generation":false,"uploads":false});
+        use std::io::Write;
+        let mut file=fs::OpenOptions::new().write(true).create_new(true).open(output).unwrap();
+        file.write_all(serde_json::to_string_pretty(&receipt).unwrap().as_bytes()).unwrap();
+        eprintln!("existing_app_readonly_tool_contract_receipt_written; credentials not returned");
+    }
+}
+
 /// 붙었는지 한 번 확인 — 도구 목록을 물어봅니다. 아무것도 만들지 않습니다.
 #[tauri::command]
 pub async fn magnific_check() -> Res<usize> {
+    Ok(read_tool_list().await?.len())
+}
+
+/// The existing connection check's read-only tool inventory, kept inside the
+/// original OAuth client. Session/auth headers never leave this module.
+async fn read_tool_list() -> Res<Vec<Value>> {
     let token = access_token().await?;
     let hello = rpc(
         &token,
@@ -559,8 +635,8 @@ pub async fn magnific_check() -> Res<usize> {
         .get("result")
         .and_then(|r| r.get("tools"))
         .and_then(|t| t.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0))
+        .cloned()
+        .unwrap_or_default())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -796,11 +872,59 @@ where
         "image" => "images_generate",
         _ => return Err("지원하지 않는 마그니픽 생성 종류입니다.".into()),
     };
+    if kind == "image" { validate_image_generation_args(&args)?; }
     // 구형 문자열 명령과 상세 명령이 이 호출 한 번을 공유합니다. 응답 해석 실패로 다시 생성하지 않습니다.
     let response = payload_of(&call(tool, args).await?);
     let identifier = identifier_of(&response)
         .ok_or_else(|| format!("«{tool}» 이 결과 id 를 주지 않았습니다. 생성 여부를 마그니픽에서 확인해 주세요."))?;
     Ok(GenerationDetails { identifier, response })
+}
+
+/// Original authenticated tools/list schema, 2026-10-06T19:28:14Z.
+/// This is the MCP limit; provider and desktop-canvas limits are distinct.
+fn validate_image_generation_args(args: &Value) -> Res<()> {
+    if let Some(refs) = args.get("references") {
+        let refs = refs.as_array().ok_or("magnific_image_references_array_required")?;
+        if refs.len() > 12 { return Err("magnific_image_reference_limit: images_generate max12".into()); }
+    }
+    if let Some(count) = args.get("count") {
+        if !count.as_u64().is_some_and(|count| (1..=8).contains(&count)) { return Err("magnific_image_count: 1..8".into()); }
+    }
+    let mode = args.get("mode").and_then(Value::as_str).unwrap_or("");
+    if matches!(mode, "nano-banana-2.1" | "gemini-nano-banana-2.1" | "Nano Banana 2.1" | "Google Nano Banana 2.1") {
+        return Err("nano_banana_21_magnific_mapping_mismatch: exact mode imagen-nano-banana-2-1 required".into());
+    }
+    if mode == "imagen-nano-banana-2-1" {
+        if args.get("brandKitId").is_some_and(|value| value.as_str().is_some_and(|value| !value.is_empty())) { return Err("nano_banana_21_brand_kit_model_switch".into()); }
+        if ["thinking", "thinkingLevel", "thinkingConfig"].iter().any(|field| args.get(*field).is_some()) { return Err("nano_banana_21_magnific_thinking_unconfirmed".into()); }
+        if args.get("resolution").is_some_and(|value| !matches!(value.as_str(), Some("1k" | "2k" | "4k"))) { return Err("nano_banana_21_magnific_resolution".into()); }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod image_schema_tests {
+    use super::*;
+    #[test]
+    fn connector_reference_limit_is_not_provider_fourteen() {
+        assert!(validate_image_generation_args(&json!({"references":vec![json!({"type":"image","identifier":"example"});12]})).is_ok());
+        assert!(validate_image_generation_args(&json!({"references":vec![json!({"type":"image","identifier":"example"});13]})).unwrap_err().contains("reference_limit"));
+    }
+    #[test]
+    fn exact_nano21_does_not_inherit_google_options_or_brand_switch() {
+        assert!(validate_image_generation_args(&json!({"mode":"imagen-nano-banana-2-1"})).is_ok());
+        for extra in [json!({"brandKitId":"existing-kit"}),json!({"thinkingLevel":"medium"}),json!({"resolution":"1K"})] {
+            let mut args=json!({"mode":"imagen-nano-banana-2-1"}); args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            assert!(validate_image_generation_args(&args).is_err());
+        }
+        assert!(validate_image_generation_args(&json!({"mode":"gemini-nano-banana-2.1"})).is_err());
+        assert!(validate_image_generation_args(&json!({"mode":"imagen-nano-banana-2","count":9})).is_err());
+    }
+    #[tokio::test]
+    async fn invalid_image_request_is_blocked_before_transport() {
+        let result=generate_with("image".into(),json!({"mode":"imagen-nano-banana-2-1","brandKitId":"existing-kit"}),|_,_|async { panic!("transport must not be called"); #[allow(unreachable_code)] Ok(Value::Null) }).await;
+        assert!(result.unwrap_err().contains("model_switch"));
+    }
 }
 
 /// 기존 문자열 명령은 유지하고 새 화면은 모델 변경 안내까지 받습니다.
@@ -1091,7 +1215,7 @@ mod live_tests {
 
     /// 시험에 쓸 그림. 정해 둔 파일이 없으면 같은 폴더에서 10KB 넘는 png 아무거나.
     fn sample_image() -> String {
-        let fixed = "D:/저장소/안경홍보/character/강아지/강아지_마그니픽_001.png";
+        let fixed = "D:/storage/sample/character/example/image.png";
         if fs::metadata(fixed).map(|m| m.len() >= 10 * 1024).unwrap_or(false) {
             return fixed.to_string();
         }

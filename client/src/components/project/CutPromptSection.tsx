@@ -1,3 +1,5 @@
+import WorkflowPromptSelect from "@/components/WorkflowPromptSelect";
+import { promptStaleMessage, type PromptSelection } from "@/lib/promptModelSelection";
 import { Link2, Loader2, Sparkles, Wand2 } from "lucide-react";
 import { LlmRequestButton } from "@/components/LlmRequestButton";
 import LocalGenerateButton from "@/components/LocalGenerateButton";
@@ -31,6 +33,7 @@ export default function CutPromptSection({
   sceneTitle,
   index,
   modelId,
+  selection,
 }: {
   cut: Cut;
   patchCut: (patch: Partial<Cut> | ((cut: Cut) => Partial<Cut>)) => void;
@@ -54,7 +57,9 @@ export default function CutPromptSection({
    * 돌아옵니다.
    */
   modelId?: string;
+  selection: PromptSelection;
 }) {
+  const stale = promptStaleMessage(cut.promptModelStamp, selection, Boolean(cut.promptKo || cut.promptEn));
   return (
     <section
         className="space-y-2 rounded-md p-3"
@@ -63,6 +68,7 @@ export default function CutPromptSection({
           border: "1px solid oklch(0.62 0.22 290 / 22%)",
         }}
       >
+        {stale && <p className="text-[10px] text-amber-300">{stale}</p>}
         <div className="flex flex-wrap items-center gap-2" data-tour="cut-prompt-section">
           <p className="text-[11px] font-semibold text-white">
             컷 프롬프트
@@ -154,8 +160,13 @@ export default function CutPromptSection({
             마그니픽용 @칩·매개변수는 보내는 순간에 걷어냅니다(`tuneForLocal`).
             로컬 모델이 하나도 안 깔려 있으면 단추가 아예 안 보입니다.
           */}
+          <WorkflowPromptSelect projectName={projectName} kind="image" value={selection.workflowTarget} onChange={target=>patchCut(()=>({promptWorkflow:target,promptEngine:target?"comfy":undefined}))} />
           <LocalGenerateButton
             kind="image"
+            workflowTarget={selection.workflowTarget}
+            target={{kind:"cut",id:cut.id}}
+            selectedEngine={selection.route}
+            onEngineChange={engine => patchCut(() => ({ promptEngine: engine }))}
             prompt={{
               ko: cut.promptKo,
               en: cut.promptEn,

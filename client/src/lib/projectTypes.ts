@@ -1,3 +1,4 @@
+import type { WorkflowPromptTarget } from "./promptModelSelection";
 import type { CharacterProfile } from "@/lib/characterProfile";
 import type { SavedPromptEntry } from "@/lib/promptHistory";
 import type { ImageMark } from "@/components/ImageMarkupEditor";
@@ -188,7 +189,6 @@ export interface SheetPlacement {
   /**
    * 칸 **아래 컷 정보**의 글자 크기(시트 절대 px). 안 주면 칸 이름의 0.72배입니다.
    *
-   *
    * 시트를 작게 뽑으면 글자도 같이 줄어드는데, 읽으라고 적은 글은 시트 크기와 무관하게
    * 읽혀야 합니다. 스토리보드가 칸 너비에 맞춰 직접 정해 넘깁니다.
    */
@@ -202,7 +202,6 @@ export interface SheetPlacement {
   label?: string;
   /**
    * 이 칸의 그림 위에 **덧그릴 표시**(동선·구역·자리).
-   *
    *
    * 표시는 그림에 구워 넣지 않고 **칸에 올릴 때** 그립니다 — 원본 그림은 표시 없이 남아야 다음 컷의 레퍼런스로 다시 쓰고,
    * 표시만 고쳐 다시 굽는 일도 됩니다. 저장된 배치도(`sheetLayouts`)에는 보통 없고, 스토리보드가 구울 때 채웁니다.
@@ -289,6 +288,8 @@ export interface Character extends PromptWorkflowState<
   ReferenceImage,
   GeneratedImageAsset
 > {
+  voiceWorkflow?: WorkflowPromptTarget;
+  voiceWorkflowInputs?: import("./comfyWorkflowRuntime").WorkflowInputSelection;
   id: string;
   name: string;
   role: string;
@@ -341,6 +342,7 @@ export interface Character extends PromptWorkflowState<
 }
 
 export interface CharacterVoiceReference {
+  workflowProvenance?: unknown;
   id: string;
   operationId?: string;
   filePath: string;
@@ -446,6 +448,16 @@ export interface SceneVideoAsset {
 }
 
 export interface Cut {
+  promptWorkflowInputs?: import("./comfyWorkflowRuntime").WorkflowInputSelection;
+  videoWorkflowInputs?: import("./comfyWorkflowRuntime").WorkflowInputSelection;
+  promptWorkflow?: WorkflowPromptTarget;
+  videoPromptWorkflow?: WorkflowPromptTarget;
+  promptModel?: string;
+  videoPromptModel?: string;
+  promptEngine?: string;
+  videoPromptEngine?: string;
+  promptModelStamp?: string;
+  videoPromptModelStamp?: string;
   id: string;
   order: number;
   title: string;
@@ -484,8 +496,6 @@ export interface Cut {
   /**
    * 받아 둔 컷 프롬프트들.
    *
-   *
-   *
    * 캐릭터·배경 카드에는 예전부터 있었는데(`PromptWorkflow.promptHistory`) 컷만 없어서,
    * 「프롬프트 작성」 을 한 번 더 누르면 앞의 판이 그 자리에서 사라졌습니다. 컷 프롬프트도
    * 돈을 내고 받는 것이고, 그 위에 손으로 고친 문장이 얹혀 있습니다.
@@ -494,8 +504,6 @@ export interface Cut {
   videoPromptHistory?: SavedPromptEntry[];
   /**
    * 구도잡기에서 뽑은 **레퍼런스 영상**(mp4)의 저장 경로와 길이(초).
-   *
-   *
    *
    * 예전에는 영상을 만들어 폴더에 저장하고 **끝**이었습니다 — 컷은 그 영상이 있는지도
    * 몰랐습니다. 경로를 컷에 적어 두면 「이 컷을 영상으로」 를 누를 때 그대로 레퍼런스로
@@ -515,8 +523,6 @@ export interface Cut {
   refVideoSeconds?: number;
   /**
    * 이 컷에서 **구도를 쓸 것인가.** 안 적었으면 씁니다(구도가 있을 때).
-   *
-   *
    *
    * 끄면 구도 그림·배경 플레이트를 레퍼런스로 안 올리고, 프롬프트에서 «@배치도를 그대로 맞추세요» 문장도 빠집니다 —
    * 인물 시트와 글만으로 뽑습니다. 씬마다 «작업 방식» 을 고르게 하던 것을 이 스위치가 대신합니다.
@@ -538,8 +544,6 @@ export interface Cut {
   /**
    * **영상용** 프롬프트. 컷 프롬프트(그림용)와 따로 둡니다.
    *
-   *
-   *
    * 글이 다릅니다 — 그림은 «한순간» 을 적고, 영상은 «무엇이 어떻게 움직이는가» 를
    * 적습니다. 한 칸에 섞으면 그림을 뽑을 때 동작 설명이 섞여 들어가 흐릿해집니다.
    */
@@ -553,8 +557,6 @@ export interface Cut {
   acting?: string;
   /**
    * 같은 연기 지시의 **영어**. 「프롬프트 말로」 단추가 만들어 둡니다.
-   *
-   *
    *
    * 번역기를 «누르면 한국어 칸만 고쳐 주는 것» 으로 두면, 정작 생성기에 가는 영문에는
    * 여전히 한국어가 실립니다 — 고생해서 다듬은 말이 무시되는 것입니다. 그래서 영어판을
@@ -615,14 +617,17 @@ export interface Cut {
 }
 
 export interface Scene {
+  videoWorkflowInputs?: import("./comfyWorkflowRuntime").WorkflowInputSelection;
+  videoPromptWorkflow?: WorkflowPromptTarget;
+  videoPromptModel?: string;
+  videoPromptEngine?: string;
+  storyboardPromptModelStamp?: string;
   id: string;
   title: string;
   summary: string;
   cuts: Cut[];
   /**
    * 이 장면의 **스토리보드 시트**(6000×6000)와 그것으로 지은 영상 프롬프트.
-   *
-   *
    *
    * 컷의 대표 그림을 모아 굽습니다(`lib/storyboardSheet.ts`). 컷 그림이 바뀌면 다시
    * 구워야 하므로 «언제 구웠는지»(`storyboardAt`)를 같이 들고, 그 뒤에 바뀐 컷이 있으면
@@ -636,8 +641,6 @@ export interface Scene {
   storyboardPromptHistory?: SavedPromptEntry[];
   /**
    * 이 장면의 영상. 컷 영상이 아니라 **장면 하나를 통째로** 뽑은 것입니다.
-   *
-   *
    */
   videos?: SceneVideoAsset[];
 }
@@ -772,6 +775,8 @@ export interface MagnificHandled {
 }
 
 export interface ProjectDraft extends ProjectContext {
+  workflowTargets?: Partial<Record<"image"|"video"|"music"|"voice", WorkflowPromptTarget>>;
+  legacyGenerationArchive?: {schemaVersion:1; batchEngines?: ProjectDraft["batchEngines"]; localLoras?: ProjectDraft["localLoras"]};
   title: string;
   logline?: string;
   /**
@@ -813,8 +818,6 @@ export interface ProjectDraft extends ProjectContext {
   sharedAssets?: VisualAsset[];
   /**
    * **작품 대표 그림** — 프로젝트 보드 카드에 뜨는 한 장(`<프로젝트>/cover/…`).
-   *
-   *
    *
    * 안 정했으면 보드가 **작품 안의 대표 그림 한 장을 알아서 찾아 씁니다**(`coverOf`) —
    * 인물·장소를 하나라도 뽑아 두었으면 카드가 비지 않습니다. 여기 값이 있으면 그것이 먼저입니다.
@@ -859,8 +862,6 @@ export interface ProjectDraft extends ProjectContext {
   /**
    * 「한 번에 뽑기」 가 쓸 **생성기** — 이미지와 영상 따로.
    *
-   *
-   *
    * 프로젝트에 담는 까닭은 작품마다 답이 다르기 때문입니다 — 실사는 마그니픽, 애니는
    * 로컬 로라. 앱 설정에 두면 프로젝트를 옮길 때마다 다시 골라야 하고, 한 번 잘못
    * 고른 채로 옆 작품을 통째로 뽑게 됩니다.
@@ -871,16 +872,12 @@ export interface ProjectDraft extends ProjectContext {
   /**
    * 마그니픽 **MCP** 로 뽑을 때의 모델과 해상도 — 이미지·영상 따로.
    *
-   *
-   *
    * 생성기 고르기와 같은 자리(프로젝트)에 둡니다 — 작품마다 답이 다르고, 앱 설정에
    * 두면 옆 작품을 잘못된 모델로 통째로 뽑게 됩니다. 비워 두면 마그니픽이 알아서
    * 고릅니다(`mode: auto`).
    */
   /**
    * **화면 비율** — 이미지와 영상 따로.
-   *
-   *
    *
    * 여태 `16:9` 로 못 박혀 있었습니다. 숏츠를 만들려면 `9:16` 이라야 하고, 그건 작품의
    * 성격이라 **작품마다** 정합니다 — 세로 작품과 가로 작품이 한 설정을 나눠 쓸 수 없습니다.

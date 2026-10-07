@@ -120,7 +120,15 @@ BGM 작업은 `bgm_projects_list` → `bgm_get` / `bgm_create` → `bgm_prompt_p
 | 사용량이 기준 이상이면 비우기 (`adaptive`) | 생성 후 임시 객체·캐시를 정리하고 시스템 RAM과 현재 GPU의 VRAM 사용률을 확인합니다. 어느 하나라도 기준 이상이거나 사용률을 읽지 못하면 해당 워커를 종료합니다. | 기준은 각각 기본 85%, 설정 범위는 1~99 정수입니다. 기준 미만이면 모델을 유지합니다. |
 | 빠른 연속 생성을 위해 모델 유지 (`retain`) | 정상 생성 후 모델을 남겨 다음 생성의 로딩 시간을 줄입니다. | RAM·VRAM 점유가 계속될 수 있습니다. 실행 중 오류로 끝난 생성도 이 설정과 별개로 해당 워커를 정리합니다. |
 
-자동 정리는 **생성이 끝난 뒤** 수행합니다. 생성 도중 사용률을 감시해 작업을 끊거나, 모델 가중치를 일부씩 제거하는 방식은 아닙니다. 다른 프로그램이 쓰는 메모리는 해제하지 않습니다. 설정은 다음 생성부터 적용되며, 이미 남아 있는 로컬 모델은 **워커 내리기**로 종료할 수 있습니다. 수동 종료는 진행 중인 생성에도 영향을 줄 수 있습니다. 업스케일러의 워커 유지 설정은 별도입니다.
+자동 정리는 **생성이 끝난 뒤** 수행합니다. 생성 도중 사용률을 감시해 작업을 끊거나, 모델 가중치를 일부씩 제거하는 방식은 아닙니다. 다른 프로그램이 쓰는 메모리는 해제하지 않습니다. 설정은 다음 생성부터 적용되며, 이미 남아 있는 유휴 로컬 모델은 **워커 내리기**로 정상 종료를 요청할 수 있습니다. 진행 중인 생성·설치·사전 다운로드가 있으면 수동 종료를 차단합니다. 업스케일러의 워커 유지 설정은 별도입니다.
+
+### 앱 정상 종료와 유휴 워커
+
+앱의 닫기 버튼과 `maintenance_prepare`는 작업·설치·사전 다운로드·저장 상태를 먼저 검사하고 변경 내용을 저장한 다음 앱이 직접 소유한 유휴 로컬/업스케일 워커에 `quit_idle`과 표준 입력 EOF를 보냅니다. 네이티브 비동기 작업에서 최대 10초 동안 실제 자식 프로세스의 종료를 확인합니다. `maintenance_quit`는 준비 토큰과 저장/작업 상태를 다시 검사한 뒤 앱 종료를 요청합니다.
+
+`maintenance_worker_status`는 앱이 소유한 워커의 엔진 ID, PID, 작업/설치/사전 다운로드 상태, 종료 요청 여부와 마지막 종료 결과를 읽습니다. 다른 앱이나 ComfyUI 프로세스는 조사하거나 종료하지 않습니다. `maintenance_abort`는 진행 중인 준비를 취소할 수 있지만 이미 보낸 종료 요청을 되돌리지는 않습니다. 저장 또는 종료 확인이 끝날 때까지 새 작업 차단을 유지합니다. 중복 준비 요청은 거절합니다.
+
+타임아웃·취소·종료 확인 실패 시 앱은 열린 상태를 유지하고 남은 워커 핸들도 보존합니다. 자동 강제 종료로 전환하지 않습니다. 다음 준비 요청은 같은 핸들의 자연 종료를 다시 확인하며, 종료 요청이 남은 워커에는 새 생성 요청을 보내지 않습니다. 이 정책은 앱 정상 종료와 **워커 내리기** 경로에 적용됩니다. 별도의 생성 오류/설치 정리 경로에 존재하는 기존 종료 정책을 모두 대체했다고 해석하지 마세요.
 
 ## 카메라·캐릭터 동작을 영상으로 잇기
 
@@ -179,6 +187,20 @@ BGM 작업은 `bgm_projects_list` → `bgm_get` / `bgm_create` → `bgm_prompt_p
 - 이 최신 소스가 반영된 최종 공개 설치본·무설치본의 구성과 실제 연결
 
 도구 등록, 자동 시험, 직접 stdio 연결, 대화 클라이언트 연결, GPU 출력과 시각 품질은 서로 다른 검증 단계입니다.
+
+## 검토 workflow의 프로젝트별 사용자 진술 기록
+
+설치본의 `tools/list`에 있는 `workflow_authorization_options`로 검토 preset ID, modelRuleId, registry SHA와 정확한 category/name/전체 파일 SHA 목록을 읽습니다. 이 목록은 native에 포함된 검토 registry에서만 나옵니다. 가져온 entry·INDEX·graph의 허가 주장이나 임의 파일 목록은 채택하지 않습니다. 목록 조회는 프로젝트에 허가를 저장하거나 모델을 내려받지 않습니다.
+
+사용자가 명시한 사용 허가 진술을 기록하도록 요청한 경우에만 `workflow_authorization_record`를 호출합니다. 저장된 `projectId`, 최신 `expectedRevision`, 조회한 `presetId`·`modelRuleId`·`registrySha256`·`files`, 그리고 `statement:{kind:"user-reported",evidence,sourceThreadId,reportedAtUtc}`를 전달합니다. 진술 원문과 출처·시각을 보존하며 정확한 프로젝트·모델·파일 범위로만 저장합니다. 이 작업은 라이선스나 토큰을 발급하지 않으며 `independentLicenseVerification:false`입니다. 시험이나 오류 수정 요청을 실제 허가 진술로 바꾸어 저장하지 않습니다. revision 충돌 또는 registry 변경 시 다시 읽고 요청을 검토합니다.
+
+UI의 workflow 라이브러리에도 같은 검토 범위와 명시 진술 입력이 있으며 같은 writer를 사용합니다. 중복 loader가 같은 파일을 사용하면 사용자 진술은 파일당 한 번 기록하고, native는 각 loader node/input의 연결을 각각 검사합니다. 기록 뒤 `workflow_register`를 다시 요청하면 현재 환경과 허가 기록으로 draft 또는 정적 manifest를 만듭니다. 검토 registry에 preset이 없거나 loaded source·schema·weight·프로젝트 범위가 확인되지 않으면 실행 가능하다고 표시하지 않습니다. 현재 포함된 실제 preset과 새로운 모델에 필요한 검토 데이터는 구분합니다.
+
+workflow 프롬프트는 명시적으로 선택한 `workflowId/workflowSha256/roleId/modelRuleId`를 사용합니다. 같은 모델의 여러 역할은 primary의 `prompt/negative`와 secondary의 `rolePrompts[roleId].positive/negative`를 각각 검토 slot에 전달하고 admission·영수증·history 검증에 포함합니다. primary 본문을 secondary에 자동 복사하지 않습니다. 역할별 모델이 다른 그래프는 현재 `workflow_mixed_model_roles_unsupported` draft로 남으며 별도 native 검토 정책이 필요합니다.
+
+수동 한국어 scene 프롬프트는 Comfy 경로에서 그대로 사용할 수 있습니다. 영어 입력이 필요한 기존 다른 경로는 `scene_video_prompt_language_conflict`로 재작성 선택을 알리며 번역하거나 덮어쓰지 않습니다. V2의 mask/pose/depth/cameraGuide/voiceReference도 native의 등록 ID·경로·해시·decode 사실로 검사합니다. maskImage는 실제 convention과 원본 크기, exact video/audio 참조는 시간 기준과 길이를 확인합니다. maskVideo는 명시적 미지원입니다. CPU 합성 시험은 실제 모델 생성 품질이나 설치본 연결을 증명하지 않습니다.
+
+exact 참조의 시간축은 UI·조종기·일괄과 native가 같은 우선순위로 검사합니다. 명시한 fps/frameCount/durationSeconds semantic 슬롯의 실제 바인딩이 우선이며, 해당 슬롯이 없을 때만 검사된 graph의 고정 fps, length/num_frames, durationSeconds를 읽습니다. 잘못된 값·누락 바인딩·여러 노드의 서로 다른 값·명시 duration과 frames/fps의 충돌은 차단합니다. 링크의 계산 결과나 모델별 숨은 길이를 추정하거나 요청자의 임의 expected FPS/길이를 권위로 채택하지 않습니다. 고정값만 있는 정상 graph도 native 참조 파일의 실제 FPS·길이와 일치하면 검사할 수 있습니다.
 
 ## 공식 LTX-2.5 LoRA 다운로드 조종기 (2026-10-05)
 

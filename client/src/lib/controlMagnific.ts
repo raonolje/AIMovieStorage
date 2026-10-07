@@ -13,6 +13,8 @@ import { getMediaLibrarySettings } from "./mediaLibrary";
 import { summarizeCompositionCamera } from "./composition";
 import { musicOf } from "./compositionEdit";
 import { targetModelOf } from "./modelRules";
+import { appPromptSelection } from "./appPromptRequest";
+import { assertPromptSelection } from "./promptModelSelection";
 import { cutVideoSecondsOf } from "./cutVideoPrompt";
 import { magnificCutVideoReferences } from "./cutVideoReferences";
 import { resolveCutContinuity } from "./cutContinuity";
@@ -275,13 +277,15 @@ export async function previewControlMagnific(raw: unknown) {
       "prompt_missing",
       "보낼 프롬프트가 없습니다. 컷의 프롬프트를 작성하거나 요청에 본문을 넣어 주세요.",
     );
-  const model =
-    request.kind === "video" ? draft.magnific?.videoModel : undefined;
+  const selection = appPromptSelection(draft, {kind:request.kind === "video" ? "cutVideo" : "cutImage",sceneId:scene.id,cutId:cut.id}, "magnific");
+  assertPromptSelection(selection);
+  if (!["magnific", "magnific-mcp"].includes(selection.route)) fail("unsupported_engine", "현재 컷은 Magnific 엔진을 선택하지 않았습니다. 선택 모델을 확인하세요.");
+  const model = selection.modelId;
   const nativeModel =
     request.kind === "video"
       ? (targetModelOf(model)?.magnific ??
         (!model ? MAGNIFIC_VIDEO_MODEL : undefined))
-      : MAGNIFIC_IMAGE_MODEL;
+      : (targetModelOf(model)?.magnific ?? (!model ? MAGNIFIC_IMAGE_MODEL : undefined));
   if (
     request.kind === "video" &&
     nativeModel !== "seedance-2-5-pro" &&
@@ -342,6 +346,7 @@ export async function previewControlMagnific(raw: unknown) {
     referencePaths,
     owner: { kind: "cut", name: `컷 ${cut.order}`, cutId: cut.id },
     model: nativeModel,
+    requestedImageModel: request.kind === "image" ? model : undefined,
     requestedVideoModel: request.kind === "video" ? model : undefined,
     seconds,
     // 기존 컷 카드의 구성과 같은 기본값입니다. 프로젝트의 별도 MCP 설정을 몰래 섞지 않습니다.
@@ -399,7 +404,7 @@ export async function previewControlMagnific(raw: unknown) {
     limitations: [
       "Magnific 데스크톱의 로그인된 보드와 앱에서 연 디버그 연결이 필요합니다. 실행 때 연결을 확인합니다.",
       "저장된 컷 참조를 업로드하고 생성기를 구성합니다. 생성 버튼은 누르지 않습니다.",
-      "영상 자동 구성은 Seedance 2.5만 지원합니다. 이미지 구성은 기존 기본 모델을 사용합니다.",
+      "영상 자동 구성은 Seedance 2.5만 지원합니다. 이미지 구성은 컷의 선택 모델과 확인된 연결값을 사용합니다.",
       "구성 시작 뒤 취소하거나 연결이 끊기면 이미 올라간 노드는 자동으로 되돌리지 않습니다. 보드를 확인하세요.",
       "이전 프롬프트 본문은 자동으로 다시 쓰지 않습니다. 새 카메라 참조 규칙은 영상 프롬프트를 다시 만들어 적용하세요.",
     ].map((message) => t(message)),
@@ -416,7 +421,11 @@ export async function previewControlMagnificSheet(raw: unknown) {
   if (!entity) fail("target_not_found", "인물 또는 장소 카드를 찾지 못했습니다.");
   const prompt = request.language === "ko" ? entity.promptKo : entity.promptEn;
   if (!prompt?.trim()) fail("prompt_missing", "앱 카드에 저장된 프롬프트가 없습니다. 먼저 프롬프트를 작성해 주세요.");
-  const model = magnificModelOf(entity.promptModel);
+  const selection = appPromptSelection(draft, {kind:request.target.kind,id:request.target.id}, "magnific");
+  assertPromptSelection(selection);
+  if (!["magnific", "magnific-mcp"].includes(selection.route)) fail("unsupported_engine", "현재 카드는 Magnific 엔진을 선택하지 않았습니다. 선택 모델을 확인하세요.");
+  const selectedModel = selection.modelId;
+  const model = magnificModelOf(selectedModel);
   if (!model) fail("unsupported_model", "고른 이미지 모델은 Magnific 구성에 연결되지 않습니다. 앱 카드의 모델을 확인해 주세요.");
   const references = entity.references || [];
   const tags = buildReferenceTags(references, "magnific");

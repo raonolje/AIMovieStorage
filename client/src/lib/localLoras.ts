@@ -1,3 +1,4 @@
+import { assertAppLoraExecutionDisabled } from "./generationRoutingPolicy";
 import { useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -14,8 +15,6 @@ import {
 
 /**
  * **받아 둔 로라** — 폴더가 진실입니다.
- *
- *
  *
  * # 왜 목록이 아니라 폴더를 믿는가
  *
@@ -279,7 +278,6 @@ export function searchLoras(query: string, filter?: LoraNet, nsfw = false): Prom
 /**
  * 받고, **어디서 왔는지도 함께 적어 둡니다.**
  *
- *
  * 파일 이름만 남으면 불러오는 말도 예시 그림도 다시 찾을 길이 없습니다.
  */
 export async function downloadLora(
@@ -288,6 +286,7 @@ export async function downloadLora(
   fileName: string,
   about?: { source?: string; trigger?: string; name?: string; weight?: number },
 ) {
+  assertAppLoraExecutionDisabled();
   const path = await invoke<string>("lora_download", { engine, url, fileName });
   await refreshLoraFiles();
   if (about) patchLora(path, about);
@@ -340,8 +339,6 @@ export function onLoraProgress(handler: (event: LoraProgress) => void): () => vo
 /**
  * **고른 것**을 로라로 바꿉니다. 안 골랐으면 그 엔진의 «기본으로 켠» 것들.
  *
- *
- *
  * 그래서 **고르는 자리가 둘**입니다 — 설정의 «기본으로 켜 둠» 과, 뽑는 자리에서의 «이번엔
  * 이걸로». 뒤엣것이 있으면 그것만 씁니다. 없으면 기본을 씁니다.
  */
@@ -350,6 +347,7 @@ export function lorasToRun(
   picked: string[] | undefined,
   onDisk: LoraOnDisk[] = files,
 ): LocalLora[] {
+  assertAppLoraExecutionDisabled();
   const items = loraItems(onDisk, engine);
   const use = picked?.length
     ? items.filter((item) => picked.includes(item.path))

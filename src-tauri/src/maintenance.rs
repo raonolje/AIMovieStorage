@@ -12,7 +12,26 @@ fn blockers(app: &AppHandle) -> Vec<String> {
     result
 }
 #[tauri::command]
-pub fn maintenance_status(app: AppHandle) -> Value { json!({"blockers": blockers(&app), "otherInstanceClosureVerified":false}) }
+pub fn maintenance_status(app: AppHandle) -> Value { json!({"blockers": blockers(&app),"workBlockers":work_blockers(&app),"workerShutdown":crate::upscale::graceful_worker_status(&app), "otherInstanceClosureVerified":false}) }
+pub(crate) fn work_blockers(app: &AppHandle) -> Vec<String> {
+    let mut result=crate::upscale::maintenance_work_blockers(app);
+    if crate::asset_upload::maintenance_pending(&app.state::<crate::asset_upload::AssetUploads>())!=0 { result.push("파일 전송이 완료되지 않았습니다.".into()); }
+    if crate::native_a2v::maintenance_busy() { result.push("네이티브 영상 작업이 실행 중입니다.".into()); }
+    result
+}
+#[tauri::command]
+pub fn maintenance_worker_status(app: AppHandle) -> Value { crate::upscale::graceful_worker_status(&app) }
+#[tauri::command]
+pub fn maintenance_cancel_idle_workers(app: AppHandle, operation_id: String) -> Result<Value,String> {
+    uuid::Uuid::parse_str(&operation_id).map_err(|_|"정상 종료 요청 번호를 확인할 수 없습니다.")?;
+    Ok(json!({"cancelRequested":crate::upscale::cancel_graceful_worker_shutdown(&app,&operation_id),"forcedTermination":false}))
+}
+#[tauri::command]
+pub async fn maintenance_release_idle_workers(app: AppHandle, operation_id: String) -> Result<Value,String> {
+    uuid::Uuid::parse_str(&operation_id).map_err(|_|"정상 종료 요청 번호를 확인할 수 없습니다.")?;
+    let busy=work_blockers(&app);if !busy.is_empty() { return Err(busy.join("; ")); }
+    tauri::async_runtime::spawn_blocking(move||crate::upscale::release_idle_workers(&app,&operation_id)).await.map_err(|e|e.to_string())?
+}
 #[tauri::command]
 pub async fn maintenance_request_quit(app: AppHandle) -> Result<(), String> {
     let busy = blockers(&app);

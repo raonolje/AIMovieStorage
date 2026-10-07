@@ -1,4 +1,10 @@
+import WorkflowPromptSelect from "@/components/WorkflowPromptSelect";
+import ComfyGenerateButton from "@/components/ComfyGenerateButton";
+import BgmVocalProfiles from "@/components/BgmVocalProfiles";
+import { bgmPromptSelection,bgmPromptStamp } from "@/lib/bgmPromptRequest";
 import { restoreBgmProjectsFromDisk } from "@/lib/bgmRestore";
+import { musicLyricsResult } from "@/lib/musicPromptPolicy";
+import { assertPromptSnapshot } from "@/lib/promptModelSelection";
 import { useEffect, useState } from "react";
 import { Loader2, Music, Plus, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
@@ -301,6 +307,7 @@ export default function BgmProjectsPage() {
     }
     setPromptBusy(true);
     try {
+      const requestedTrack = structuredClone(track);
       const result = await requestPromptFromLlm({
         task: "bgmPrompt",
         template: "bgm-prompt",
@@ -325,19 +332,15 @@ export default function BgmProjectsPage() {
         negativeKo: "",
         negativeEn: "",
       };
+      const latest = loadBgmProjects().find(item => item.id === project?.id)?.tracks.find(item => item.id === track.id);
+      assertPromptSnapshot(requestedTrack, latest);
       const gotLyrics = Boolean(result.lyricsKo || result.lyricsEn);
       updateTrack({
-        styleKo: result.ko,
-        styleEn: result.en,
-        promptKo: result.ko,
-        promptEn: result.en,
-        ...(gotLyrics
-          ? {
-              lyricsKo: result.lyricsKo || track.lyricsKo || track.lyrics,
-              lyricsEn: result.lyricsEn || track.lyricsEn || "",
-              lyrics: result.lyricsKo || track.lyrics,
-            }
-          : {}),
+        styleKo: result.ko, styleEn: result.en, promptKo: result.ko, promptEn: result.en,
+        ...musicLyricsResult({ lyricsKo: result.lyricsKo || track.lyricsKo || track.lyrics,
+          lyricsEn: result.lyricsEn || track.lyricsEn || "" }, track.instrumental),
+        lyrics: track.instrumental ? "" : musicLyricsResult({lyricsKo: result.lyricsKo || track.lyricsKo || track.lyrics}, false).lyricsKo,
+        promptModelStamp: bgmPromptStamp(track),
         promptHistory: [entry, ...(track.promptHistory ?? [])].slice(0, 20),
       });
       /*
@@ -819,6 +822,9 @@ export default function BgmProjectsPage() {
                     </select>
                   </label>
                 </div>
+                {track.targetTool==="comfy"&&<><WorkflowPromptSelect projectId={project!.id} kind="music" value={track.promptWorkflow} onChange={target=>updateTrack({promptWorkflow:target})}/><ComfyGenerateButton kind="audio" projectId={project!.id} projectName="BGM" target={{kind:"bgm",id:track.id}} workflowTarget={track.promptWorkflow} prompt={{ko:track.styleKo||track.promptKo,en:track.styleEn||track.promptEn}} assetType="bgm-track" ownerName={project!.name} stem={track.name||"곡"} onDone={()=>undefined}/></>}
+                <BgmVocalProfiles track={track} onChange={updateTrack}/>
+                {(track.styleKo || track.styleEn || track.promptKo || track.promptEn) && track.promptModelStamp !== bgmPromptStamp(track) && <p className="text-[10px] text-amber-300">현재 모델과 작성 기록이 다르거나 기록이 없습니다. 기존 문장은 유지되며 재작성 시 새 모델을 반영합니다.</p>}
                 {toolHint && (
                   <p
                     className="text-[10px] leading-relaxed"
@@ -843,7 +849,7 @@ export default function BgmProjectsPage() {
                 </label>
                 <p className="-mt-1 text-[10px]" style={{ color: "oklch(0.46 0.01 265)" }}>
                   {track.instrumental
-                    ? "가사 없이 연주로만 만듭니다. 「스타일 · 가사 뽑기」 는 구간 태그만 채웁니다."
+                    ? "가사 없이 연주로만 만듭니다. 「스타일 · 가사 뽑기」 는 가사를 비우고 편곡을 스타일에 적습니다."
                     : "노래입니다 — 「스타일 · 가사 뽑기」 가 가사를 써 옵니다. 연주곡으로 받고 싶으면 이 칸을 켜세요."}
                 </p>
 
@@ -903,21 +909,13 @@ export default function BgmProjectsPage() {
                     data={() => bgmRequestData(track)}
                     tail="가사"
                     // 곡에는 네거티브 칸이 없습니다. 스타일 두 칸과 가사 두 칸만 씁니다.
-                    onApplyPrompt={(result) =>
-                      updateTrack({
-                        styleKo: result.ko,
-                        styleEn: result.en,
-                        promptKo: result.ko,
-                        promptEn: result.en,
-                        ...(result.lyricsKo || result.lyricsEn
-                          ? {
-                              lyricsKo: result.lyricsKo || track.lyricsKo || track.lyrics,
-                              lyricsEn: result.lyricsEn || track.lyricsEn || "",
-                              lyrics: result.lyricsKo || track.lyrics,
-                            }
-                          : {}),
-                      })
-                    }
+                    modelId={bgmPromptSelection(track).modelId}
+                    onApplyPrompt={(result) => {
+                      const lyrics = musicLyricsResult({lyricsKo: result.lyricsKo || track.lyricsKo || track.lyrics,
+                        lyricsEn: result.lyricsEn || track.lyricsEn || ""}, track.instrumental);
+                      updateTrack({styleKo: result.ko, styleEn: result.en, promptKo: result.ko, promptEn: result.en,
+                        ...lyrics, lyrics: lyrics.lyricsKo, promptModelStamp: bgmPromptStamp(track)});
+                    }}
                   />
                   {/*
                     API 로 바로 받는 「프롬프트 작성」. 캐릭터·컷 카드에 있는 그 단추와
@@ -956,6 +954,7 @@ export default function BgmProjectsPage() {
                       }
                       const made = buildBgmStyle(track);
                       updateTrack({
+                        promptModelStamp: bgmPromptStamp(track),
                         styleKo: made.styleKo,
                         styleEn: made.styleEn,
                         promptKo: made.styleKo,

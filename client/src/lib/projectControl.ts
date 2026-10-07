@@ -2,6 +2,7 @@ import { diffControlValues } from "./controlChanges";
 import { copyJsonWithinLimit, sameImmutableJson } from "./immutableJson";
 import { controlDetailSchema, projectControlValue, type ControlDetail } from "./controlProjection";
 import { z } from "zod";
+import { workflowInputSelectionSchema } from "./workflowRunContract";
 import { relinkCutCharacterPrompts } from "@/lib/cutCharacterLinks";
 import { ensureVoicePrompt } from "@/lib/characterVoice";
 import { relinkCharacterBlueprintPrompts } from "@/lib/characterBlueprintPrompt";
@@ -23,16 +24,19 @@ import { newProjectDraft, newCharacter, newBackground, newScene, newCut, uid, ty
 const id = z.string().min(1).max(200);
 const text = z.string().max(100_000);
 const name = z.string().trim().min(1).max(300);
+const workflowTargetSchema = z.object({kind:z.literal("workflow"), workflowId:id, workflowSha256:z.string().regex(/^[a-f0-9]{64}$/), roleId:id, modelRuleId:id}).strict();
+const promptRouteFields = {promptWorkflowInputs:workflowInputSelectionSchema.optional(),promptEngine:id.optional(),promptWorkflow:workflowTargetSchema.optional()};
+const videoRouteFields = {videoWorkflowInputs:workflowInputSelectionSchema.optional(),videoPromptModel:id.optional(),videoPromptEngine:id.optional(),videoPromptWorkflow:workflowTargetSchema.optional()};
 const prompts = { promptKo: text.optional(), promptEn: text.optional(), negativeKo: text.optional(), negativeEn: text.optional() };
 const characterBlueprintIds = new Set(CHARACTER_BLUEPRINT_GROUPS.flatMap((group) => group.options.map((item) => item.id)));
 const characterBlueprint = z.array(z.string().refine((value) => characterBlueprintIds.has(value), "모르는 캐릭터 구성 항목입니다.")).max(100);
 const backgroundBlueprintIds = BACKGROUND_BLUEPRINT_GROUPS.flatMap((group) => group.options.map((item) => item.id)) as [string, ...string[]];
 const backgroundBlueprint = z.array(z.enum(backgroundBlueprintIds)).max(100);
-const imageModel = z.string().refine((value) => IMAGE_ONLY_MODELS.some((model) => model.id === value), "앱에서 지원하는 이미지 모델을 고르세요.");
+const imageModel = z.string().refine((value) => IMAGE_ONLY_MODELS.some((model) => model.id === value) || ["qwenimage","zimage","krea2","anima"].includes(value), "앱에서 지원하는 이미지 모델을 고르세요.");
 const videoModel = z.string().refine((value) => targetModelOf(value)?.kind === "video", "앱에서 지원하는 영상 모델을 고르세요.");
 const roomSize = z.object({ width: z.number().finite().min(0.4).max(400), depth: z.number().finite().min(0.4).max(400), height: z.number().finite().min(0.4).max(400).optional() }).strict();
 const profileFields = z.object({ callName: text.optional(), age: text.optional(), mbti: text.optional(), tagline: text.optional(), personality: text.optional(), speech: text.optional(), habits: text.optional(), background: text.optional(), directing: text.optional() }).strict();
-const projectFields = z.object({ title: name.optional(), logline: text.optional(), synopsis: text.optional(), tone: text.optional(), runtime: text.optional(), storyboardNote: text.optional(), videoModel: videoModel.optional(),
+const projectFields = z.object({ workflowTargets:z.object({image:workflowTargetSchema.optional(),video:workflowTargetSchema.optional(),music:workflowTargetSchema.optional(),voice:workflowTargetSchema.optional()}).strict().optional(), batchEngines:z.object({image:id.optional(),video:id.optional()}).strict().optional(), title: name.optional(), logline: text.optional(), synopsis: text.optional(), tone: text.optional(), runtime: text.optional(), storyboardNote: text.optional(), videoModel: videoModel.optional(),
   genres: z.array(z.string().refine((value) => GENRE_OPTIONS.includes(value), "모르는 장르입니다.")).max(30).optional(),
   styles: z.array(z.string().refine((value) => STYLE_OPTIONS.includes(value), "모르는 스타일입니다.")).max(30).optional(),
   eras: z.array(z.string().refine((value) => ERA_PRESETS.some((item) => item.id === value), "모르는 시대입니다.")).max(30).optional(),
@@ -40,10 +44,10 @@ const projectFields = z.object({ title: name.optional(), logline: text.optional(
   eraUnspecified: z.boolean().optional(),
 }).strict();
 const workflowFields = { referenceMode: z.enum(["none", "keep", "blend"]).optional(), analysis: text.optional(), analysisEn: text.optional(), firstReferencePromptKo: text.optional(), firstReferencePromptEn: text.optional(), firstReferenceModel: imageModel.optional() };
-const characterFields = z.object({ name: name.optional(), role: text.optional(), gender: text.optional(), description: text.optional(), voiceDescription: text.optional(), voiceDescriptionEn: text.optional(), heightCm: z.number().finite().min(1).max(1000).optional(), build: z.enum(["slim", "average", "athletic", "broad"]).optional(), kind: z.enum(["human", "animal", "creature"]).optional(), blueprint: characterBlueprint.optional(), promptModel: imageModel.optional(), ...workflowFields, ...prompts }).strict();
-const backgroundFields = z.object({ name: name.optional(), location: text.optional(), description: text.optional(), spaceKind: z.enum(["interior", "exterior", "mixed"]).optional(), usage: z.enum(["wall", "dome"]).optional(), panoramaSpace: roomSize.optional(), exteriorSpace: roomSize.optional(), faceMarkSourceId: id.optional(), blueprint: backgroundBlueprint.optional(), promptModel: imageModel.optional(), ...workflowFields, ...prompts }).strict();
-const sceneFields = z.object({ title: text.optional(), summary: text.optional(), storyboardPromptKo: text.optional(), storyboardPromptEn: text.optional() }).strict();
-const cutFields = z.object({ cutContinuity: z.enum(["independent", "continue", "same-space-new-angle"]).optional(), title: text.optional(), description: text.optional(), acting: text.optional(), actingEn: text.optional(), backgroundMotion: text.optional(), backgroundMotionEn: text.optional(), vfx: text.optional(), vfxEn: text.optional(), plannedSeconds: z.number().finite().positive().max(3600).optional(), characterIds: z.array(id).max(100).optional(), backgroundId: id.optional(), characterRefs: z.record(id, z.array(z.string().min(1).max(4000)).max(8)).optional(), styleTags: z.array(z.string().min(1).max(200)).max(100).optional(), techniques: z.array(z.string().min(1).max(200)).max(100).optional(), useComposition: z.boolean().optional(), useRefVideo: z.boolean().optional(), videoPromptKo: text.optional(), videoPromptEn: text.optional(), ...prompts }).strict();
+const characterFields = z.object({ name: name.optional(), role: text.optional(), gender: text.optional(), description: text.optional(), voiceDescription: text.optional(), voiceDescriptionEn: text.optional(),voiceWorkflow:workflowTargetSchema.optional(),voiceWorkflowInputs:workflowInputSelectionSchema.optional(), heightCm: z.number().finite().min(1).max(1000).optional(), build: z.enum(["slim", "average", "athletic", "broad"]).optional(), kind: z.enum(["human", "animal", "creature"]).optional(), blueprint: characterBlueprint.optional(), promptModel: imageModel.optional(), ...promptRouteFields, ...workflowFields, ...prompts }).strict();
+const backgroundFields = z.object({ name: name.optional(), location: text.optional(), description: text.optional(), spaceKind: z.enum(["interior", "exterior", "mixed"]).optional(), usage: z.enum(["wall", "dome"]).optional(), panoramaSpace: roomSize.optional(), exteriorSpace: roomSize.optional(), faceMarkSourceId: id.optional(), blueprint: backgroundBlueprint.optional(), promptModel: imageModel.optional(), ...promptRouteFields, ...workflowFields, ...prompts }).strict();
+const sceneFields = z.object({...videoRouteFields, title: text.optional(), summary: text.optional(), storyboardPromptKo: text.optional(), storyboardPromptEn: text.optional() }).strict();
+const cutFields = z.object({...promptRouteFields, ...videoRouteFields, promptModel:imageModel.optional(), cutContinuity: z.enum(["independent", "continue", "same-space-new-angle"]).optional(), title: text.optional(), description: text.optional(), acting: text.optional(), actingEn: text.optional(), backgroundMotion: text.optional(), backgroundMotionEn: text.optional(), vfx: text.optional(), vfxEn: text.optional(), plannedSeconds: z.number().finite().positive().max(3600).optional(), characterIds: z.array(id).max(100).optional(), backgroundId: id.optional(), characterRefs: z.record(id, z.array(z.string().min(1).max(4000)).max(8)).optional(), styleTags: z.array(z.string().min(1).max(200)).max(100).optional(), techniques: z.array(z.string().min(1).max(200)).max(100).optional(), useComposition: z.boolean().optional(), useRefVideo: z.boolean().optional(), videoPromptKo: text.optional(), videoPromptEn: text.optional(), ...prompts }).strict();
 const referenceOwner = z.object({ kind: z.enum(["character", "background"]), id }).strict();
 const sheetPlacement = z.object({ id, kind: z.enum(["image", "profile"]).optional(),
   x: z.number().int().min(0).max(12000), y: z.number().int().min(0).max(12000),

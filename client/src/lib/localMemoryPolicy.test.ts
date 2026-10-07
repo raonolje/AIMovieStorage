@@ -48,10 +48,8 @@ describe("로컬 생성의 메모리 정책", () => {
     expect(api.loadPrecision("qwenimage")).toBe("int8");
     expect(() => api.savePrecision("int4", "minimaxh3")).toThrow("지원하지");
     newOrigin(); vi.resetModules(); api = await load();
-    await api.runLocal("wanvideo", "compare.mp4", { prompt: "시험" });
-    expect(native.invoke).toHaveBeenLastCalledWith("local_run", expect.objectContaining({ opts: expect.objectContaining({ precision: "int4" }) }));
-    await api.runLocal("wanvideo", "compare.mp4", { prompt: "시험", precision: "int8" });
-    expect(native.invoke).toHaveBeenLastCalledWith("local_run", expect.objectContaining({ opts: expect.objectContaining({ precision: "int8" }) }));
+    await expect(api.runLocal("wanvideo","compare.mp4",{prompt:"시험"})).rejects.toThrow("legacy_generation_disabled");
+    expect(native.invoke.mock.calls.some(([command])=>command==="local_run")).toBe(false);
     await api.savePrecision("inherit", "wanvideo");
     expect(api.loadPrecision("wanvideo")).toBe("int8");
   });
@@ -88,20 +86,10 @@ describe("로컬 생성의 메모리 정책", () => {
     expect(JSON.parse(window.localStorage.getItem(settingsKey)!)).toEqual(adaptive);
   });
 
-  it("생성은 거울 복원을 기다리고 세 모드의 같은 규격을 Rust에 전달한다", async () => {
-    native.entries.localMemoryPolicy = { value: adaptive, savedAt: 100 };
-    const api = await import("./localEngines");
-    // 복원 완료를 직접 기다리지 않고 바로 시작해도 저장된 정책을 사용해야 합니다.
-    await api.runLocal("qwenimage", "result.png", { prompt: "시험" });
-    expect(native.invoke).toHaveBeenLastCalledWith("local_run", expect.objectContaining({ opts: expect.objectContaining({ memory_policy: "adaptive", memory_ram_percent: 80, memory_vram_percent: 90, keep_worker: false }) }));
-    for (const mode of ["release", "retain"] as const) {
-      await api.saveLocalMemoryPolicy({ ...adaptive, mode });
-      const options = { prompt: "시험", keep_worker: true, memory_policy: "retain", memory_ram_percent: 99 } as LocalRunOptions;
-      await api.runLocal("wanvideo", "result.mp4", options);
-      const run = native.invoke.mock.calls.filter(([command]) => command === "local_run").at(-1)!;
-      expect(run[1].opts).toMatchObject({ prompt: "시험", memory_policy: mode, memory_ram_percent: 80, memory_vram_percent: 90, keep_worker: mode === "retain" });
-      expect(options).toMatchObject({ keep_worker: true, memory_policy: "retain", memory_ram_percent: 99 });
-    }
+  it("기존 메모리 정책은 복원되지만 폐지된 직접 엔진 실행은 차단합니다",async()=>{
+    native.entries.localMemoryPolicy={value:adaptive,savedAt:100};const api=await load();expect(api.getLocalMemoryPolicy()).toEqual(adaptive);
+    for(const engine of ["qwenimage","wanvideo"] as const)await expect(api.runLocal(engine,"result",{prompt:"시험"})).rejects.toThrow("legacy_generation_disabled");
+    expect(native.invoke.mock.calls.some(([command])=>command==="local_run")).toBe(false);
   });
 
   it("수동 워커 종료 실패를 삼키지 않아 화면에서 오류를 표시할 수 있다", async () => {
@@ -123,9 +111,8 @@ describe("로컬 생성의 메모리 정책", () => {
     await api.saveLocalMemoryPolicy({ mode: "retain", ramPercent: 85, vramPercent: 85 });
     await api.savePrecision("int4");
     const options={prompt:"native QA",ltx_a2v:"experimental",ltx_a2v_offload:"disk",native_gpu_handoff:{operationId:"approved-op"}} as LocalRunOptions;
-    await api.runLocal("ltx25","native.mp4",options);
-    const run=native.invoke.mock.calls.filter(([command])=>command==="local_run").at(-1)!;
-    expect(run[1].opts).toEqual(options);
-    for(const field of ["precision","memory_policy","memory_ram_percent","memory_vram_percent","keep_worker"])expect(run[1].opts).not.toHaveProperty(field);
+    const original=structuredClone(options);
+    await expect(api.runLocal("ltx25","native.mp4",options)).rejects.toThrow("legacy_generation_disabled");
+    expect(options).toEqual(original);expect(native.invoke.mock.calls.some(([command])=>command==="local_run")).toBe(false);
   });
 });
