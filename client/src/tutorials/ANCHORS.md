@@ -97,7 +97,8 @@
 
 | 앵커 | 파일 | 요소 (줄 힌트) |
 | --- | --- | --- |
-| `scenes-add` | `StepScenes.tsx` | 목록 끝 «장면 추가» (L148); 빈 상태 «첫 장면 추가하기» (L117) 에도 |
+| `scenes-add` | `StepScenes.tsx` | 선택 씬 아래 «장면 추가» (L148); 빈 상태 «첫 장면 추가하기» (L117) 에도 |
+| `scene-navigation` | `SceneNavigation.tsx` | 고정 진행바 아래 씬 번호·이동·씬 탭 (좌우/Home/End) |
 | `scene-summary` | `StepScenes.tsx` | 장면 요약 textarea `placeholder="이 장면에서 무슨 일이 일어나는지"` (L274) |
 | `scene-cut-add` | `StepScenes.tsx` | «컷 추가» 단추 (L357) |
 | `scene-storyboard` | `SceneStoryboard.tsx` | «스토리보드» 제목 줄 (L382) 을 싸는 상자 |

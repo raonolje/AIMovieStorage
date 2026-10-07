@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ensureProjectInbox } from "@/lib/mediaLibrary";
 import { useLocation, useRoute } from "wouter";
-import { ArrowLeft, ArrowRight, Check } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { applyMovedPaths, revertOwnerNames, syncOwnerFolders } from "@/lib/ownerFolders";
 import { useAutoSave } from "@/lib/autoSave";
 import { startMaintenanceActivity } from "@/lib/maintenanceGate";
-import GlobalNav from "@/components/GlobalNav";
 import { WORK_WIDTH } from "@/lib/layout";
 import StepBasics from "@/components/project/StepBasics";
 import StepCharacters from "@/components/project/StepCharacters";
 import StepScenes from "@/components/project/StepScenes";
+import ProjectProgress, { PROJECT_STEPS as STEPS } from "@/components/project/ProjectProgress";
+import { useSceneSelection } from "@/components/project/useSceneSelection";
 import StepFinish from "@/components/project/StepFinish";
 import ProjectEditorLoadGate from "@/components/project/ProjectEditorLoadGate";
 import { ConfirmDialogHost } from "@/components/ConfirmDialog";
@@ -81,12 +82,6 @@ import {
   이름과 힌트는 한국어 원문 그대로 두고 그릴 때 `t()` 로 바꿉니다 — 모듈 상수에 `t()` 를 넣으면
   언어를 바꿔도 따라오지 않습니다.
 */
-const STEPS = [
-  { id: 1, label: "주제 설정", hint: "장르·스타일·시대. 이후 모든 프롬프트의 머리말이 됩니다" },
-  { id: 2, label: "캐릭터", hint: "인물과 레퍼런스, 캐릭터 시트" },
-  { id: 3, label: "씬 구성", hint: "장면과 컷 · 이 장면에 쓸 장소·에셋도 여기서" },
-  { id: 4, label: "확인", hint: "스토리보드와 한눈에 보기" },
-];
 
 export default function NewProjectPage() {
   const [, params] = useRoute("/project/:id");
@@ -242,6 +237,7 @@ function ProjectEditor({ initialProject }: { initialProject?: LocalProject }) {
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
+  const sceneSelection = useSceneSelection(savedId ?? undefined, draft.scenes);
   const bootstrapKey = savedId ?? "새 프로젝트";
   const registeredTargetKey = useRef(bootstrapKey);
   useEffect(
@@ -543,7 +539,8 @@ function ProjectEditor({ initialProject }: { initialProject?: LocalProject }) {
   return (
     <ProjectMediaContext.Provider value={media}>
       <div className="min-h-screen" style={{ background: "oklch(0.12 0.008 265)" }}>
-        <GlobalNav />
+        <ProjectProgress draft={draft} step={step} maxStep={maxStep} goStep={goStep}
+          selectedSceneId={sceneSelection.selectedId} onSelectScene={sceneSelection.select} />
 
         <main className={`${WORK_WIDTH} pb-16 pt-5`}>
           {recovered && (
@@ -584,108 +581,7 @@ function ProjectEditor({ initialProject }: { initialProject?: LocalProject }) {
             </div>
           )}
 
-          {/*
-            전역 프로그래스 바.
 
-            **동그라미와 선이 서로 다른 것을 말합니다.**
-
-            - 동그라미 — 그 단계를 «채웠는가». 인물이 하나도 없으면 안 칠합니다
-            - 선       — 어디까지 «가 봤는가». 지나갔으면 칠합니다
-
-            둘을 갈라 놓은 이유가 있습니다. 예전에는 동그라미도 위치만 보고
-            칠했습니다. 그러니까 캐릭터를 건너뛰고 배경으로 가도 캐릭터가
-            «완료» 로 보였어요. 지금은 «주제 설정은 찼고, 캐릭터는 건너뛰었고,
-            지금 배경에 있다» 가 한눈에 읽힙니다.
-
-            지나온 곳은 눌러 돌아갈 수 있고, 아직 안 간 곳도 눌러 건너뛸 수 있습니다.
-          */}
-          <div data-tour="project-progress" className="mb-5 flex items-center gap-0">
-            {STEPS.map((item, index) => {
-              const filled = stepFilled(draft, item.id);
-              const on = item.id === step;
-              // 「다음」 을 눌러 지나간 단계. 되돌아와 있어도 남습니다.
-              const walked = Boolean(draft.progress?.[String(item.id)]);
-              // 지나온 구간. 되돌아와 있어도 선은 가 본 데까지 칠해 둡니다.
-              const passed = item.id < maxStep || walked;
-              const skipped = passed && !filled;
-              /*
-                지금 작업 중이면서 아직 「다음」 을 안 누른 단계는 **반만** 칠합니다.
-                「작업 중이니까 프로그래스 바가 캐릭터 절반이 유지가 되어야하고」
-              */
-              const half = on && !walked;
-              return (
-                <div key={item.id} className="flex min-w-0 items-center" style={{ flex: index === STEPS.length - 1 ? "0 0 auto" : "1 1 0" }}>
-                  <button
-                    type="button"
-                    onClick={() => goStep(item.id)}
-                    title={`${t(item.hint)}${on ? ` · ${t("지금 여기")}` : filled ? ` · ${t("채웠습니다")}` : skipped ? ` · ${t("건너뛰었습니다")}` : ""}`}
-                    className="flex shrink-0 items-center gap-2"
-                  >
-                    <span
-                      className="flex h-7 w-7 items-center justify-center rounded-full"
-                      style={{
-                        background: filled
-                          ? "oklch(0.62 0.22 290)"
-                          : half
-                            ? "oklch(0.62 0.22 290 / 45%)"
-                            : "oklch(1 0 0 / 7%)",
-                        // 지금 있는 곳은 채웠든 아니든 테두리로 짚어 줍니다.
-                        border: on
-                          ? "2px solid oklch(0.80 0.18 290)"
-                          : skipped
-                            ? "2px dashed oklch(0.62 0.14 60 / 55%)"
-                            : "2px solid transparent",
-                      }}
-                    >
-                      {filled ? (
-                        <Check className="h-3.5 w-3.5" style={{ color: "white" }} />
-                      ) : (
-                        // 건너뛴 곳은 빈 채로 둡니다. 체크를 흐리게 넣으면
-                        // 「했나 안 했나」 가 도로 헷갈립니다.
-                        <span
-                          className="h-1.5 w-1.5 rounded-full"
-                          style={{
-                            background: skipped
-                              ? "oklch(0.72 0.14 60)"
-                              : on
-                                ? "oklch(0.80 0.18 290)"
-                                : "oklch(0.32 0.01 265)",
-                          }}
-                        />
-                      )}
-                    </span>
-                    <span
-                      className="whitespace-nowrap text-xs font-semibold"
-                      style={{
-                        color: on
-                          ? "white"
-                          : filled
-                            ? "oklch(0.78 0.10 290)"
-                            : skipped
-                              ? "oklch(0.72 0.12 60)"
-                              : "oklch(0.50 0.01 265)",
-                      }}
-                    >
-                      {t(item.label)}
-                    </span>
-                  </button>
-                  {index < STEPS.length - 1 && (
-                    <span
-                      className="mx-3 h-px min-w-6 flex-1"
-                      style={{ background: passed ? "oklch(0.62 0.22 290 / 55%)" : "oklch(1 0 0 / 10%)" }}
-                    />
-                  )}
-                </div>
-              );
-            })}
-
-            {/*
-              **«저장» 단추는 걷어냈습니다.** 맞습니다.
-              `useAutoSave` 가 손을 멈추면 1.5초 뒤, 창을 가릴 때, 화면을 떠날 때 세 번
-              **파일로** 씁니다(브라우저 저장소가 아니라). 단계를 넘길 때도 한 번 더 씁니다.
-              누를 필요가 없는 단추가 있으면 «눌러야 저장되나» 하고 누르게 됩니다.
-            */}
-          </div>
 
           <p className="mb-3 text-xs" style={{ color: "oklch(0.48 0.01 265)" }}>
             {t("STEP {n} / {total} · {hint}", { n: current.id, total: STEPS.length, hint: t(current.hint) })}
@@ -711,7 +607,9 @@ function ProjectEditor({ initialProject }: { initialProject?: LocalProject }) {
             />
           )}
           {step === 2 && <StepCharacters draft={draft} onChange={patch} />}
-          {step === 3 && <StepScenes draft={draft} onChange={patch} controlCutRequest={controlCutRequest} />}
+          {step === 3 && <StepScenes draft={draft} onChange={patch} controlCutRequest={controlCutRequest}
+            onControlRequestHandled={() => setControlCutRequest(null)}
+            selectedSceneId={sceneSelection.selectedId} onSelectScene={sceneSelection.select} editorStateKey={sceneSelection.stateKey} getCurrentDraft={() => draftRef.current} />}
           {step === 4 && <StepFinish projectId={bootstrapKey} draft={draft} onChange={patch} />}
 
           <div className="mt-5 flex items-center gap-2">

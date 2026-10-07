@@ -235,3 +235,11 @@ Read planar_overlay_status first. media_planar_overlay uses same-project video/i
 ## 원본 보호 CPU 편집 (준비 후보)
 
 protected_edit_status를 읽고 media_local_edit를 사용한다. 명시적 같은 프로젝트 선택/보호 이미지 ID와 SHA256, 원본/crop 매핑이 필요하다. 보호가 우선하며 정확 문자 레이어가 보호에 걸리면 자르지 않고 거절한다. 자동 의미 분할·글자 인식·새 모델·GPU 사용은 없다. 결과는 비대표·미등록이고 검수 후 별도 허가된 media_register(makePrimary:false) 또는 기존 comfy_masked_compose를 재사용한다. 현재 앱 쓰기/설치 보류를 지킨다. docs/LOCAL_PROTECTED_EDIT.md 참고.
+
+## 연결 진단 코드
+
+기본 자동 시작은 기존과 같이 저장값이 정확히 `false`일 때만 중지됩니다. MCP 연결 실패는 이 저장 선택을 바꾸지 않습니다.
+
+`control_disabled`는 해당 discovery 세션의 명시적 중지 기록이 확인된 경우에만 설정 켜기 안내를 표시합니다. `session_closed`는 정상 종료, `connection_refused`는 저장된 endpoint의 TCP 연결 거부, `connection_timeout`은 5초 연결 기한 초과입니다. `discovery_unavailable`은 등록 부재이며 앱 미실행·초기화 중·설정 비활성을 단정하지 않습니다.
+
+`startup_not_ready`는 인증된 host에서 조종 요청 처리기의 준비 보고가 아직 없을 때만 반환합니다. 준비 보고는 요청 리스너 등록 이후 전송하며 켜짐 선택이나 토큰을 수정하지 않습니다. `response_timeout`은 연결·요청 전송 후 95초 응답 기한 또는 host의 90초 처리 기한 초과입니다. 편집이 이미 적용됐을 수 있으므로 작업 상태를 먼저 조회합니다. 초기화 중이나 비활성으로 바꾸어 해석하지 않습니다.

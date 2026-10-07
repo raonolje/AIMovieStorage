@@ -64,6 +64,8 @@ export function initializeAppControl(
     );
     // 첫 설치에서는 조종기를 바로 켭니다. 사용자가 설정에서 끄면 다음 실행에도
     // 그 선택을 지킵니다. 리스너보다 먼저 열면 첫 MCP 요청이 시간 초과됩니다.
+    // 요청 수신 준비만 알립니다. 켜짐 선택·토큰은 바꾸지 않습니다.
+    await invoke("control_frontend_ready");
     if (window.localStorage.getItem(AUTOSTART_KEY) !== "false") {
       try {
         await invoke("control_enable", { enabled: true });

@@ -41,6 +41,7 @@ mod comfy_preset_test_fixture;
 mod comfy_actual_probe;
 mod asset_upload;
 mod control;
+mod control_diagnostics;
 mod control_lifecycle;
 mod maintenance;
 pub use control::run_mcp;
@@ -1503,6 +1504,7 @@ pub fn run() {
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             installer_app_locale,
             control::control_status,
+            control::control_frontend_ready,
             control::control_enable,
             control::control_respond,
             control::control_read_journal,

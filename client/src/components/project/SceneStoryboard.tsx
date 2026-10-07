@@ -1,7 +1,9 @@
 import WorkflowPromptSelect from "@/components/WorkflowPromptSelect";
 import ComfyGenerateButton from "@/components/ComfyGenerateButton";
 import { resolvePromptSelection, promptStamp, promptStaleMessage, assertPromptSnapshot } from "@/lib/promptModelSelection";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
+import { useEditorActivity } from "./useSceneSelection";
+import { assertCurrentScenePrompt } from "@/lib/sceneEditorPromptSnapshot";
 import { Clapperboard, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import PromptResultPanels from "@/components/PromptResultPanels";
@@ -48,6 +50,8 @@ export default function SceneStoryboard({
   backgrounds = [],
   aspect = "16:9",
   videoAspect,
+  editorStateKey,
+  getCurrentDraft,
 }: {
   scene: Scene;
   /** 장면 순번 — 제목이 없을 때 폴더 이름이 「장면 N」 이 됩니다. */
@@ -68,8 +72,11 @@ export default function SceneStoryboard({
    * 사용자 2026-09-18 점검: 씬 영상 프롬프트에 화면비가 아예 안 실리고 있었습니다.
    */
   videoAspect?: string;
+  editorStateKey?: string;
+  getCurrentDraft?: () => import("@/lib/projectTypes").ProjectDraft;
 }) {
-  const { projectName, imageMarks, promptProject } = useProjectMedia();
+  const { projectName, projectId, imageMarks, promptProject } = useProjectMedia();
+  const stateKey = editorStateKey || projectId || `draft:${projectName}`;
   const selection = resolvePromptSelection("video", { workflowTarget: scene.videoPromptWorkflow, model: scene.videoPromptModel, engine: scene.videoPromptEngine, project: promptProject });
   const latest = useRef({ scene, selection }); latest.current = { scene, selection };
   const stale = promptStaleMessage(scene.storyboardPromptModelStamp, selection, Boolean(scene.storyboardPromptKo || scene.storyboardPromptEn));
@@ -82,7 +89,7 @@ export default function SceneStoryboard({
     () => storyboardLockNames(scene, characters),
     [scene.cuts, characters],
   );
-  const [baking, setBaking] = useState(false);
+  const [baking, setBaking] = useEditorActivity(stateKey, scene.id, "storyboard-bake");
   /*
     표시(동선·카메라 무빙)는 **그림에 붙어** 있습니다 — 그림 선반의 «표시하기» 에서 그린 것이
     `imageMarks[파일경로]` 로 남고, 대표 그림이 바뀌면 그 그림의 표시가 따라옵니다.
@@ -120,7 +127,7 @@ export default function SceneStoryboard({
     규칙 조립은 그대로 두고(시트를 구울 때 자동으로 채워집니다) 그 위에 API 를 얹습니다.
   */
   const apiReady = useApiReady();
-  const [writing, setWriting] = useState(false);
+  const [writing, setWriting] = useEditorActivity(stateKey, scene.id, "storyboard-prompt");
 
   /** 요청문과 API 가 **같은 재료**를 봅니다(`promptRequest` 규칙). */
   const boardRequestData = () => ({ generationTarget: selection, ...storyboardRequestData({ scene, cells, swaps, videoAspect, lockNames }) });
@@ -144,8 +151,12 @@ export default function SceneStoryboard({
         platformId: selection.platformId,
         data: boardRequestData(),
       });
-      assertPromptSnapshot(promptStamp(selection), promptStamp(latest.current.selection));
-      assertPromptSnapshot([scene.storyboardPromptKo, scene.storyboardPromptEn], [latest.current.scene.storyboardPromptKo, latest.current.scene.storyboardPromptEn]);
+      if (getCurrentDraft) {
+        assertCurrentScenePrompt(getCurrentDraft(), scene.id, promptStamp(selection), [scene.storyboardPromptKo, scene.storyboardPromptEn]);
+      } else {
+        assertPromptSnapshot(promptStamp(selection), promptStamp(latest.current.selection));
+        assertPromptSnapshot([scene.storyboardPromptKo, scene.storyboardPromptEn], [latest.current.scene.storyboardPromptKo, latest.current.scene.storyboardPromptEn]);
+      }
       onPatch((current) => ({ ...withStoryboardPrompt(current, result, "API · 프롬프트 작성"), storyboardPromptModelStamp: promptStamp(selection) }));
       toast.success("스토리보드 영상 프롬프트를 받았습니다.");
     } catch (error) {

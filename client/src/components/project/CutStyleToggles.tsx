@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { CUT_TOGGLE_GROUPS } from "@/lib/cutStyle";
 import type { AutoRealism } from "@/lib/autoRealism";
+import { useT } from "@/lib/i18n";
 
 /**
  * **연출 토글 패널** — 스타일·촬영·조명·색감·질감을 켜고 끕니다.
@@ -29,10 +30,11 @@ export default function CutStyleToggles({
   /** 앱이 알아서 켠 것. 화면에 다른 색으로 보여 줍니다. */
   autoLook: AutoRealism;
 }) {
+  const t = useT();
   return (
     <>
       {CUT_TOGGLE_GROUPS.map((group) => {
-        const groupOpen = openGroups[group.id] ?? false;
+        const groupOpen = openGroups[group.id] ?? true;
         const picked = group.options.filter((option) =>
           tags.includes(option.id),
         );
@@ -52,6 +54,7 @@ export default function CutStyleToggles({
                 setOpenGroups({ ...openGroups, [group.id]: !groupOpen })
               }
               className="flex w-full items-center gap-1.5 px-2.5 py-2 text-left"
+              aria-expanded={groupOpen}
             >
               {groupOpen ? (
                 <ChevronDown
@@ -68,7 +71,7 @@ export default function CutStyleToggles({
                 className="text-[11px] font-bold"
                 style={{ color: "oklch(0.82 0.16 290)" }}
               >
-                {group.label}
+                {t(group.label)}
               </span>
               <span
                 className="min-w-0 flex-1 truncate text-[9px]"

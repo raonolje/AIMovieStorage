@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { expectEmptyProjectSave } from "@/lib/localProjectStore";
 import { ChevronDown, ChevronRight, Clapperboard, Film, Plus, Trash2 } from "lucide-react";
 import { confirmDialog } from "@/components/ConfirmDialog";
@@ -11,6 +11,10 @@ import { useProjectMedia } from "@/components/project/ProjectMediaContext";
 import { newCut, newScene, type Cut, type ProjectDraft, type Scene } from "@/lib/projectTypes";
 import { fieldStyle } from "@/components/project/fieldStyle";
 import { TUTORIAL_CUT_EVENT } from "@/lib/tutorialStore";
+import { sceneEditorStore } from "@/lib/sceneEditorState";
+import { useEditorDisclosure } from "./useSceneSelection";
+import { scenePanelId, sceneTabId } from "./SceneNavigation";
+import { useT } from "@/lib/i18n";
 
 /**
  * 3단계 — 장면과 컷, 그리고 이 작품이 쓸 **장소·에셋**.
@@ -27,9 +31,19 @@ export default function StepScenes({
   draft,
   onChange,
   controlCutRequest,
+  onControlRequestHandled,
+  selectedSceneId,
+  onSelectScene,
+  editorStateKey,
+  getCurrentDraft,
 }: {
   draft: ProjectDraft;
+  selectedSceneId: string | null;
+  onSelectScene: (id: string) => void;
+  editorStateKey: string;
+  getCurrentDraft: () => ProjectDraft;
   controlCutRequest?: { cutId: string } | null;
+  onControlRequestHandled?: () => void;
   /**
    * 초안을 고칩니다. **지금 값을 받아 다음 값을 만드는 함수** 여야 합니다.
    *
@@ -38,32 +52,24 @@ export default function StepScenes({
    */
   onChange: (updater: (current: ProjectDraft) => Partial<ProjectDraft>) => void;
 }) {
-  /*
-    **장면은 기본으로 전부 펴 둡니다.**
-
-    여태 첫 장면 하나만 펴 두었더니, 장면이 넷이면 나머지 셋은 컷이 몇 개인지도 안 보였습니다.
-    여기는 «훑어보는 자리» 가 아니라 컷을 만드는 자리라 다 보이는 편이 맞습니다.
-    닫아 둔 것만 기억합니다 — 새 장면이 생기면 저절로 펴집니다.
-  */
-  const [closedIds, setClosedIds] = useState<string[]>([]);
-  const isOpen = (id: string) => !closedIds.includes(id);
-  const toggle = (id: string) =>
-    setClosedIds((now) => (now.includes(id) ? now.filter((item) => item !== id) : [...now, id]));
+  const t = useT();
+  const handledControlRequest = useRef<{ cutId: string } | null | undefined>(null);
   useEffect(() => {
-    if (!controlCutRequest) return;
+    if (!controlCutRequest || handledControlRequest.current === controlCutRequest) return;
     const scene = draft.scenes.find(item => item.cuts.some(cut => cut.id === controlCutRequest.cutId));
-    if (scene) setClosedIds(current => current.filter(id => id !== scene.id));
-  }, [controlCutRequest]);
-  /*
-    장소 칸은 **장면이 하나도 없을 때만 펴 둡니다.**
-    새 작품은 장소부터
-    만들지만, 장면이 쌓인 뒤로는 컷이 먼저 보여야 합니다.
-  */
+    if (!scene) return;
+    handledControlRequest.current = controlCutRequest;
+    sceneEditorStore.disclose(editorStateKey, scene.id, "scene", true);
+    sceneEditorStore.disclose(editorStateKey, controlCutRequest.cutId, "cut", true);
+    onSelectScene(scene.id);
+    // 소비된 화면 이동 요청은 부모에서 비웁니다. 단계 재방문이 수동 선택을 덮지 않습니다.
+    onControlRequestHandled?.();
+  }, [controlCutRequest, draft.scenes, onSelectScene, editorStateKey, onControlRequestHandled]);
 
   const add = () => {
     const created = newScene();
     onChange((current) => ({ scenes: [...current.scenes, created] }));
-    setClosedIds((now) => now.filter((item) => item !== created.id));
+    onSelectScene(created.id);
   };
 
   /*
@@ -77,15 +83,16 @@ export default function StepScenes({
   const [tutorialCutId, setTutorialCutId] = useState<string | null>(null);
   useEffect(() => {
     const onWant = () => {
-      const scene = draft.scenes[0];
+      const scene = draft.scenes.find(item => item.id === selectedSceneId) ?? draft.scenes[0];
       if (!scene) {
         const created = newScene();
         onChange((current) => ({ scenes: [...current.scenes, created] }));
-        setClosedIds((now) => now.filter((item) => item !== created.id));
+        onSelectScene(created.id);
         setTutorialCutId(created.cuts[0]?.id ?? null);
         return;
       }
-      setClosedIds((now) => now.filter((item) => item !== scene.id));
+      sceneEditorStore.disclose(editorStateKey, scene.id, "scene", true);
+      onSelectScene(scene.id);
       const cut = scene.cuts[0];
       if (cut) {
         setTutorialCutId(cut.id);
@@ -101,7 +108,7 @@ export default function StepScenes({
     };
     window.addEventListener(TUTORIAL_CUT_EVENT, onWant);
     return () => window.removeEventListener(TUTORIAL_CUT_EVENT, onWant);
-  }, [draft.scenes, onChange]);
+  }, [draft.scenes, onChange, selectedSceneId, onSelectScene, editorStateKey]);
 
   const patchScene = (id: string, updater: (current: Scene) => Partial<Scene>) =>
     onChange((current) => ({
@@ -168,19 +175,23 @@ export default function StepScenes({
         </div>
       )}
 
+      {/* 탭의 관계 대상만 남깁니다. 다른 씬의 컷·스토리보드 본문은 마운트하지 않습니다. */}
       {draft.scenes.map((scene, index) => (
-        <SceneCard
-          key={scene.id}
+        <div key={scene.id} id={scenePanelId(scene.id)} role="tabpanel" aria-labelledby={sceneTabId(scene.id)}
+          hidden={scene.id !== selectedSceneId} tabIndex={0} className="outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+          style={{ scrollMarginTop: "var(--scene-scroll-offset, 160px)" }}>
+        {scene.id === selectedSceneId && <SceneCard
           scene={scene}
           index={index}
           draft={draft}
-          open={isOpen(scene.id)}
-          onToggle={() => toggle(scene.id)}
+          editorStateKey={editorStateKey}
+          getCurrentDraft={getCurrentDraft}
           onPatch={(updater) => patchScene(scene.id, updater)}
           onChange={onChange}
           onRemove={() => void remove(scene)}
           tutorialCutId={tutorialCutId}
-        />
+        />}
+        </div>
       ))}
 
       {/* 빈 상태 박스 안에 이미 같은 버튼이 있습니다. 둘 다 두면 어느 쪽을
@@ -200,7 +211,7 @@ export default function StepScenes({
       {/* 하단 상태줄 — 컷이 접혀 있으면 프롬프트가 어디 있는지 안 보입니다. */}
       {draft.scenes.length > 0 && (
         <p className="text-center text-[10px]" style={{ color: "oklch(0.42 0.01 265)" }}>
-          컷을 클릭하면 아래로 펼쳐져 프롬프트가 표시됩니다
+          {t("컷과 연출 설정은 기본으로 펼쳐집니다. 화살표로 접거나 다시 펼칠 수 있습니다.")}
         </p>
       )}
     </div>
@@ -211,8 +222,8 @@ function SceneCard({
   scene,
   index,
   draft,
-  open,
-  onToggle,
+  editorStateKey,
+  getCurrentDraft,
   onPatch,
   onChange,
   onRemove,
@@ -221,16 +232,18 @@ function SceneCard({
   scene: Scene;
   index: number;
   draft: ProjectDraft;
-  open: boolean;
+  editorStateKey: string;
+  getCurrentDraft: () => ProjectDraft;
   /** 튜토리얼이 펴 두라고 고른 컷. 그 컷이 이 장면에 있으면 펴집니다. */
   tutorialCutId: string | null;
-  onToggle: () => void;
   onPatch: (updater: (current: Scene) => Partial<Scene>) => void;
   /** 초안 전체를 고칩니다 — 구도잡기에서 만든 장소는 장면이 아니라 프로젝트에 붙습니다. */
   onChange: (updater: (current: ProjectDraft) => Partial<ProjectDraft>) => void;
   onRemove: () => void;
 }) {
   const { projectContext } = useProjectMedia();
+  const [open, setOpen] = useEditorDisclosure(editorStateKey, scene.id, "scene");
+  const t = useT();
 
   const patchCut = (cutId: string, patch: Partial<Cut> | ((cut: Cut) => Partial<Cut>)) =>
     onPatch((current) => ({
@@ -266,7 +279,7 @@ function SceneCard({
       style={{ background: "oklch(0.14 0.009 265)", border: "1px solid oklch(1 0 0 / 8%)" }}
     >
       <div className="flex items-center gap-2 px-3 py-2.5">
-        <button type="button" onClick={onToggle} className="shrink-0" aria-label="펼치기">
+        <button type="button" onClick={() => setOpen(!open)} className="shrink-0" aria-label={t(open ? "장면 접기" : "장면 펼치기")} aria-expanded={open}>
           {open ? (
             <ChevronDown className="h-4 w-4" style={{ color: "oklch(0.60 0.01 265)" }} />
           ) : (
@@ -332,6 +345,8 @@ function SceneCard({
           {scene.cuts.map((cut) => (
             <CutCard
               key={cut.id}
+              editorStateKey={editorStateKey}
+              getCurrentDraft={getCurrentDraft}
               tutorialOpen={cut.id === tutorialCutId}
               cut={cut}
               scene={scene}
@@ -416,6 +431,8 @@ function SceneCard({
             순서라, 위에 두면 화면을 위아래로 오가게 됩니다.
           */}
           <SceneStoryboard
+            editorStateKey={editorStateKey}
+            getCurrentDraft={getCurrentDraft}
             scene={scene}
             index={index}
             onPatch={onPatch}

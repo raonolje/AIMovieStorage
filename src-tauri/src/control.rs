@@ -1,6 +1,7 @@
 //! MCP는 켜진 앱의 편집기만 조종합니다. stdio 프로세스는 저장본을 직접 고치지 않습니다.
 use crate::{LockSafe, Res};
 use crate::control_lifecycle::{Discovery, ForwarderLifecycle, session_id};
+use crate::control_diagnostics::{ControlDiagnostic, closed_diagnostic, connection_failure, discovery_read_failure};
 use fs2::FileExt;
 use rmcp::{
     model::*,
@@ -106,12 +107,19 @@ pub struct ControlState {
     host: Mutex<Option<Host>>,
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
     journal: Mutex<Option<File>>,
+    frontend_ready: std::sync::atomic::AtomicBool,
+}
+
+#[tauri::command]
+pub fn control_frontend_ready(state: tauri::State<ControlState>) {
+    // 초기화 진행 여부와 사용자가 선택한 켜짐 상태는 별개입니다. 선택이나 토큰을 바꾸지 않습니다.
+    state.frontend_ready.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 #[tauri::command]
 pub fn control_status(state: tauri::State<ControlState>) -> Res<Value> {
     Ok(
-        json!({"enabled":state.host.lock_safe().is_some(), "command":std::env::current_exe().map_err(|e|e.to_string())?, "args":["--mcp"], "edition":crate::edition::EDITION, "mcpLifecycle":"bound-session-normal-close-v1"}),
+        json!({"enabled":state.host.lock_safe().is_some(), "frontendReady":state.frontend_ready.load(std::sync::atomic::Ordering::SeqCst), "command":std::env::current_exe().map_err(|e|e.to_string())?, "args":["--mcp"], "edition":crate::edition::EDITION, "mcpLifecycle":"bound-session-normal-close-v1"}),
     )
 }
 
@@ -201,7 +209,7 @@ async fn serve_connection(
     let mut line = String::new();
     tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut line))
         .await
-        .map_err(|_| "연결 시간 초과")?
+        .map_err(|_| ControlDiagnostic::RequestTimeout.message())?
         .map_err(|e| e.to_string())?;
     if !line.ends_with('\n') {
         return Err("요청이 너무 크거나 끝나지 않았습니다.".into());
@@ -225,18 +233,23 @@ async fn serve_connection(
         if !host.as_ref().is_some_and(|host| host.token == token) {
             return Err("조종기 연결이 닫혔거나 바뀌었습니다.".into());
         }
-        pending.lock_safe().insert(id.clone(), tx);
-        app.emit(
-            "app-control-request",
-            json!({"id":id,"method":request["method"],"params":request["params"]}),
-        )
+        // 인증과 현재 host 일치가 확인된 뒤에만 준비 상태를 판단합니다. 오래된 endpoint는 추측하지 않습니다.
+        if !state.frontend_ready.load(std::sync::atomic::Ordering::SeqCst) {
+            Err(ControlDiagnostic::StartupNotReady.message())
+        } else {
+            pending.lock_safe().insert(id.clone(), tx);
+            app.emit(
+                "app-control-request",
+                json!({"id":id,"method":request["method"],"params":request["params"]}),
+            ).map_err(|error| error.to_string())
+        }
     };
     let result = if let Err(e) = emitted {
         Err(e.to_string())
     } else {
         tokio::time::timeout(Duration::from_secs(90), rx)
             .await
-            .map_err(|_| "앱 응답 시간 초과. 작업 상태를 조회한 뒤 재시도하세요.".to_string())
+            .map_err(|_| ControlDiagnostic::ResponseTimeout.message())
             .and_then(|r| r.map_err(|e| e.to_string()))
     };
     pending.lock_safe().remove(&id);
@@ -305,37 +318,35 @@ impl AppMcp {
     fn begin_request(&self) -> Res<ForwarderRequest> { self.lifecycle.lock_safe().begin()?; Ok(ForwarderRequest(self.lifecycle.clone())) }
 }
 async fn forward(method: &str, params: Value) -> Res<(Value, String)> {
+    forward_at(&directory()?.join("host.json"), method, params, Duration::from_secs(5), Duration::from_secs(95)).await
+}
+
+async fn forward_at(path: &std::path::Path, method: &str, params: Value, connect_timeout: Duration, response_timeout: Duration) -> Res<(Value, String)> {
     let discovery: Discovery = serde_json::from_slice(
-        &fs::read(directory()?.join("host.json"))
-            .map_err(|_| "AIMovieStorage를 열고 설정에서 외부 조종기를 켜세요.")?,
-    )
-    .map_err(|e| e.to_string())?;
-    if discovery.currently_closed() { return Err("이 GUI 세션이 정상 종료됐습니다. 앱을 정상 시작한 뒤 MCP를 다시 연결하세요.".into()); }
-    let stream = TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, discovery.port))
-        .await
-        .map_err(|_| "앱에 연결하지 못했습니다. 설정에서 외부 조종기를 다시 켜세요.")?;
+        &fs::read(path).map_err(|error| discovery_read_failure(error.kind()).message())?,
+    ).map_err(|_| ControlDiagnostic::DiscoveryInvalid.message())?;
+    if let Some(issue) = closed_diagnostic(&discovery) { return Err(issue.message()); }
+    let stream = connect_with_timeout(TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, discovery.port)), connect_timeout).await?;
     let (reader, mut writer) = stream.into_split();
-    let mut bytes =
-        serde_json::to_vec(&json!({"token":discovery.token,"method":method,"params":params}))
-            .map_err(|e| e.to_string())?;
+    let mut bytes = serde_json::to_vec(&json!({"token":discovery.token,"method":method,"params":params}))
+        .map_err(|_| ControlDiagnostic::RequestWriteFailed.message())?;
     bytes.push(b'\n');
-    writer.write_all(&bytes).await.map_err(|e| e.to_string())?;
+    writer.write_all(&bytes).await.map_err(|_| ControlDiagnostic::RequestWriteFailed.message())?;
     let mut line = String::new();
-    tokio::time::timeout(
-        Duration::from_secs(95),
-        BufReader::new(reader.take(RESPONSE_LIMIT)).read_line(&mut line),
-    )
-    .await
-    .map_err(|_| "앱 응답 시간 초과")?
-    .map_err(|e| e.to_string())?;
-    if !line.ends_with('\n') {
-        return Err("앱 응답을 끝까지 받지 못했습니다.".into());
-    }
-    let response: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
-    if let Some(error) = response["error"].as_str() {
-        return Err(error.into());
-    }
+    tokio::time::timeout(response_timeout, BufReader::new(reader.take(RESPONSE_LIMIT)).read_line(&mut line))
+        .await
+        .map_err(|_| ControlDiagnostic::ResponseTimeout.message())?
+        .map_err(|_| ControlDiagnostic::ResponseReadFailed.message())?;
+    if !line.ends_with('\n') { return Err(ControlDiagnostic::ResponseIncomplete.message()); }
+    let response: Value = serde_json::from_str(&line).map_err(|_| ControlDiagnostic::ResponseInvalid.message())?;
+    if let Some(error) = response["error"].as_str() { return Err(error.into()); }
     Ok((response["result"].clone(), session_id(&discovery.token)))
+}
+
+async fn connect_with_timeout(connection: impl std::future::Future<Output = std::io::Result<TcpStream>>, deadline: Duration) -> Res<TcpStream> {
+    tokio::time::timeout(deadline, connection).await
+        .map_err(|_| ControlDiagnostic::ConnectionTimeout.message())?
+        .map_err(|error| connection_failure(error.kind()).message())
 }
 
 impl ServerHandler for AppMcp {
@@ -436,6 +447,91 @@ pub fn run_mcp() -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn pending_tcp_connection_is_bounded_and_does_not_claim_disabled() {
+        let result = connect_with_timeout(std::future::pending::<std::io::Result<TcpStream>>(), Duration::from_millis(10)).await;
+        let error = result.unwrap_err(); assert!(error.starts_with("[connection_timeout]"));
+        assert!(!error.contains("앱 조종 켜기"));
+    }
+    #[tokio::test]
+    async fn missing_discovery_is_unknown_without_setting_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("host.json");
+        let error = forward_at(&path, "tools/list", json!({}), Duration::from_secs(1), Duration::from_secs(1)).await.unwrap_err();
+        assert!(error.starts_with("[discovery_unavailable]"));
+        assert!(!error.contains("앱 조종 켜기"));
+        assert!(!path.exists());
+    }
+    #[tokio::test]
+    async fn malformed_discovery_does_not_export_private_input() {
+        let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("host.json");
+        let bytes = br#"{"token":"private-should-not-leak","port":"invalid"}"#;
+        fs::write(&path, bytes).unwrap();
+        let error = forward_at(&path, "tools/list", json!({}), Duration::from_secs(1), Duration::from_secs(1)).await.unwrap_err();
+        assert!(error.starts_with("[discovery_invalid]"));
+        assert!(!error.contains("private-should-not-leak"));
+        assert_eq!(fs::read(path).unwrap(), bytes);
+    }
+    #[tokio::test]
+    async fn confirmed_disabled_and_normal_closed_sessions_are_distinct() {
+        let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("host.json");
+        for (reason, code, enable_hint) in [("control_disabled", "control_disabled", true), ("normal_shutdown", "session_closed", false)] {
+            let mut entry = Discovery::active(1, "private-fixture".into(), None); entry.close(reason).unwrap();
+            atomic_json(&path, &serde_json::to_value(entry).unwrap()).unwrap(); let before = fs::read(&path).unwrap();
+            let error = forward_at(&path, "tools/list", json!({}), Duration::from_secs(1), Duration::from_secs(1)).await.unwrap_err();
+            assert!(error.starts_with(&format!("[{code}]"))); assert_eq!(error.contains("앱 조종 켜기"), enable_hint);
+            assert!(!error.contains("private-fixture")); assert_eq!(fs::read(&path).unwrap(), before);
+        }
+    }
+    #[tokio::test]
+    async fn stale_refused_endpoint_does_not_claim_disabled_or_initializing() {
+        let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("host.json");
+        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let entry = Discovery::active(listener.local_addr().unwrap().port(), "private-fixture".into(), None);
+        atomic_json(&path, &serde_json::to_value(entry).unwrap()).unwrap(); drop(listener);
+        let before = fs::read(&path).unwrap();
+        let error = forward_at(&path, "tools/list", json!({}), Duration::from_secs(5), Duration::from_secs(1)).await.unwrap_err();
+        assert!(error.starts_with("[connection_refused]"), "error={error}"); assert!(!error.contains("앱 조종 켜기"));
+        assert!(!error.contains("[startup_not_ready]")); assert!(!error.contains("private-fixture"));
+        assert_eq!(fs::read(&path).unwrap(), before);
+    }
+    async fn diagnostic_fixture(reply: Option<Vec<u8>>) -> String {
+        let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("host.json");
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        atomic_json(&path, &serde_json::to_value(Discovery::active(listener.local_addr().unwrap().port(), "fixture".into(), None)).unwrap()).unwrap();
+        let bridge = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap(); let (reader, mut writer) = socket.into_split();
+            let mut line = String::new(); BufReader::new(reader).read_line(&mut line).await.unwrap();
+            let request: Value = serde_json::from_str(&line).unwrap(); assert_eq!(request["token"], "fixture");
+            if let Some(bytes) = reply { writer.write_all(&bytes).await.unwrap(); }
+            else { tokio::time::sleep(Duration::from_millis(250)).await; }
+        });
+        let error = forward_at(&path, "tools/list", json!({}), Duration::from_secs(1), Duration::from_millis(100)).await.unwrap_err();
+        bridge.await.unwrap(); error
+    }
+    #[tokio::test]
+    async fn confirmed_host_not_ready_is_distinct_from_response_timeout() {
+        let issue = ControlDiagnostic::StartupNotReady;
+        let error = diagnostic_fixture(Some(response_bytes(&json!({"error": issue.message(), "errorCode": issue.code()}), 4096).unwrap())).await;
+        assert!(error.starts_with("[startup_not_ready]")); assert!(!error.contains("앱 조종 켜기"));
+        let error = diagnostic_fixture(None).await;
+        assert!(error.starts_with("[response_timeout]")); assert!(!error.contains("[startup_not_ready]"));
+    }
+    #[tokio::test]
+    async fn incomplete_or_invalid_response_has_no_false_setting_advice() {
+        let error = diagnostic_fixture(Some(b"{\"result\":".to_vec())).await;
+        assert!(error.starts_with("[response_incomplete]")); assert!(!error.contains("앱 조종 켜기"));
+        let error = diagnostic_fixture(Some(b"invalid-private-fixture\n".to_vec())).await;
+        assert!(error.starts_with("[response_invalid]")); assert!(!error.contains("invalid-private-fixture"));
+    }
+    #[test]
+    fn frontend_readiness_defaults_false_without_enabling_host() {
+        let state = ControlState::default();
+        assert!(!state.frontend_ready.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(state.host.lock_safe().is_none());
+        state.frontend_ready.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(state.host.lock_safe().is_none());
+    }
     #[test]
     fn oversized_response_is_a_complete_small_error_not_a_truncated_frame() {
         let value = json!({"result": {"content": [{"type": "text", "text": "가".repeat(20_000)}]}});

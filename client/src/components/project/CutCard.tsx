@@ -5,6 +5,8 @@ import { musicOf } from "@/lib/compositionEdit";
 import { HOLDS_PLANNER } from "@/lib/useTutorialPanel";
 import { aspectNumberOf } from "@/components/composition/planner/PlannerChrome";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useEditorActivity, useEditorDisclosure, useEditorGroups, useEditorSessionValue } from "./useSceneSelection";
+import { currentCutPromptState } from "@/lib/sceneEditorPromptSnapshot";
 import { CompositionControlError, registerCompositionOpener } from "@/lib/compositionControl";
 import { cutCompositionPatch } from "@/lib/cutCompositionSave";
 import { projectFolderName } from "@/lib/localProjectStore";
@@ -157,6 +159,8 @@ const PICK_ACCENT = {
  * 앵글이 나와요. 두 곳에 두면 반드시 어긋나서, **읽기 전용으로만** 보여 줍니다.
  */
 export default function CutCard({
+  editorStateKey,
+  getCurrentDraft,
   tutorialOpen,
   cut,
   scene,
@@ -183,6 +187,8 @@ export default function CutCard({
   onSaveRoomPreset,
   onRemoveRoomPreset,
 }: {
+  editorStateKey: string;
+  getCurrentDraft: () => import("@/lib/projectTypes").ProjectDraft;
   cut: Cut;
   scene: Scene;
   scenes: Scene[];
@@ -257,13 +263,13 @@ export default function CutCard({
 }) {
   const { projectName, sharedAssets, commitProjectChange } = useProjectMedia();
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useEditorDisclosure(editorStateKey, cut.id, "cut");
 
   // 튜토리얼이 고른 컷은 폅니다. 접는 것까지 하지는 않습니다 — 사람이 보던 것을 닫아 버리면 안 됩니다.
   useEffect(() => {
     if (tutorialOpen) setOpen(true);
   }, [tutorialOpen]);
-  const [cutBusy, setCutBusy] = useState(false);
+  const [cutBusy, setCutBusy] = useEditorActivity(editorStateKey, cut.id, "image-prompt");
   const apiReady = useApiReady();
 
   /** LlmRequestButton 과 API 요청이 **같은 재료**를 쓰게 한 곳에 둡니다. */
@@ -279,8 +285,7 @@ export default function CutCard({
   const promptProject = useProjectMedia().promptProject;
   const imageSelection = resolvePromptSelection("image", { workflowTarget: cut.promptWorkflow, model: cut.promptModel || imageModel, engine: cut.promptEngine, project: promptProject, platform: getTargetPlatform() });
   const videoSelection = resolvePromptSelection("video", { workflowTarget: cut.videoPromptWorkflow, model: cut.videoPromptModel || videoModel, engine: cut.videoPromptEngine, project: promptProject, platform: getTargetPlatform() });
-  const latestPromptSelection = useRef({ cut, imageSelection, videoSelection });
-  latestPromptSelection.current = { cut, imageSelection, videoSelection };
+  const latestPromptSelection = () => currentCutPromptState(getCurrentDraft(), cut.id, getTargetPlatform());
   const cutRequestData = () =>
     ({ generationTarget: imageSelection, ...cutRequestPayload({
       projectFacts: context?.facts ?? null,
@@ -322,9 +327,14 @@ export default function CutCard({
         data: cutRequestData(),
         images: cut.guideImage ? [cut.guideImage] : [],
       });
-      assertPromptSnapshot(promptStamp(imageSelection), promptStamp(latestPromptSelection.current.imageSelection));
-      assertPromptSnapshot([cut.promptKo, cut.promptEn], [latestPromptSelection.current.cut.promptKo, latestPromptSelection.current.cut.promptEn]);
-      await keepPrompt(result, "프롬프트 작성");
+      const latest = latestPromptSelection();
+      assertPromptSnapshot(promptStamp(imageSelection), promptStamp(latest.imageSelection));
+      assertPromptSnapshot([cut.promptKo, cut.promptEn], [latest.cut.promptKo, latest.cut.promptEn]);
+      await keepPrompt(result, "프롬프트 작성", () => {
+        const current = latestPromptSelection();
+        assertPromptSnapshot(promptStamp(imageSelection), promptStamp(current.imageSelection));
+        assertPromptSnapshot([cut.promptKo, cut.promptEn, cut.negativeKo, cut.negativeEn], [current.cut.promptKo, current.cut.promptEn, current.cut.negativeKo, current.cut.negativeEn]);
+      });
       patchCut(() => ({ promptModelStamp: promptStamp(imageSelection) }));
       toast.success("컷 프롬프트를 받았습니다.");
     } catch (error) {
@@ -351,7 +361,7 @@ export default function CutCard({
   );
   /** 6면 세트 카드를 누르면 여섯 면을 넘겨 봅니다 */
   const [viewingSet, setViewingSet] = useState<LightboxImage[] | null>(null);
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const [openGroups, setOpenGroups] = useEditorGroups(editorStateKey, cut.id);
 
   /**
    * 구도를 레퍼런스 삼아 마그니픽에서 뽑기.
@@ -448,7 +458,7 @@ export default function CutCard({
     return gatherStoredCutMagnificRefs({ cut, characters, backgrounds, background, sharedAssets, guidePath, platePath });
   };
 
-  const [sendingShot, setSendingShot] = useState(false);
+  const [sendingShot, setSendingShot] = useEditorActivity(editorStateKey, cut.id, "image-compose");
   const sendCompositionToMagnific = async (
     prompt: string,
     lang: "ko" | "en" = "en",
@@ -635,7 +645,7 @@ export default function CutCard({
     프롬프트를 새로 받으면 손으로 고친 문장까지 같이 날아갑니다. 바뀐 것이 그림 이름
     하나일 때는 이름만 갈아 끼웁니다 — 키 이미지 두 칸과 영상 두 칸을 한 번에.
   */
-  const [relinking, setRelinking] = useState(false);
+  const [relinking, setRelinking] = useEditorActivity(editorStateKey, cut.id, "relink");
   /*
     토스트의 단추는 **나중에** 눌립니다. 그때 부를 함수가 지금 렌더의 `cut` 을 물고 있으면
     그 사이 바뀐 선택이 반영되지 않습니다. 늘 최신 것을 부르도록 손잡이만 둡니다.
@@ -705,7 +715,8 @@ export default function CutCard({
    */
   const keepPrompt = async (
     made: { ko: string; en: string; negativeKo: string; negativeEn: string },
-    how: string,
+      how: string,
+      validate?: () => void,
   ) => {
     /*
       **영문에 한국어가 섞였으면 알려 줍니다.**
@@ -742,7 +753,8 @@ export default function CutCard({
     });
     // 값이 아니라 함수로 — 재료를 모으는 사이 도착한 다른 답을 지우면 안 됩니다.
     // 기록에는 칸에 들어간 그대로(태그 이어진 글) — 되돌릴 때 태그까지 같이 돌아와야 합니다(`withCutPromptResult`).
-    patchCut((current) => withCutPromptResult(current, made, { ko, en }, how, note));
+      validate?.();
+      patchCut((current) => withCutPromptResult(current, made, { ko, en }, how, note));
   };
 
   const applyRulePrompt = async () => {
@@ -791,9 +803,9 @@ export default function CutCard({
 
      그림 프롬프트와 **칸을 따로 둡니다**. 한 칸에 섞으면 그림을 뽑을 때 「0~2초에
      고개를 든다」 같은 시간 이야기가 끼어들어 자세가 흐려집니다. */
-  const [sendingVideo, setSendingVideo] = useState(false);
-  const [magnificVideoResolution, setMagnificVideoResolution] = useState<MagnificVideoResolution>("1080p");
-  const [magnificMusicChoice, setMagnificMusicChoice] = useState<boolean | null>(null);
+  const [sendingVideo, setSendingVideo] = useEditorActivity(editorStateKey, cut.id, "video-compose");
+  const [magnificVideoResolution, setMagnificVideoResolution] = useEditorSessionValue<MagnificVideoResolution>(editorStateKey, cut.id, "video-resolution", "1080p");
+  const [magnificMusicChoice, setMagnificMusicChoice] = useEditorSessionValue<boolean | null>(editorStateKey, cut.id, "video-music", null);
   const magnificMusicEnabled = magnificMusicChoice ?? Boolean(cut.composition && musicOf(cut.composition));
   let continuity: ReturnType<typeof resolveCutContinuity> = null;
   let continuityError = "";
@@ -890,9 +902,10 @@ export default function CutCard({
    * 여태는 맨 글로 덮어써서, 이어 둔 태그가 「영상 프롬프트」 를 누를 때마다 풀렸습니다(2026-09-21 실측).
    * 재료를 못 모아도 지은 글은 넣습니다. 값이 아니라 함수로 — 기다리는 사이 도착한 답을 지우면 안 됩니다.
    */
-  const keepVideoPrompt = async (made: { ko: string; en: string }) => {
+  const keepVideoPrompt = async (made: { ko: string; en: string }, validate?: () => void) => {
     const input = await gatherLinkInput().then(link => cutVideoLinkInput(cut, link, continuity, characters)).catch(() => undefined);
-    const source = (text: string) => continuity ? relinkContinuityTags(text, continuity.sourceCut, continuity.video) : text;
+      const source = (text: string) => continuity ? relinkContinuityTags(text, continuity.sourceCut, continuity.video) : text;
+    validate?.();
     patchCut((current) => withCutVideoPrompt(current, {
       ko: ensureVoicePrompt(input ? relinkPromptText(source(made.ko), input, "ko") : made.ko,
         { cut: current, scenes, characters, lang: "ko" }),
@@ -918,7 +931,7 @@ export default function CutCard({
     «누가 어디 서고 카메라가 어떻게 가는가» 는 알아도 상황·표정·공기는 지어낼 수 없습니다.
     그림 칸의 「프롬프트 작성」 과 같은 자리·같은 모양으로 둡니다(규칙 1). 뼈대는 규칙이, 살은 LLM 이.
   */
-  const [videoBusy, setVideoBusy] = useState(false);
+  const [videoBusy, setVideoBusy] = useEditorActivity(editorStateKey, cut.id, "video-prompt");
   const runVideoPrompt = async () => {
     if (videoBusy) return;
     if (continuityError) { toast.error(continuityError); return; }
@@ -954,9 +967,14 @@ export default function CutCard({
           useComposition,
         }),
       });
-      assertPromptSnapshot(promptStamp(videoSelection), promptStamp(latestPromptSelection.current.videoSelection));
-      assertPromptSnapshot([cut.videoPromptKo, cut.videoPromptEn], [latestPromptSelection.current.cut.videoPromptKo, latestPromptSelection.current.cut.videoPromptEn]);
-      await keepVideoPrompt(result);
+      const latest = latestPromptSelection();
+      assertPromptSnapshot(promptStamp(videoSelection), promptStamp(latest.videoSelection));
+      assertPromptSnapshot([cut.videoPromptKo, cut.videoPromptEn], [latest.cut.videoPromptKo, latest.cut.videoPromptEn]);
+      await keepVideoPrompt(result, () => {
+        const current = latestPromptSelection();
+        assertPromptSnapshot(promptStamp(videoSelection), promptStamp(current.videoSelection));
+        assertPromptSnapshot([cut.videoPromptKo, cut.videoPromptEn], [current.cut.videoPromptKo, current.cut.videoPromptEn]);
+      });
       patchCut(() => ({ videoPromptModelStamp: promptStamp(videoSelection) }));
       toast.success(`컷 ${cut.order} 영상 프롬프트를 받았습니다.`, {
         description: `러닝타임 ${skeleton.seconds.toFixed(1)}초 · 규칙 뼈대 위에 상황·환경·동작을 채웠습니다`,
@@ -1143,7 +1161,7 @@ export default function CutCard({
           type="button"
           onClick={() => setOpen(!open)}
           className="shrink-0"
-          aria-label="펼치기"
+            aria-label={t(open ? "컷 접기" : "컷 펼치기")}
           // 접힌 컷은 머리줄만 보입니다 — 펴야 아래 자리들이 생깁니다.
           data-tour-switch="cut-frame cut-switches cut-summary cut-refs cut-style-toggles cut-dialogue cut-background-motion cut-prompt-section cut-prompt-write cut-video-section cut-video-prompt cut-ref-video-list"
           data-tour-switch-kind="expand"
@@ -1307,9 +1325,9 @@ export default function CutCard({
           style={{ borderColor: "oklch(1 0 0 / 8%)" }}
         >
           {/* ── 프레임 + 설명 ────────────────────────────────────────── */}
-          <div className="flex gap-3">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row">
             {cut.guideImage ? (
-              <div className="relative w-[150px] shrink-0" data-tour="cut-frame">
+              <div className="relative w-[150px] max-w-full shrink-0" data-tour="cut-frame">
                 <img
                   src={cut.guideImage}
                   alt="구도 참고"
@@ -1337,7 +1355,7 @@ export default function CutCard({
                 type="button"
                 onClick={openPlanner}
                 data-tour="cut-frame"
-                className="flex h-[110px] w-[150px] shrink-0 flex-col items-center justify-center gap-1 rounded-md text-[10px]"
+                className="flex h-[110px] w-[150px] max-w-full shrink-0 flex-col items-center justify-center gap-1 rounded-md text-[10px]"
                 style={{
                   background: "oklch(0.10 0.006 265)",
                   border: "1px dashed oklch(0.62 0.22 290 / 40%)",
