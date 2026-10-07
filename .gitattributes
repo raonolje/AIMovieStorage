@@ -6,3 +6,8 @@ client/src/prompts/**/*.md text eol=lf
 src-tauri/resources/native_a2v/sdk_candidate/** -text
 # Preserve this upstream comment's existing trailing space without changing its hash.
 src-tauri/resources/native_a2v/sdk_candidate/ltx_core/model/transformer/transformer.py whitespace=-blank-at-eol
+
+# 검토 graph와 registry의 원문 SHA는 Windows 체크아웃에서도 같아야 합니다.
+src-tauri/resources/comfy*.json -text
+src-tauri/resources/comfy-v2-graphs/** -text
+client/src/lib/workflowEvidence/** -text

@@ -1,9 +1,15 @@
 use super::*;
 struct Fixture {root:tempfile::TempDir,policy:LocalPolicy,bytes:Vec<u8>,envelope:Value}
+// 실제 경로를 쓰되 TTS bundle 이름의 대소문자는 유지합니다.
+fn fixture_real_path(path:&Path)->String {
+    let real=fs::canonicalize(path).unwrap();let text=real.to_string_lossy();
+    text.strip_prefix(r"\\?\").unwrap_or(&text).into()
+}
 fn fixture(class:&str)->Fixture {
     let root=tempfile::tempdir().unwrap();let mut bundles=vec![];
     let roles=if class=="SDNQSampler"{vec![("diffusers-model","cpu-diffusers")]}else{vec![("tts-model",match class{"FB_Qwen3TTSCustomVoice"=>"Qwen3-TTS-12Hz-1.7B-CustomVoice","FB_Qwen3TTSVoiceDesign"=>"Qwen3-TTS-12Hz-1.7B-VoiceDesign",_=>"Qwen3-TTS-12Hz-1.7B-Base"}),("tts-tokenizer","Qwen3-TTS-Tokenizer-12Hz")]};
-    for (role,name) in roles{let dir=root.path().join(name);fs::create_dir(&dir).unwrap();let mut files=vec![];for name in ["config.json","model.safetensors"]{let bytes=b"CPU synthetic bytes; not a model";fs::write(dir.join(name),bytes).unwrap();files.push(BundleFile{relative_path:name.into(),sha256:sha(bytes),bytes:bytes.len() as u64});}let tree=sha(&serde_json::to_vec(&files).unwrap());bundles.push(Bundle{registered_bundle_id:role.into(),role:role.into(),exact_real_path:dir.to_string_lossy().into(),tree_sha256:tree,files});}
+    // CI 임시 폴더의 별칭 대신 실제 경로를 등록해 운영의 exact-real-path 검증을 그대로 시험합니다.
+    for (role,name) in roles{let dir=root.path().join(name);fs::create_dir(&dir).unwrap();let mut files=vec![];for name in ["config.json","model.safetensors"]{let bytes=b"CPU synthetic bytes; not a model";fs::write(dir.join(name),bytes).unwrap();files.push(BundleFile{relative_path:name.into(),sha256:sha(bytes),bytes:bytes.len() as u64});}let tree=sha(&serde_json::to_vec(&files).unwrap());bundles.push(Bundle{registered_bundle_id:role.into(),role:role.into(),exact_real_path:fixture_real_path(&dir),tree_sha256:tree,files});}
     let mut inputs=json!({"text":"CPU only","model_choice":"1.7B"});
     if class=="SDNQSampler"{inputs=json!({"prompt":"CPU only","model_selection":"[Custom Path]","custom_model_path":bundles[0].exact_real_path,"auto_download":false,"num_frames":1,"use_quantized_matmul":false,"use_xformers":false});for i in 1..=5{let prefix=if i==1{"lora".into()}else{format!("lora{i}")};inputs[format!("{prefix}_selection")]=json!("[None]");inputs[format!("{prefix}_custom_path")]=json!("");inputs[format!("{prefix}_strength")]=json!(0);}}
     let graph=json!({"1":{"class_type":class,"inputs":inputs}});let bytes=serde_json::to_vec(&graph).unwrap();
