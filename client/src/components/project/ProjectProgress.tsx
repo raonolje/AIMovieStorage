@@ -69,7 +69,7 @@ export default function ProjectProgress({ draft, step, maxStep, goStep, selected
       <div className="min-w-0 overflow-x-auto" style={{ scrollbarWidth: "thin", scrollbarColor: "oklch(0.50 0.10 290) oklch(1 0 0 / 4%)" }}>
         <div className="min-w-max"><GlobalNav /></div>
       </div>
-      <div className={WORK_WIDTH}>
+      <div className={`${WORK_WIDTH} max-sm:px-2`}>
         <nav aria-label={t("프로젝트 진행")} className="min-w-0 space-y-2 py-3">
           {/*
             전역 프로그래스 바.

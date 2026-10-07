@@ -13,7 +13,7 @@ import { fieldStyle } from "@/components/project/fieldStyle";
 import { TUTORIAL_CUT_EVENT } from "@/lib/tutorialStore";
 import { sceneEditorStore } from "@/lib/sceneEditorState";
 import { useEditorDisclosure } from "./useSceneSelection";
-import { scenePanelId, sceneTabId } from "./SceneNavigation";
+import { scenePanelId } from "./SceneNavigation";
 import { useT } from "@/lib/i18n";
 
 /**
@@ -177,7 +177,7 @@ export default function StepScenes({
 
       {/* 탭의 관계 대상만 남깁니다. 다른 씬의 컷·스토리보드 본문은 마운트하지 않습니다. */}
       {draft.scenes.map((scene, index) => (
-        <div key={scene.id} id={scenePanelId(scene.id)} role="tabpanel" aria-labelledby={sceneTabId(scene.id)}
+        <div key={scene.id} id={scenePanelId(scene.id)} role="tabpanel" aria-label={`${t("씬 {n}", { n: index + 1 })}${scene.title ? ` · ${scene.title}` : ""}`}
           hidden={scene.id !== selectedSceneId} tabIndex={0} className="outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
           style={{ scrollMarginTop: "var(--scene-scroll-offset, 160px)" }}>
         {scene.id === selectedSceneId && <SceneCard
