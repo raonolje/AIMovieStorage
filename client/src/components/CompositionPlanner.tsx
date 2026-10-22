@@ -1,3 +1,6 @@
+import LedGuidePanel from "@/components/led/LedGuidePanel";
+import LedGuideOverlay from "@/components/led/LedGuideOverlay";
+import { normalizeLedSettings } from "@/lib/ledGuides";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
@@ -985,6 +988,7 @@ export default function CompositionPlanner({
                       video.videoRendererRef.current = frameRenderer;
                     }}
                   />
+                  {!freeView && <LedGuideOverlay settings={normalizeLedSettings(state.ledGuides)} aspect={captureAspect} interactive={panelTab === "led"} onChange={ledGuides => setState(current => ({ ...current, ledGuides }))} />}
                 </div>
 
                 {previewing && (
@@ -999,6 +1003,7 @@ export default function CompositionPlanner({
                 setCaptureAspect={setCaptureAspect}
               >
                 {/* 샷 크기·조작 속도는 화면을 보면서 돌리는 값이라 오른쪽 패널이 아니라 여기 둡니다. */}
+                <div className={panelTab === "led" ? "hidden" : "contents"}>
                 <PlannerCameraBar
                   state={state}
                   setState={setState}
@@ -1014,6 +1019,7 @@ export default function CompositionPlanner({
                   setPreviewing(false);
                   setCameraRestoreRequest((request) => request + 1);
                 }} />
+                </div>
               </PlannerViewBar>
 
               {/*
@@ -1034,7 +1040,7 @@ export default function CompositionPlanner({
                 떠 있어서 서로 겹쳤습니다().
                 흐름으로 쌓으면 타임라인 높이가 바뀌어도 문구가 알아서 위로 밀립니다.
               */}
-              <div className="absolute inset-x-6 bottom-6 z-10">
+              <div hidden={panelTab === "led"} className="absolute inset-x-6 bottom-6 z-10">
                 <CameraHelpHint />
                 <PlannerMoveTimeline
                   state={state}
@@ -1148,6 +1154,7 @@ export default function CompositionPlanner({
                 borderLeft: "1px solid oklch(1 0 0 / 8%)",
               }}
             >
+              {panelTab === "led" && <><p className="text-xs text-white/60">{freeView ? t("카메라 화면 비율을 선택하면 가이드가 표시됩니다.") : t("카메라 화면에 겹친 확인용 가이드입니다.")}</p><LedGuidePanel settings={normalizeLedSettings(state.ledGuides)} aspect={captureFormat.width / captureFormat.height} onChange={ledGuides => setState(current => ({ ...current, ledGuides }))} /></>}
               {panelTab === "layout" && (
                 <LayoutPanel
                   /*

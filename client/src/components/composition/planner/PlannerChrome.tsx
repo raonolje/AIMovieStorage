@@ -39,7 +39,7 @@ import TutorialMenu from "@/components/tutorial/TutorialMenu";
  * 바로 옆에서 볼 수 있어야 합니다. 갈래 이름은 옛 저장본의 `panelTab` 값 때문에
  * 타입에는 남겨 두되(열면 배치로 보냅니다) 목록에서만 뺍니다.
  */
-export type PanelTabId = "layout" | "environment" | "camera" | "timeline";
+export type PanelTabId = "layout" | "environment" | "camera" | "timeline" | "led";
 
 /*
   **탭이 열어 주는 자리들.** 탭 하나가 살아 있는 동안만 그 패널을 그리므로, 다른 탭에 서
@@ -50,6 +50,7 @@ export type PanelTabId = "layout" | "environment" | "camera" | "timeline";
 const TAB_OPENS: Record<PanelTabId, string> = {
   // 카메라 탭은 없앴습니다(위 주석) — 목록에 안 뜨니 열어 줄 것도 없습니다.
   camera: "",
+  led: "",
   layout: "layout-characters layout-character-fields layout-body-color layout-gizmo-mode layout-path layout-objects layout-object-kinds layout-object-group layout-object-swap layout-object-asset layout-attach-bone layout-light layout-wall-image layout-pose-from-image layout-joints layout-hands layout-presets layout-mocap-cleanup layout-mannequins bone-picker",
   environment: "env-room-add-indoor env-room-list env-room-size env-horizon-color env-outdoor-shape env-occlude-faces env-room-make-image env-panoramas env-face-sets env-room-props env-room-library env-display env-shadows",
   timeline: "timeline-music timeline-music-pick timeline-music-sections timeline-mocap-open timeline-glb timeline-blender-prompt timeline-render timeline-render-split timeline-render-run timeline-renders-list",
@@ -63,6 +64,7 @@ export const PANEL_TABS: {
   { id: "layout", label: "배치", icon: User },
   { id: "environment", label: "환경", icon: ImageIcon },
   { id: "timeline", label: "타임라인", icon: Film },
+  { id: "led", label: "LED 가이드", icon: ImageIcon },
 ];
 
 /**

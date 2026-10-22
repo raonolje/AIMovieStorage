@@ -1,3 +1,4 @@
+import { normalizeLedSettings, type LedGuideSettings } from "@/lib/ledGuides";
 import { DEFAULT_SHADOWS, normalizeShadows, type CompositionShadows } from "@/lib/compositionShadows";
 import { normalizeFloorplanWall } from "./floorplan";
 import {
@@ -1017,6 +1018,8 @@ export interface CompositionRender {
 }
 
 export interface CompositionState {
+  /** LED 가이드와 실루엣은 화면 확인용이며 렌더 장면에는 포함하지 않습니다. */
+  ledGuides?: LedGuideSettings;
   camera: CameraComposition;
   /**
    * 카메라 무빙 **클립 목록**. 시간순으로 이어 붙습니다(앞 클립이 끝난 자세에서 다음이 출발).
@@ -1546,6 +1549,7 @@ export function normalizeComposition(
   return {
     ...DEFAULT_COMPOSITION,
     ...saved,
+    ledGuides: normalizeLedSettings(saved.ledGuides),
     shadows: normalizeShadows(saved.shadows, saved.showFloor !== false),
     camera,
     characters: (saved.characters || []).map((item) => {

@@ -1,3 +1,4 @@
+import LedImageWorkbench from "@/components/led/LedImageWorkbench";
 import { useEffect, useRef, useState } from "react";
 import { useT } from "@/lib/i18n";
 import { sizeLabel } from "@/lib/useImageSize";
@@ -159,7 +160,7 @@ export default function SheetPanelCropper({
    * 자르기·지우기는 «그림에서 덜어내는» 일이고, 표시하기는 «그림에 얹는» 일입니다.
    * 손짓은 셋 다 끌기라서 한 화면에 섞어 두면 무엇을 그리는 중인지 알 수 없습니다.
    */
-  const [tool, setTool] = useState<"cut" | "mark" | "motion" | "pano" | "cross">("cut");
+  const [tool, setTool] = useState<"cut" | "mark" | "motion" | "pano" | "cross" | "led">("cut");
   /** 지금 그리면 자르기가 되는지 지우기가 되는지. */
   const [mode, setMode] = useState<BoxMode>("crop");
   /**
@@ -652,6 +653,7 @@ export default function SheetPanelCropper({
         <div className="flex gap-1 px-5" data-tour="cropper-tabs">
           {[
             { id: "cut" as const, label: "자르기 · 지우기", icon: Scissors, opens: "cropper-surface cropper-undo cropper-box-list cropper-box-row cropper-upscale cropper-upscale-now cropper-footer" },
+            { id: "led" as const, label: "LED 가이드", icon: Grid2x2, opens: "" },
             { id: "mark" as const, label: "표시하기", icon: MapPin, opens: "cropper-mark-shapes" },
             /*
               **동선**은 컷 카드의 «이미지 편집» 단추에 있던 것을 여기로 옮긴 것입니다.
@@ -693,7 +695,7 @@ export default function SheetPanelCropper({
           })}
         </div>
 
-        {tool === "cross" ? (
+        {tool === "led" ? <LedImageWorkbench key={`${projectName}:${sourcePath || imageSrc}`} imageSrc={imageSrc} storageKey={`${projectName}:${sourcePath || imageSrc}`} /> : tool === "cross" ? (
           <div className="p-5">
             <CrossUnfoldWorkbench
               imageSrc={imageSrc}
