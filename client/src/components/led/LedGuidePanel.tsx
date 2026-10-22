@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useT } from "@/lib/i18n";
 import {
+  panelPose,
+  panelProjection,
+  perspectiveActor,
+} from "@/lib/ledPerspective";
+import {
   actorProjection,
   decodeLedPreset,
   encodeLedPreset,
@@ -80,7 +85,12 @@ export default function LedGuidePanel({
   const g =
     settings.guides.find((g) => g.id === selected) ?? settings.guides[0];
   const a = settings.actor,
-    projection = actorProjection(settings, aspect);
+    projection = settings.perspective.enabled
+      ? perspectiveActor(settings, aspect)
+      : actorProjection(settings, aspect);
+  const perspective = (p: Partial<LedGuideSettings["perspective"]>) =>
+    update({ ...settings, perspective: { ...settings.perspective, ...p } });
+  const pose = g ? panelPose(settings, g, aspect) : null;
   const update = (s: LedGuideSettings) => onChange(normalizeLedSettings(s));
   const patch = (p: Partial<LedGuide>) =>
     g &&
@@ -199,6 +209,71 @@ export default function LedGuidePanel({
           </div>
         ))}
       </div>
+      <fieldset className="space-y-2 rounded border border-white/15 p-2">
+        <legend className="text-xs">{t("물리 패널 투시 보정")}</legend>
+        <label className="flex gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={settings.perspective.enabled}
+            onChange={(e) => perspective({ enabled: e.target.checked })}
+          />
+          {t("투시 보정 사용")}
+        </label>
+        {settings.perspective.enabled && (
+          <>
+            <p className="text-xs text-white/60">
+              {t(
+                "실선은 송출용 크롭 영역, 점선은 관객에게 보이는 패널입니다. 패널의 실측 위치와 각도로 원근을 자동 계산합니다.",
+              )}
+            </p>
+            <label className="grid gap-1 text-xs">
+              {t("기준 정면 LED")}
+              <select
+                className={field}
+                aria-label={t("기준 정면 LED")}
+                value={
+                  settings.perspective.referenceGuideId ||
+                  settings.guides[0]?.id ||
+                  ""
+                }
+                onChange={(e) =>
+                  perspective({ referenceGuideId: e.target.value })
+                }
+              >
+                {settings.guides.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <NumberField
+                label="관객 좌우 위치 (m)"
+                value={settings.perspective.viewerXM}
+                onChange={(viewerXM) => perspective({ viewerXM })}
+              />
+              <NumberField
+                label="관객 눈높이 (m)"
+                value={settings.perspective.eyeHeightM}
+                min={0}
+                onChange={(eyeHeightM) => perspective({ eyeHeightM })}
+              />
+              <NumberField
+                label="관객에서 LED 거리 (m)"
+                value={a.viewerDistanceM}
+                min={0.01}
+                onChange={(viewerDistanceM) => actor({ viewerDistanceM })}
+              />
+            </div>
+            <p className="text-xs text-white/50">
+              {t(
+                "기준면은 정면 LED 바닥 z=0입니다. 깊이 +는 관객에게서 멀어지는 방향, 회전 +는 오른쪽 끝이 멀어지는 방향입니다. 관객은 기준면을 정면으로 봅니다.",
+              )}
+            </p>
+          </>
+        )}
+      </fieldset>
       {g && (
         <fieldset className="space-y-2 rounded border border-white/15 p-2">
           <legend className="text-xs">{t("선택한 LED 영역")}</legend>
@@ -216,6 +291,50 @@ export default function LedGuidePanel({
               onChange={(e) => patch({ color: e.target.value })}
             />
           </div>
+          {settings.perspective.enabled && pose && (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <NumberField
+                  label="패널 중심 좌우 (m)"
+                  value={pose.centerXM}
+                  onChange={(centerXM) =>
+                    patch({ pose: { ...pose, centerXM } })
+                  }
+                />
+                <NumberField
+                  label="패널 중심 깊이 (m)"
+                  value={pose.depthM}
+                  onChange={(depthM) => patch({ pose: { ...pose, depthM } })}
+                />
+                <NumberField
+                  label="패널 꺾임 각도 (°)"
+                  value={pose.yawDeg}
+                  min={-179}
+                  max={179}
+                  step={1}
+                  onChange={(yawDeg) => patch({ pose: { ...pose, yawDeg } })}
+                />
+                <NumberField
+                  label="패널 바닥 높이 (m)"
+                  value={pose.baseYM}
+                  onChange={(baseYM) => patch({ pose: { ...pose, baseYM } })}
+                />
+              </div>
+              <p className="text-xs text-white/60">
+                {t("패널 실제 폭 (m)")}:{" "}
+                {((g.physicalHeightM * g.ratioWidth) / g.ratioHeight).toFixed(
+                  3,
+                )}
+              </p>
+              {!panelProjection(settings, g, aspect) && (
+                <p role="alert" className="text-xs text-amber-300">
+                  {t(
+                    "패널이 관객 뒤에 있거나 뒷면·옆면을 향합니다. 깊이와 각도를 수정하세요.",
+                  )}
+                </p>
+              )}
+            </>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <NumberField
               label="비율 가로"
@@ -325,12 +444,14 @@ export default function LedGuidePanel({
             min={0}
             onChange={(forwardM) => actor({ forwardM })}
           />
-          <NumberField
-            label="관객에서 LED 거리 (m)"
-            value={a.viewerDistanceM}
-            min={0.01}
-            onChange={(viewerDistanceM) => actor({ viewerDistanceM })}
-          />
+          {!settings.perspective.enabled && (
+            <NumberField
+              label="관객에서 LED 거리 (m)"
+              value={a.viewerDistanceM}
+              min={0.01}
+              onChange={(viewerDistanceM) => actor({ viewerDistanceM })}
+            />
+          )}
           <NumberField
             label="기준 영역 안 좌우 (%)"
             value={a.x * 100}
@@ -350,9 +471,17 @@ export default function LedGuidePanel({
             onChange={(opacity) => actor({ opacity: opacity / 100 })}
           />
         </div>
-        {a.forwardM >= a.viewerDistanceM ? (
+        {(
+          settings.perspective.enabled
+            ? !!settings.guides.length && !projection
+            : a.forwardM >= a.viewerDistanceM
+        ) ? (
           <p role="alert" className="text-xs text-amber-300">
-            {t("배우의 LED 앞 거리는 관객에서 LED까지 거리보다 작아야 합니다.")}
+            {t(
+              settings.perspective.enabled
+                ? "배우가 관객 뒤에 있거나 기준 패널이 보이지 않습니다. 배우 거리와 패널 배치를 확인하세요."
+                : "배우의 LED 앞 거리는 관객에서 LED까지 거리보다 작아야 합니다.",
+            )}
           </p>
         ) : (
           projection && (
@@ -364,7 +493,9 @@ export default function LedGuidePanel({
         )}
         <p className="text-xs text-white/50">
           {t(
-            "LED를 정면에서 보는 원근 크기 비교입니다. 실제 꺾인 패널의 투시·바닥 높이를 자동 복원하지 않습니다. 발 위치는 화면에서 조절할 수 있습니다.",
+            settings.perspective.enabled
+              ? "배우는 선택한 패널 앞에서 기준 정면 LED와 평행하게 서 있습니다. LED 앞 거리는 기준면의 깊이 방향이며 관객의 눈높이와 좌우 위치를 함께 반영합니다."
+              : "정면 기준 원근 크기 비교입니다. 물리 패널 투시 보정을 켜면 꺾임과 관객 위치도 반영합니다.",
           )}
         </p>
       </fieldset>

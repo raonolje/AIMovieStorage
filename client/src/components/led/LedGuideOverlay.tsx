@@ -5,6 +5,11 @@ import {
   type LedGuideSettings,
 } from "@/lib/ledGuides";
 import { useT } from "@/lib/i18n";
+import {
+  actorPositionFromScreen,
+  panelProjection,
+  perspectiveActor,
+} from "@/lib/ledPerspective";
 
 export default function LedGuideOverlay({
   settings,
@@ -57,12 +62,22 @@ export default function LedGuideOverlay({
       const g = d.start.guides.find((g) => g.id === d.start.actor.guideId);
       if (!g) return;
       const r = guideRect(g, aspect);
+      const initialActor = d.start.perspective.enabled
+        ? perspectiveActor(d.start, aspect)
+        : null;
+      const position = initialActor
+        ? actorPositionFromScreen(d.start, aspect, {
+            x: initialActor.x + dx,
+            y: initialActor.footY + dy,
+          })
+        : null;
+      if (d.start.perspective.enabled && !position) return;
       setPreview({
         ...d.start,
         actor: {
           ...d.start.actor,
-          x: d.start.actor.x + dx / r.width,
-          footY: d.start.actor.footY + dy / r.height,
+          x: position?.x ?? d.start.actor.x + dx / r.width,
+          footY: position?.footY ?? d.start.actor.footY + dy / r.height,
         },
       });
     } else
@@ -86,7 +101,9 @@ export default function LedGuideOverlay({
     drag.current = null;
     setPreview(null);
   };
-  const actor = actorProjection(current, aspect);
+  const actor = current.perspective.enabled
+    ? perspectiveActor(current, aspect)
+    : actorProjection(current, aspect);
   if (!current.visible) return null;
   return (
     <svg
@@ -106,6 +123,9 @@ export default function LedGuideOverlay({
       {current.guides
         .filter((g) => g.visible)
         .map((g) => {
+          const projected = current.perspective.enabled
+            ? panelProjection(current, g, aspect)
+            : null;
           const r = guideRect(g, aspect),
             x = r.x * 1000,
             y = (r.y * 1000) / aspect,
@@ -113,6 +133,21 @@ export default function LedGuideOverlay({
             height = (r.height * 1000) / aspect;
           return (
             <g key={g.id} data-led-guide={g.id}>
+              {projected && (
+                <polygon
+                  data-led-perspective={g.id}
+                  points={projected
+                    .map((p) => `${p.x * 1000},${(p.y * 1000) / aspect}`)
+                    .join(" ")}
+                  fill={g.color}
+                  fillOpacity=".12"
+                  stroke={g.color}
+                  strokeWidth="3"
+                  strokeDasharray="8 4"
+                  vectorEffect="non-scaling-stroke"
+                  style={{ pointerEvents: "none" }}
+                />
+              )}
               <rect
                 x={x}
                 y={y}

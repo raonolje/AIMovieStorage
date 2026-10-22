@@ -11,11 +11,18 @@ export interface LedGuide {
   y: number;
   width: number;
   physicalHeightM: number;
+  pose?: { centerXM?: number; depthM: number; yawDeg: number; baseYM: number };
 }
 export interface LedGuideSettings {
   version: 1;
   visible: boolean;
   guides: LedGuide[];
+  perspective: {
+    enabled: boolean;
+    referenceGuideId: string;
+    viewerXM: number;
+    eyeHeightM: number;
+  };
   actor: {
     visible: boolean;
     guideId: string;
@@ -47,6 +54,12 @@ export function defaultLedSettings(): LedGuideSettings {
     version: 1,
     visible: true,
     guides: [],
+    perspective: {
+      enabled: false,
+      referenceGuideId: "",
+      viewerXM: 0,
+      eyeHeightM: 1.6,
+    },
     actor: {
       visible: false,
       guideId: "",
@@ -75,7 +88,8 @@ export function normalizeLedSettings(value: unknown): LedGuideSettings {
   const guides: LedGuide[] = (Array.isArray(v.guides) ? v.guides : [])
     .slice(0, 32)
     .map((raw, index) => {
-      const g = obj(raw);
+      const g = obj(raw),
+        p = obj(g.pose);
       let id = typeof g.id === "string" && g.id ? g.id : `led-${index}`;
       while (ids.has(id)) id += "-copy";
       ids.add(id);
@@ -97,12 +111,35 @@ export function normalizeLedSettings(value: unknown): LedGuideSettings {
         y: num(g.y, 0, -10, 10),
         width: num(g.width, 0.5, 0.001, 10),
         physicalHeightM: num(g.physicalHeightM, 2.5, 0.01, 1000),
+        ...(g.pose
+          ? {
+              pose: {
+                ...(typeof p.centerXM === "number" &&
+                Number.isFinite(p.centerXM)
+                  ? { centerXM: num(p.centerXM, 0, -1000, 1000) }
+                  : {}),
+                depthM: num(p.depthM, 0, -1000, 1000),
+                yawDeg: num(p.yawDeg, 0, -179, 179),
+                baseYM: num(p.baseYM, 0, -1000, 1000),
+              },
+            }
+          : {}),
       };
     });
   return {
     version: 1,
     visible: v.visible !== false,
     guides,
+    perspective: {
+      enabled: obj(v.perspective).enabled === true,
+      referenceGuideId:
+        typeof obj(v.perspective).referenceGuideId === "string" &&
+        ids.has(obj(v.perspective).referenceGuideId as string)
+          ? (obj(v.perspective).referenceGuideId as string)
+          : "",
+      viewerXM: num(obj(v.perspective).viewerXM, 0, -1000, 1000),
+      eyeHeightM: num(obj(v.perspective).eyeHeightM, 1.6, 0, 100),
+    },
     actor: {
       visible: a.visible === true,
       guideId:
@@ -202,20 +239,40 @@ export function saveLedPresets(rows: LedGuidePreset[]) {
 
 /** 삭제한 영역을 다시 더해도 남은 영역과 기본색이 겹치지 않게 합니다. */
 export function nextLedColor(guides: LedGuide[]): string {
-  const used = new Set(guides.map(g => g.color.toLowerCase()));
-  const first = LED_COLORS.find(c => !used.has(c));
+  const used = new Set(guides.map((g) => g.color.toLowerCase()));
+  const first = LED_COLORS.find((c) => !used.has(c));
   if (first) return first;
   for (let index = 1; index < 100; index++) {
-    const hue = (index * 137.508) % 360 / 60;
-    const x = 0.65 * (1 - Math.abs(hue % 2 - 1));
-    const rgb = hue < 1 ? [.65, x, 0] : hue < 2 ? [x, .65, 0] : hue < 3 ? [0, .65, x] : hue < 4 ? [0, x, .65] : hue < 5 ? [x, 0, .65] : [.65, 0, x];
-    const color = "#" + rgb.map(c => Math.round((c + .25) * 255).toString(16).padStart(2, "0")).join("");
+    const hue = ((index * 137.508) % 360) / 60;
+    const x = 0.65 * (1 - Math.abs((hue % 2) - 1));
+    const rgb =
+      hue < 1
+        ? [0.65, x, 0]
+        : hue < 2
+          ? [x, 0.65, 0]
+          : hue < 3
+            ? [0, 0.65, x]
+            : hue < 4
+              ? [0, x, 0.65]
+              : hue < 5
+                ? [x, 0, 0.65]
+                : [0.65, 0, x];
+    const color =
+      "#" +
+      rgb
+        .map((c) =>
+          Math.round((c + 0.25) * 255)
+            .toString(16)
+            .padStart(2, "0"),
+        )
+        .join("");
     if (!used.has(color)) return color;
   }
   return "#ffffff";
 }
 export function ledImageStorageKey(project: string, image: string) {
   let hash = 2166136261;
-  for (let index = 0; index < image.length; index++) hash = Math.imul(hash ^ image.charCodeAt(index), 16777619);
+  for (let index = 0; index < image.length; index++)
+    hash = Math.imul(hash ^ image.charCodeAt(index), 16777619);
   return `${project}:${image.length}:${(hash >>> 0).toString(16)}`;
 }

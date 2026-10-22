@@ -11,6 +11,7 @@ import { useUndoStack } from "@/lib/useUndoStack";
 import { isTypingTarget } from "@/lib/isTypingTarget";
 import LedGuideOverlay from "./LedGuideOverlay";
 import LedGuidePanel from "./LedGuidePanel";
+import LedPerspectivePreview from "./LedPerspectivePreview";
 
 export default function LedImageWorkbench({
   imageSrc,
@@ -106,6 +107,9 @@ export default function LedImageWorkbench({
             "원본 이미지의 전체 화면 위에서 확인합니다. 크롭 가이드는 원본을 수정하지 않습니다.",
           )}
         </p>
+        {history.value.perspective.enabled && (
+          <LedPerspectivePreview imageSrc={imageSrc} settings={history.value} />
+        )}
       </div>
       <LedGuidePanel
         settings={history.value}
