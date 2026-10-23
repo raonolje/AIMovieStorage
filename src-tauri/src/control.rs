@@ -110,6 +110,10 @@ pub struct ControlState {
     frontend_ready: std::sync::atomic::AtomicBool,
 }
 
+pub(crate) fn owns_journal(app: &tauri::AppHandle) -> bool {
+    app.state::<ControlState>().journal.lock_safe().is_some()
+}
+
 #[tauri::command]
 pub fn control_frontend_ready(state: tauri::State<ControlState>) {
     // 초기화 진행 여부와 사용자가 선택한 켜짐 상태는 별개입니다. 선택이나 토큰을 바꾸지 않습니다.

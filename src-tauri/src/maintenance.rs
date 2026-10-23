@@ -12,7 +12,7 @@ fn blockers(app: &AppHandle) -> Vec<String> {
     result
 }
 #[tauri::command]
-pub fn maintenance_status(app: AppHandle) -> Value { json!({"blockers": blockers(&app),"workBlockers":work_blockers(&app),"workerShutdown":crate::upscale::graceful_worker_status(&app), "otherInstanceClosureVerified":false}) }
+pub fn maintenance_status(app: AppHandle) -> Value { json!({"blockers": blockers(&app),"workBlockers":work_blockers(&app),"journalOwned":crate::control::owns_journal(&app),"workerShutdown":crate::upscale::graceful_worker_status(&app), "otherInstanceClosureVerified":false}) }
 pub(crate) fn work_blockers(app: &AppHandle) -> Vec<String> {
     let mut result=crate::upscale::maintenance_work_blockers(app);
     if crate::asset_upload::maintenance_pending(&app.state::<crate::asset_upload::AssetUploads>())!=0 { result.push("파일 전송이 완료되지 않았습니다.".into()); }
